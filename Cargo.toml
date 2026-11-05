@@ -1,0 +1,23 @@
+[package]
+name = "alchemize"
+version = "0.0.0"
+edition = "2024"
+description = "Transmute any document into Markdown"
+readme = "README.md"
+license = "Apache-2.0"
+repository = "https://github.com/Kirky-X/alchemize"
+homepage = "https://github.com/Kirky-X/alchemize"
+documentation = "https://docs.rs/alchemize"
+keywords = ["markdown", "converter", "document", "pdf", "docx"]
+categories = ["command-line-utilities", "text-processing"]
+autobins = false
+
+[lib]
+name = "alchemize"
+path = "src/lib.rs"
+
+[[bin]]
+name = "alch"
+path = "src/main.rs"
+
+[dependencies]
