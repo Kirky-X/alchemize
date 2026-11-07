@@ -1,16 +1,9 @@
 //! Alchemize — transmute documents into Markdown.
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub mod domain;
 
-/// Input formats the converter recognises.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Format {
-    Pdf,
-    Docx,
-    Xlsx,
-    Pptx,
-    Html,
-    Epub,
-    Audio,
-    Video,
-}
+pub use domain::error::AlchemizeError;
+pub use domain::input::{Input, InputFormat, detect_format};
+
+/// Crate version (mirrors Cargo.toml via workspace inheritance).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
