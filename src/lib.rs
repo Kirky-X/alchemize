@@ -1,7 +1,9 @@
 //! Alchemize — transmute documents into Markdown.
 
+pub mod application;
 pub mod domain;
 
+pub use application::registry::ConverterRegistry;
 pub use domain::error::AlchemizeError;
 pub use domain::input::{Input, InputFormat, detect_format};
 
