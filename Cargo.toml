@@ -1,13 +1,26 @@
-[package]
-name = "alchemize"
-version = "0.0.0"
+[workspace]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
 edition = "2024"
-description = "Transmute any document into Markdown"
-readme = "README.md"
 license = "Apache-2.0"
 repository = "https://github.com/Kirky-X/alchemize"
 homepage = "https://github.com/Kirky-X/alchemize"
 documentation = "https://docs.rs/alchemize"
+rust-version = "1.91"
+
+[package]
+name = "alchemize"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+rust-version.workspace = true
+description = "Transmute any document into Markdown"
+readme = "README.md"
 keywords = ["markdown", "converter", "document", "pdf", "docx"]
 categories = ["command-line-utilities", "text-processing"]
 autobins = false
@@ -20,4 +33,65 @@ path = "src/lib.rs"
 name = "alch"
 path = "src/main.rs"
 
+[features]
+default = []
+# MinerU 云端 PDF 高保真（HTTP 客户端）
+mineru = ["dep:reqwest", "dep:limiteron", "dep:futures"]
+# anydoc office 全格式后端（firecrawl/anydoc crate, MIT）
+anydoc = ["dep:anydoc"]
+# ASR：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
+asr = ["dep:vecboost"]
+full = ["mineru", "anydoc", "asr"]
+
 [dependencies]
+anyhow = { version = "1.0", default-features = false, features = ["std"] }
+async-trait = { version = "0.1", default-features = false }
+base64 = { version = "0.22", default-features = false, features = ["std"] }
+bytes = { version = "1.0", default-features = false, features = ["std"] }
+
+# 文档解析
+calamine = { version = "0.38", default-features = false }
+csv = { version = "1.4", default-features = false }
+encoding_rs = { version = "0.8", default-features = false }
+htmd = { version = "0.5", default-features = false }
+img_hash = { version = "3.2", default-features = false }
+pdf-extract = { version = "0.12", default-features = false }
+quick-xml = { version = "0.42", default-features = false, features = ["serialize"] }
+rbook = { version = "0.7", default-features = false, features = ["threadsafe"] }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+sha2 = { version = "0.10", default-features = false }
+thiserror = { version = "2.0", default-features = false }
+tokio = { version = "1.0", default-features = false, features = ["rt", "macros", "fs", "process", "io-util", "time", "sync"] }
+tracing = { version = "0.1", default-features = false }
+zip = { version = "9.3", default-features = false, features = ["deflate"] }
+
+# CLI
+clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+
+# 可选后端
+anydoc = { version = "0.2", default-features = false, optional = true }
+futures = { version = "0.3", default-features = false, features = ["std"], optional = true }
+# 轮询退避原语：MinerU 三客户端共享 poll_delay 走 limiteron delay_for_attempt
+limiteron = { version = "0.3.0-rc.10", default-features = false, features = ["retry"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
+# 自研转录引擎门面：Qwen3-ASR ONNX 三图 + silero VAD（load-dynamic ort）
+vecboost = { path = "../vecboost", version = "0.3.0-rc.3", default-features = false, features = ["transcribe"], optional = true }
+
+[dev-dependencies]
+proptest = { version = "1.0", default-features = false, features = ["std"] }
+tempfile = { version = "3", default-features = false, features = ["getrandom"] }
+tokio-test = { version = "0.4", default-features = false }
+
+[workspace.lints.rust]
+missing_docs = "allow"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[lints]
+workspace = true
+
+[profile.release]
+# anydoc catch_unwind 防御要求 panic = "unwind"（默认即 unwind，显式声明防止下游改 abort）
+panic = "unwind"
