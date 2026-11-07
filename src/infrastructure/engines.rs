@@ -27,6 +27,9 @@ pub fn default_converters(
 
     // Text family (plain text + code/config fence).
     engines.push(Box::new(TextConverter::new()));
+    // Office XML (fallback tier below anydoc).
+    engines.push(Box::new(crate::infrastructure::document::DocxConverter::new()));
+    engines.push(Box::new(crate::infrastructure::document::PptxConverter::new()));
     // Tables (csv/tsv).
     engines.push(Box::new(CsvConverter::new()));
     // Hypertext / e-book.
