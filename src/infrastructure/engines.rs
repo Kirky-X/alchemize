@@ -18,9 +18,9 @@ use crate::infrastructure::document::{CsvConverter, TextConverter};
 ///   converters to metadata-only markdown.
 pub fn default_converters(
     mineru: &Option<MineruConfig>,
-    _vision: Option<Arc<dyn VisionProvider>>,
-    _transcribe: Option<Arc<dyn TranscribeProvider>>,
-    _video_mode: VideoProcessingMode,
+    vision: Option<Arc<dyn VisionProvider>>,
+    transcribe: Option<Arc<dyn TranscribeProvider>>,
+    video_mode: VideoProcessingMode,
     _max_file_size: usize,
 ) -> Vec<Box<dyn Converter>> {
     let mut engines: Vec<Box<dyn Converter>> = Vec::new();
@@ -36,6 +36,29 @@ pub fn default_converters(
     engines.push(Box::new(crate::infrastructure::document::PdfConverter::new()));
     // LaTeX source (pandoc-gated, fenced fallback).
     engines.push(Box::new(crate::infrastructure::document::LatexSourceConverter::new()));
+    // Media family.
+    let image_converter = match vision.clone() {
+        Some(vision) => crate::infrastructure::media::ImageConverter::with_vision(vision),
+        None => crate::infrastructure::media::ImageConverter::new(),
+    };
+    engines.push(Box::new(image_converter));
+
+    let audio_converter = match transcribe.clone() {
+        Some(provider) => crate::infrastructure::media::AudioConverter::with_transcriber(provider),
+        None => crate::infrastructure::media::AudioConverter::new(),
+    };
+    engines.push(Box::new(audio_converter));
+
+    let video_converter = match vision.clone() {
+        Some(vision) => {
+            crate::infrastructure::media::VideoConverter::new(video_mode).with_vision_provider(vision)
+        }
+        None => crate::infrastructure::media::VideoConverter::new(video_mode),
+    };
+    engines.push(Box::new(video_converter));
+
+    engines.push(Box::new(crate::infrastructure::media::SubtitleConverter::new()));
+
     // MinerU remote tier (config-gated; falls through to local on failure).
     #[cfg(feature = "mineru")]
     if let Some(cfg) = mineru {

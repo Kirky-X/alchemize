@@ -40,7 +40,7 @@ mineru = ["dep:reqwest", "dep:limiteron", "dep:futures", "reqwest/multipart", "r
 # anydoc office 全格式后端（firecrawl/anydoc crate, MIT）
 anydoc = ["dep:anydoc"]
 # ASR：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
-asr = ["dep:vecboost"]
+asr = ["dep:vecboost", "dep:reqwest", "reqwest/multipart"]
 full = ["mineru", "anydoc", "asr"]
 
 [dependencies]
@@ -54,6 +54,7 @@ calamine = { version = "0.38", default-features = false }
 csv = { version = "1.4", default-features = false }
 encoding_rs = { version = "0.8", default-features = false }
 htmd = { version = "0.5", default-features = false }
+aspasia = { version = "0.2", default-features = false }
 img_hash = { version = "3.2", default-features = false }
 pdf-extract = { version = "0.12", default-features = false }
 quick-xml = { version = "0.42", default-features = false, features = ["serialize"] }
@@ -62,6 +63,7 @@ serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 sha2 = { version = "0.10", default-features = false }
 thiserror = { version = "2.0", default-features = false }
+tempfile = { version = "3", default-features = false, features = ["getrandom"] }
 tokio = { version = "1.0", default-features = false, features = ["rt", "macros", "fs", "process", "io-util", "time", "sync"] }
 tracing = { version = "0.1", default-features = false }
 zip = { version = "9.3", default-features = false, features = ["deflate"] }
