@@ -29,13 +29,25 @@ alch doctor
 alch formats
 ```
 
-退出码：`0` 成功（含降级产出）；`2` 不支持格式；`3` 全链失败（stderr 列出各引擎失败原因）。
+退出码：`0` 成功（含降级产出）；`1` 其他错误（输入不存在、写文件失败等）；`2` 不支持格式；`3` 全链失败（stderr 列出各引擎失败原因）。
+
+## 📚 文档
+
+| 文档 | 说明 |
+|------|------|
+| [🏗️ 架构文档](docs/ARCHITECTURE.md) | 设计原则、模块划分与 fallback 链机制 |
+| [📘 API 参考](docs/API_REFERENCE.md) | 库公开 API、CLI 接口、环境变量 |
+| [📖 用户指南](docs/USER_GUIDE.md) | 从安装到进阶的完整使用教程 |
+| [❓ FAQ](docs/FAQ.md) | 常见问题解答 |
+| [📋 更新日志](docs/CHANGELOG.md) | 版本变更记录 |
+| [🤝 贡献指南](docs/CONTRIBUTING.md) | 开发环境、测试与提交约定 |
+| [🔒 安全文档](docs/SECURITY.md) | 信任边界、SSRF 防护、漏洞报告 |
 
 ## 架构
 
 单 crate DDD 三层：`domain`（类型与规则，零 IO）→ `application`（Converter 注册表 priority fallback 链 + 端口）→ `infrastructure`（各格式转换器 + MinerU/ASR 后端）。
 
-fallback 链（PDF 例）：MinerU 云端（feature `mineru`，质量 `api`）→ anydoc（`local_full`）→ pdf-extract 本地文本 + TOC 剔除/结构启发（`local_fallback`）。转换结果的质量分层与实际引擎记录在 `metadata`。
+fallback 链（PDF 例）：anydoc（feature `anydoc`，`local_full`，priority 15）→ pdf-extract 本地文本 + TOC 剔除/结构启发（`local_fallback`，priority 10）→ MinerU 云端（feature `mineru` 且配置端点，`api`，priority 5）——本地优先，云端仅在本地链失败后兜底。转换结果的质量分层与实际引擎记录在 `metadata` 与 stderr 摘要行。
 
 ## Features
 
