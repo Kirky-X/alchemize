@@ -1,29 +1,129 @@
-# Alchemize
+<div align="center">
 
-Transmute any document into Markdown (Rust, Apache-2.0).
+<img src="docs/assets/alchemize.svg" alt="Alchemize Logo" width="240">
 
-中文版本: [README.md](README.md)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024-edded?logo=rust&style=for-the-badge)](https://www.rust-lang.org/) [![Rustc 1.91+](https://img.shields.io/badge/Rustc-1.91+-orange.svg?style=for-the-badge)](https://www.rust-lang.org/) [![license](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
 
-## Supported formats
+[中文](README.md) | **English**
 
-| Family | Formats | Engine |
-| --- | --- | --- |
-| Documents | pdf, docx/pptx/xlsx (+xls/ods), odt/odp/rtf, legacy binary Office (doc/ppt/…, feature `anydoc`), html/htm, epub, csv/tsv, txt/text/log/md, zip (recursive), ipynb, tex/latex (pandoc) | registry fallback chain |
-| Code/config | py/rs/js/ts/go/java/c/cpp/json/yaml/toml/xml/sh and ~45 extensions total | fenced code blocks (language-tag mapping) |
-| Images | png/jpg/jpeg/gif/bmp/webp/tiff/svg | VisionProvider or metadata degradation |
-| Audio | wav/mp3/ogg/flac/aac/m4a/wma | vecboost transcription (feature `asr`) or metadata degradation |
-| Video | mp4/avi/mkv/mov/wmv/flv/webm/m4v | ffmpeg track extraction → audio chain |
-| Subtitles | srt/vtt/ass/ssa | native parsing (timestamped segments) |
+**Transmute any document into Markdown**
 
-## Usage
+[✨ Features](#-features) • [🚀 Quick Start](#-quick-start) • [📚 Documentation](#-documentation) • [💻 Examples](#-examples) • [🤝 Contributing](#-contributing)
+
+</div>
+
+---
+
+<div align="center">
+
+### 🎯 One Input, Any Format, Markdown Out
+
+Hand `alch` a file — PDF, Office, audio/video, a zip archive — and it picks the engine via a priority fallback chain, producing Markdown with an honest quality label:
+
+<table style="width:100%; border-collapse: collapse">
+<tr>
+<td align="center" width="25%">🧪<br><b>Any format</b><br><span style="color:#64748B">documents · code · images · audio/video · subtitles · zip</span></td>
+<td align="center" width="25%">🔗<br><b>Fallback chain</b><br><span style="color:#64748B">priority-descending · automatic degradation · degradation is explicit</span></td>
+<td align="center" width="25%">🏷️<br><b>Quality tiers</b><br><span style="color:#64748B">api / local_full / local_fallback · engine traceable</span></td>
+<td align="center" width="25%">🏠<br><b>Local first</b><br><span style="color:#64748B">zero external services by default · fully offline with --no-remote</span></td>
+</tr>
+</table>
+
+</div>
+
+---
+
+## 📋 Table of Contents
+
+<details open>
+<summary>📑 Table of Contents</summary>
+
+- [✨ Features](#-features)
+- [🚀 Quick Start](#-quick-start)
+- [🎨 Feature Flags](#-feature-flags)
+- [📚 Documentation](#-documentation)
+- [💻 Examples](#-examples)
+- [🏗️ Architecture](#️-architecture)
+- [🧪 Testing](#-testing)
+- [📊 Performance](#-performance)
+- [🔒 Security](#-security)
+- [🗺️ Roadmap](#️-roadmap)
+- [🤝 Contributing](#-contributing)
+- [📋 Changelog](#-changelog)
+- [📄 License](#-license)
+- [🙏 Acknowledgments](#-acknowledgments)
+- [📞 Contact & Support](#-contact--support)
+- [⭐ Star History](#-star-history)
+
+</details>
+
+---
+
+## ✨ Features
+
+<table style="width:100%; border-collapse: collapse">
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">📄 <b>Full document formats</b><br><span style="color:#64748B">PDF, docx/pptx/xlsx (+xls/ods), odt/odp/rtf, legacy binary Office (<code>anydoc</code>), html/epub, csv/tsv, LaTeX (pandoc), ipynb</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🧬 <b>Code fencing</b><br><span style="color:#64748B">py/rs/js/ts/go/java/c/cpp/json/yaml/toml/xml/sh and ~45 extensions total, as language-tagged fenced code blocks</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🖼️ <b>Image handling</b><br><span style="color:#64748B">Inject a VisionProvider for description and OCR; without one, degrades to metadata-only markdown (dimensions/hash)</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🎙️ <b>Audio/video transcription</b><br><span style="color:#64748B">In-house vecboost facade (Qwen3-ASR ONNX + silero VAD), fully local inference; VAD-segmented text with timestamps</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">⏱️ <b>Subtitle parsing</b><br><span style="color:#64748B">srt/vtt/ass/ssa parsed natively into timestamped segments, no ffmpeg involved</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">📦 <b>Recursive zip</b><br><span style="color:#64748B">Archive members routed to their own engines by extension; nested zips are explicitly unsupported — unbounded self-recursion is structurally impossible</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🌐 <b>Multi-encoding detection</b><br><span style="color:#64748B">UTF-8 first → CJK-priority probing (GBK/Big5/Shift-JIS/…) → lossy fallback; CSV delimiter auto-detection</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🧭 <b>Engine preference & diagnostics</b><br><span style="color:#64748B"><code>--engine</code> prefix-matches and moves to front (silent fallback on miss); <code>doctor</code> per-engine availability, <code>formats</code> full list</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🖼 <b>Dual asset modes</b><br><span style="color:#64748B"><code>dir</code> (images written to <code>images/</code> with relative references) and <code>inline</code> (base64, single-file delivery)</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🛡️ <b>Security defenses</b><br><span style="color:#64748B">MinerU URL SSRF validation (HTTPS-only / private-range denial / hostname allowlist), tiered response limits, credentials redacted on all three output paths</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">☁️ <b>MinerU cloud fidelity</b><br><span style="color:#64748B">Agent/Precision dual clients selected by file size, polling with backoff; local first, cloud as last resort (chain tail)</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🧰 <b>CLI diagnostics trio</b><br><span style="color:#64748B"><code>convert</code> (-o/--engine/--assets/--no-remote/--format), <code>doctor</code>, <code>formats</code>; semantic exit codes 0/1/2/3</span></td>
+</tr>
+</table>
+
+Beyond these core capabilities, video track extraction and frame dedup, video processing modes (Gpu/AudioOnly/Disabled), a Whisper-compatible cloud backend (activated only via explicit injection), and LaTeX math-delimiter validation are all built in or provided behind independent feature flags; see the [🎨 Feature Flags](#-feature-flags) section for the full matrix.
+
+---
+
+## 🚀 Quick Start
+
+### 📦 Installation
 
 ```bash
-# Convert (stdout)
+# Check the Rust version (1.91+ required)
+rustc --version
+
+# Default features (zero external-service dependencies)
+cargo build --release          # binary: target/release/alch
+
+# Full build (MinerU cloud + anydoc office backend + local ASR)
+cargo build --release --features full
+
+# Install locally
+cargo install --path . --features full
+```
+
+### 💡 Minimal Example
+
+```bash
+# Convert to stdout
 alch convert paper.pdf
 
-# Write file + engine preference + asset mode
+# Write file + engine preference + asset mode (parent dirs auto-created)
 alch convert report.docx -o report.md --engine anydoc --assets dir|inline
 
+# stderr summary line: quality tier and actual engine at a glance
+# converted report.docx -> report.md [local_full] (engine: anydoc)
+```
+
+```bash
 # Engine diagnostics / supported formats
 alch doctor
 alch formats
@@ -31,49 +131,263 @@ alch formats
 
 Exit codes: `0` success (including degraded output); `1` other errors; `2` unsupported format; `3` entire chain failed (stderr lists each engine's failure reason).
 
-## Architecture
+### 🧭 Core Concepts
 
-Single-crate DDD three layers: `domain` (types and rules, no network/process IO) → `application` (converter registry with a priority fallback chain + ports) → `infrastructure` (per-format converters + MinerU/ASR backends).
+- **Registry & fallback chain**: engines for an extension are tried in descending `priority()`; on failure the next engine takes over; `Unavailable` engines are skipped with the reason recorded.
+- **Quality tiers**: every output is labeled `api` (cloud high-fidelity) / `local_full` (full local) / `local_fallback` (degraded local), recorded in `metadata` and the stderr summary line together with the actual engine name.
+- **Local first**: the PDF chain is anydoc(15) → pdf-extract(10) → MinerU(5, chain tail once configured) — the cloud is only a fallback after the local chain fails.
 
-The registry tries engines for an extension in descending priority order. PDF example: anydoc (`local_full`, priority 15) → pdf-extract local text + TOC pruning/structure heuristics (`local_fallback`, priority 10) → MinerU cloud (`api`, priority 5, registered only when configured, tried after the local chain fails). The quality tier and the engine that actually produced the result are recorded in `metadata` and the stderr summary line.
+---
 
-## Docs
+## 🎨 Feature Flags
 
-| Doc | Description |
-|------|------|
-| [🏗️ Architecture](docs/ARCHITECTURE.md) | Design principles, module layout, fallback-chain mechanics |
-| [📘 API Reference](docs/API_REFERENCE.md) | Library API, CLI surface, environment variables |
-| [📖 User Guide](docs/USER_GUIDE.md) | Complete tutorial from install to advanced use |
-| [❓ FAQ](docs/FAQ.md) | Frequently asked questions |
-| [📋 Changelog](docs/CHANGELOG.md) | Release history |
-| [🤝 Contributing](docs/CONTRIBUTING.md) | Dev environment, testing, commit conventions |
-| [🔒 Security](docs/SECURITY.md) | Trust boundaries, SSRF guards, vulnerability reporting |
+### 📦 Feature Presets
 
-## Features
+| Preset | Command | Use case |
+| --- | --- | --- |
+| Minimal | `cargo build` | pure local conversion, zero external services |
+| Recommended | `cargo build --features anydoc` | + office full formats (incl. legacy binary Office) |
+| Production | `cargo build --features full` | + MinerU cloud PDF + local ASR |
+
+### 📋 Feature Matrix
 
 | feature | Pulls in | Notes |
 | --- | --- | --- |
-| `mineru` | MinerU cloud PDF engine | endpoint via `ALCHEMIZE_MINERU_URL` |
-| `anydoc` | office full-format backend (firecrawl/anydoc, MIT) | includes legacy binary Office; image bytes exported in document order |
-| `asr` | vecboost transcription + Whisper-compatible API | in-house [vecboost](https://github.com/Kirky-X/vecboost) (Qwen3-ASR ONNX + silero VAD) |
+| `mineru` | MinerU cloud PDF engine (reqwest/limiteron) | registered only after the endpoint is configured via `ALCHEMIZE_MINERU_URL` |
+| `anydoc` | office full-format backend (firecrawl/anydoc, MIT) | priority 15 above native parsers; image bytes exported in document order |
+| `asr` | vecboost transcription facade + Whisper-compatible API | Qwen3-ASR ONNX + silero VAD, path dependency on sibling crate vecboost |
+| `full` | all of the above | |
 
-`full` = all of the above. Default features have zero external-service dependencies.
+Default is `default = []` — engines behind disabled features are not compiled at all.
 
-## Transcription (feature `asr`)
+---
 
-Audio/video transcription calls the in-house vecboost `transcribe` facade (fully local ONNX inference):
+## 📚 Documentation
 
-- Model bundle: point `ALCHEMIZE_TRANSCRIBE_MODELS` at a directory; defaults to probing `~/.cache/alchemize/models/transcribe/`. Layout: `qwen3-conv_frontend.onnx`, `qwen3-encoder.int8.onnx`, `qwen3-decoder.int8.onnx`, `silero_vad.onnx`, `tokenizer/` (same contract as vecboost). When missing, the engine reports Unavailable with retrieval guidance — no silent behavior, no automatic network fetches.
-- Runtime dynamic library: `ORT_DYLIB_PATH` points at the onnxruntime library.
-- Output is VAD-segment text + timestamps; segmentation comes from silero VAD (voice activity detection) and is **not speaker diarization** — no SpeakerN attribution is provided.
-- The Whisper-compatible cloud backend activates only with an explicitly injected configuration.
+<details>
+<summary>📋 Table</summary>
 
-Release ordering constraint: vecboost is published to crates.io before alchemize (currently a path dependency).
+| Doc | Description |
+|------|------|
+| [📖 User Guide](docs/USER_GUIDE.md) | Complete tutorial from install to advanced use |
+| [📘 API Reference](docs/API_REFERENCE.md) | All public APIs, CLI surface, environment variables |
+| [🏗️ Architecture](docs/ARCHITECTURE.md) | Design principles, module layout, fallback-chain mechanics |
+| [❓ FAQ](docs/FAQ.md) | Frequently asked questions |
+| [🔒 Security](docs/SECURITY.md) | Trust boundaries, SSRF guards, vulnerability reporting |
+| [🤝 Contributing](docs/CONTRIBUTING.md) | Dev environment, TDD workflow, commit conventions |
+| [📋 Changelog](docs/CHANGELOG.md) | Release history |
 
-## License
+</details>
 
-Apache-2.0. Acknowledgements and boundaries:
+Capability-domain spec sources (verifiable behaviors for conversion / fallback chains / media / CLI output) live in `specmark/specs/`.
 
-- [firecrawl/anydoc](https://github.com/firecrawl/anydoc) (MIT) — office format backend dependency.
-- [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate) (AGPL-3.0) — **design ideas absorbed only (layout region classification, image-page OCR fallback, paragraph reassembly); zero code copied**; alchemize remains Apache-2.0.
-- [mnemis](https://github.com/Kirky-X/mnemis) (own project) — source of the migrated converter skeleton.
+---
+
+## 💻 Examples
+
+### 🤖 CLI Tool
+
+```bash
+# Pipe-friendly: straight to stdout
+alch convert paper.pdf | head -50
+
+# Batch: shell loop
+for f in docs/*.docx; do alch convert "$f" -o "md/$(basename "${f%.docx}").md"; done
+
+# Offline/compliance environments: zero network egress
+alch convert --no-remote secret.docx -o secret.md
+
+# Force the format when the extension is untrustworthy
+alch convert payload.bin --format pdf
+```
+
+### 🦀 As a Library
+
+```rust
+use alchemize::{AlchemizeBuilder, Input};
+
+#[tokio::main]
+async fn main() -> Result<(), alchemize::AlchemizeError> {
+    let alch = AlchemizeBuilder::new().build();
+    let result = alch.convert(&Input::Path("paper.pdf".into())).await?;
+    println!("engine: {}", result.metadata["converter"]);   // actual engine
+    println!("quality: {}", result.quality);                // quality tier
+    println!("{}", result.markdown);
+    Ok(())
+}
+```
+
+More examples (custom vision/transcription providers, asset modes, registry assembly) in the [API Reference · Examples](docs/API_REFERENCE.md#-使用示例).
+
+---
+
+## 🏗️ Architecture
+
+Single-crate DDD three layers: `domain` (types and rules, no network/process IO) → `application` (converter registry with a priority fallback chain + ports) → `infrastructure` (per-format converters + MinerU/ASR backends).
+
+```
+alch CLI ──> Alchemize facade ──> ConverterRegistry (priority descending)
+                                  │  anydoc(15) → native parsers(10) → MinerU(5, tail)
+                                  ▼
+                        ConvertResult { markdown, metadata.converter, quality, assets }
+```
+
+Design principles, module layout and data flows in the [🏗️ Architecture doc](docs/ARCHITECTURE.md).
+
+---
+
+## 🧪 Testing
+
+### 🎯 Test Strategy
+
+- **Two-tier matrix**: default tier (no external services) and `--features full` tier, both fully run.
+- **Real-file suite**: 12 real-file tests with hard assertions, using 9 in-repo fixtures and 1 external video source — not synthetic samples.
+- **Golden outputs**: `tests/golden.rs` pins the textual shape of each format's output.
+- **CLI e2e**: exit codes, stderr summaries, asset writing verified end to end.
+
+### ▶️ Commands
+
+```bash
+cargo test                    # default tier (317 tests)
+cargo test --features full    # full tier (396 tests)
+cargo clippy --all-features   # no new warnings
+cargo fmt --check             # zero format diffs
+cargo llvm-cov --features full # coverage (gate ≥90%)
+```
+
+### 📊 Test Scale
+
+| Tier | Passed | Failed | Ignored |
+| --- | --- | --- | --- |
+| default | 317 | 0 | 0 |
+| full | 396 | 0 | 1 (real-model e2e, awaiting ASR bundle) |
+
+Line coverage **90.49%** (gate ≥90%).
+
+---
+
+## 📊 Performance
+
+No criterion benchmarks yet — no performance numbers are provided (none are fabricated). Design-level trade-offs: single-threaded runtime, async remote paths (limiteron polling backoff), no global health cache (per-conversion probing), bounded response memory (tiered limits, 8MB preallocation cap). Design notes in [🏗️ Architecture · Performance](docs/ARCHITECTURE.md#-性能设计); benchmark data will be added once criterion is introduced.
+
+---
+
+## 🔒 Security
+
+### 🛡️ Security Design
+
+Four defense lines: structured error handling for untrusted input (no panics); SSRF validation of MinerU download URLs (HTTPS-only, loopback/RFC1918/CGNAT/link-local denied, hostname allowlist, presigned signatures); tiered response limits (64KB/8KB/50MB/50MB); credentials passed only via environment variables and redacted on all three output paths. Details in the [🔒 Security doc](docs/SECURITY.md).
+
+### ⛓️ Supply Chain and Gates
+
+`Cargo.lock` is committed to lock the dependency graph; every source file carries an `SPDX-License-Identifier: Apache-2.0` header (59/59, machine-readable for license scanners); `cargo audit` is part of the upgrade flow, with known accepted risks registered in the [Security doc](docs/SECURITY.md#已知且可接受的风险).
+
+### 🚨 Reporting Security Issues
+
+**Do not** open a public issue. Use GitHub private security advisories (**Security → Report a vulnerability**); process and response commitments in the [Security doc · Reporting](docs/SECURITY.md#-漏洞报告流程).
+
+---
+
+## 🗺️ Roadmap
+
+<details>
+<summary>📋 Table</summary>
+
+<table style="width:100%; border-collapse: collapse">
+<tr><th style="text-align:center">Status</th><th style="text-align:left">Area</th><th style="text-align:left">Items</th></tr>
+<tr><td align="center">✅</td><td>Conversion engines</td><td>registry fallback chain, full document formats, code fencing, recursive zip, multi-encoding detection</td></tr>
+<tr><td align="center">✅</td><td>Optional backends</td><td>anydoc office formats, MinerU cloud PDF (SSRF guards + limits), vecboost local ASR</td></tr>
+<tr><td align="center">✅</td><td>Media pipelines</td><td>vision port, ffmpeg track extraction, native subtitle parsing, frame dedup, VAD-segmented transcription</td></tr>
+<tr><td align="center">✅</td><td>CLI & diagnostics</td><td>convert/doctor/formats, semantic exit codes, engine preference & asset modes</td></tr>
+<tr><td align="center">✅</td><td>Docs & compliance</td><td>seven-doc suite (structure aligned with confers), bilingual README, SPDX headers 59/59, coverage 90.49%</td></tr>
+<tr><td align="center">🔲</td><td>Supply chain</td><td>fork anydoc onto zip 9.4 (one-line change already proven) to clear cargo-audit advisories</td></tr>
+<tr><td align="center">🔲</td><td>Release</td><td>first crates.io publish (vecboost first) + crates.io/docs.rs badges</td></tr>
+<tr><td align="center">🔲</td><td>CI & quality</td><td>GitHub Actions two-tier matrix + codecov coverage badge</td></tr>
+<tr><td align="center">🔲</td><td>Performance</td><td>criterion benchmarks → real data for a PERFORMANCE doc</td></tr>
+<tr><td align="center">🔲</td><td>ASR real pipeline</td><td>run the real-model e2e once the model bundle is available (currently #[ignore])</td></tr>
+</table>
+
+</details>
+
+---
+
+## 🤝 Contributing
+
+### 🛠️ Development Environment
+
+Rust 1.91+, one command to get started: `cargo build --features full` (requires sibling crate vecboost). See [🤝 Contributing](docs/CONTRIBUTING.md).
+
+### 💖 Ways to Contribute
+
+- New format engine: implement the `Converter` trait + wire it in `engines.rs` + behavior-pinning tests
+- Bug fixes: write the failing test first, then fix (TDD)
+- Docs & specs: docs follow the confers skeleton; behavior changes update `specmark/specs/` in the same batch
+
+### 🐛 Report Bugs
+
+Open a [GitHub Issue](https://github.com/Kirky-X/alchemize/issues) with a minimal reproduction file (sanitized), `alch --version`, and expected vs. actual output.
+
+### 💡 Feature Suggestions
+
+Open an issue labeled `enhancement`; proposals touching network egress or credential handling should read the [Security doc](docs/SECURITY.md) first.
+
+### 🔧 Submit a PR
+
+Conventional Commits (feat/fix/test/docs/chore); local gates before submitting: `cargo fmt --check` + `cargo clippy --all-features` with no new warnings + both test tiers green.
+
+---
+
+## 📋 Changelog
+
+See [docs/CHANGELOG.md](docs/CHANGELOG.md).
+
+---
+
+## 📄 License
+
+Apache-2.0 ([LICENSE](LICENSE)). Every source file carries an SPDX header; files migrated from other repositories keep their original copyright year ranges.
+
+---
+
+## 🙏 Acknowledgments
+
+### 🌟 Core Dependencies
+
+- [firecrawl/anydoc](https://github.com/firecrawl/anydoc) (MIT) — office full-format backend dependency.
+- [vecboost](https://github.com/Kirky-X/vecboost) (own project) — Qwen3-ASR ONNX + silero VAD local transcription facade.
+- Excellent open-source crates: [pdf-extract](https://crates.io/crates/pdf-extract), [calamine](https://crates.io/crates/calamine), [quick-xml](https://crates.io/crates/quick-xml), [aspasia](https://crates.io/crates/aspasia), [rbook](https://crates.io/crates/rbook), [htmd](https://crates.io/crates/htmd), and more.
+
+### 💝 Special Thanks
+
+- [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate) (AGPL-3.0) — design ideas absorbed only (layout region classification, image-page OCR fallback, paragraph reassembly); zero code copied; alchemize remains Apache-2.0.
+- mnemis (own project, not public) — source of the migrated converter skeleton.
+- [confers](https://github.com/Kirky-X/confers) — the reference baseline for documentation style and engineering conventions.
+
+---
+
+## 📞 Contact & Support
+
+<table style="width:100%; max-width: 600px">
+<tr>
+<td align="center" width="33%">
+<a href="https://github.com/Kirky-X/alchemize/issues"><b style="color:#991B1B">Issues</b></a><br>
+<span style="color:#64748B">Report bugs and problems</span>
+</td>
+<td align="center" width="33%">
+<a href="https://github.com/Kirky-X/alchemize/security/advisories"><b style="color:#1E40AF">Security Advisories</b></a><br>
+<span style="color:#64748B">Private vulnerability reports</span>
+</td>
+<td align="center" width="33%">
+<a href="https://github.com/Kirky-X/alchemize"><b style="color:#1E293B">GitHub</b></a><br>
+<span style="color:#64748B">Browse the source</span>
+</td>
+</tr>
+</table>
+
+---
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Kirky-X/alchemize&type=Date)](https://star-history.com/#Kirky-X/alchemize&Date)
+
+If this project helps you, please consider giving it a ⭐️!

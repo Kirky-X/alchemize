@@ -48,14 +48,14 @@ alchemize 所有显著变更记录于此文件。
 
 - 测试：default 档 317 例、`--features full` 档 396 例，全部通过。
 - 覆盖率：90.49%（门禁 ≥90%）。
-- 真实文件套件：11 个 fixtures（macOS 文档/词表/vecboost 源文件），验证中暴露并修复 HTML 正文中 CSS 泄漏缺陷。
+- 真实文件套件：12 项测试，素材为 9 个仓库内 fixtures 与 1 个外部视频源，验证中暴露并修复 HTML 正文中 CSS 泄漏缺陷。
 - 规格驱动交付：迁移全程走 specmark 规格（五大能力域 delta specs + 24/24 任务）。
 
 ### 致谢
 
 - [firecrawl/anydoc](https://github.com/firecrawl/anydoc)（MIT）——office 全格式后端依赖。
 - [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate)（AGPL-3.0）——仅吸收设计思想（版面区域分类、图像页 OCR fallback、段落重组），零代码复制。
-- [mnemis](https://github.com/Kirky-X/mnemis)（自有）——转换器骨架迁移源。
+- mnemis（自有，未公开）——转换器骨架迁移源。
 
 [Unreleased]: https://github.com/Kirky-X/alchemize/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/Kirky-X/alchemize/releases/tag/v0.1.0

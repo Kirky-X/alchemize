@@ -1,79 +1,393 @@
-# Alchemize
+<div align="center">
 
-把任意文档炼成 Markdown（Rust，Apache-2.0）。
+<img src="docs/assets/alchemize.svg" alt="Alchemize Logo" width="240">
 
-English version: [README_EN.md](README_EN.md)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024-edded?logo=rust&style=for-the-badge)](https://www.rust-lang.org/) [![Rustc 1.91+](https://img.shields.io/badge/Rustc-1.91+-orange.svg?style=for-the-badge)](https://www.rust-lang.org/) [![license](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
 
-## 支持的格式
+**中文** | [English](README_EN.md)
 
-| 族 | 格式 | 引擎 |
-| --- | --- | --- |
-| 文档 | pdf、docx/pptx/xlsx（+xls/ods）、odt/odp/rtf、旧版二进制 Office（doc/ppt/…，feature `anydoc`）、html/htm、epub、csv/tsv、txt/text/log/md、zip（递归）、ipynb、tex/latex（pandoc） | 注册表 fallback 链 |
-| 代码/配置 | py/rs/js/ts/go/java/c/cpp/json/yaml/toml/xml/sh 等 ~45 扩展名 | 围栏代码块（语言标签映射） |
-| 图片 | png/jpg/jpeg/gif/bmp/webp/tiff/svg | VisionProvider 或元数据降级 |
-| 音频 | wav/mp3/ogg/flac/aac/m4a/wma/opus | vecboost 转录（feature `asr`）或元数据降级 |
-| 视频 | mp4/avi/mkv/mov/wmv/flv/webm/m4v | ffmpeg 抽轨 → 音频链 |
-| 字幕 | srt/vtt/ass/ssa | 原生解析（时间码列表） |
+**把任意文档炼成 Markdown**
 
-## 用法
+[✨ 功能特性](#-功能特性) • [🚀 快速开始](#-快速开始) • [📚 文档](#-文档) • [💻 示例](#-示例) • [🤝 参与贡献](#-参与贡献)
+
+</div>
+
+---
+
+<div align="center">
+
+### 🎯 一处输入，任意格式，炼成 Markdown
+
+给 `alch` 一个文件——PDF、Office、音视频、zip 压缩包——它按优先级 fallback 链自动选引擎，产出带质量标注的 Markdown：
+
+<table style="width:100%; border-collapse: collapse">
+<tr>
+<td align="center" width="25%">🧪<br><b>任意格式</b><br><span style="color:#64748B">文档 · 代码 · 图片 · 音视频 · 字幕 · zip</span></td>
+<td align="center" width="25%">🔗<br><b>fallback 链</b><br><span style="color:#64748B">priority 降序 · 失败自动降级 · 降级显性</span></td>
+<td align="center" width="25%">🏷️<br><b>质量分层</b><br><span style="color:#64748B">api / local_full / local_fallback · 引擎可溯</span></td>
+<td align="center" width="25%">🏠<br><b>本地优先</b><br><span style="color:#64748B">默认零外部服务 · --no-remote 全离线</span></td>
+</tr>
+</table>
+
+</div>
+
+---
+
+## 📋 目录
+
+<details open>
+<summary>📑 目录</summary>
+
+- [✨ 功能特性](#-功能特性)
+- [🚀 快速开始](#-快速开始)
+- [🎨 特性标志](#-特性标志)
+- [📚 文档](#-文档)
+- [💻 示例](#-示例)
+- [🏗️ 架构](#️-架构)
+- [🧪 测试](#-测试)
+- [📊 性能](#-性能)
+- [🔒 安全](#-安全)
+- [🗺️ 开发路线图](#️-开发路线图)
+- [🤝 参与贡献](#-参与贡献)
+- [📋 更新日志](#-更新日志)
+- [📄 许可证](#-许可证)
+- [🙏 致谢](#-致谢)
+- [📞 联系与支持](#-联系与支持)
+- [⭐ Star 历史](#-star-历史)
+
+</details>
+
+---
+
+## ✨ 功能特性
+
+<table style="width:100%; border-collapse: collapse">
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">📄 <b>文档全格式</b><br><span style="color:#64748B">PDF、docx/pptx/xlsx（+xls/ods）、odt/odp/rtf、旧版二进制 Office（<code>anydoc</code>）、html/epub、csv/tsv、LaTeX（pandoc）、ipynb</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🧬 <b>代码围栏化</b><br><span style="color:#64748B">py/rs/js/ts/go/java/c/cpp/json/yaml/toml/xml/sh 等 ~45 扩展名，带语言标签的围栏代码块</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🖼️ <b>图片处理</b><br><span style="color:#64748B">注入 VisionProvider 做描述与 OCR；不注入则降级为元数据 markdown（含尺寸/哈希）</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🎙️ <b>音视频转录</b><br><span style="color:#64748B">自研 vecboost 门面（Qwen3-ASR ONNX + silero VAD）完全本地推理；输出 VAD 段级文本 + 时间戳</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">⏱️ <b>字幕解析</b><br><span style="color:#64748B">srt/vtt/ass/ssa 原生解析，输出时间码列表，不经 ffmpeg</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">📦 <b>zip 递归</b><br><span style="color:#64748B">压缩包内文件按扩展名走各自引擎；嵌套 zip 显式不支持，无界自递归在结构上不可能</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🌐 <b>多编码探测</b><br><span style="color:#64748B">UTF-8 直读 → GBK/Big5/Shift-JIS 等 CJK 优先探测 → lossy 兜底；csv 分隔符自探测</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🧭 <b>引擎偏好与诊断</b><br><span style="color:#64748B"><code>--engine</code> 前缀匹配提前（未命中静默回落）；<code>doctor</code> 逐引擎可用性、<code>formats</code> 全格式清单</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">🖼 <b>资产双模式</b><br><span style="color:#64748B"><code>dir</code>（图片写 <code>images/</code> 相对引用）与 <code>inline</code>（base64 单文件交付）</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🛡️ <b>安全防线</b><br><span style="color:#64748B">MinerU URL SSRF 校验（HTTPS-only/私网拒绝/域名白名单）、响应分級限量、凭据三通路脱敏</span></td>
+</tr>
+<tr>
+<td width="50%" style="vertical-align:top; padding: 12px">☁️ <b>MinerU 云端高保真</b><br><span style="color:#64748B">Agent/Precision 双客户端按文件大小选择、轮询退避；本地优先、云端兜底（链尾）</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🧰 <b>CLI 诊断三件套</b><br><span style="color:#64748B"><code>convert</code>（-o/--engine/--assets/--no-remote/--format）、<code>doctor</code>、<code>formats</code>；退出码 0/1/2/3 语义化</span></td>
+</tr>
+</table>
+
+除上述核心能力外，视频抽轨与帧去重、视频处理模式（Gpu/AudioOnly/Disabled）、Whisper 兼容云端后端（显式注入激活）、LaTeX 数学定界符校验等能力也均已内置或以独立特性标志提供；完整矩阵见 [🎨 特性标志](#-特性标志) 一节。
+
+---
+
+## 🚀 快速开始
+
+### 📦 安装
 
 ```bash
-# 转换（stdout）
+# 检查 Rust 版本（要求 1.91+）
+rustc --version
+
+# 默认特性构建（零外部服务依赖）
+cargo build --release          # 二进制：target/release/alch
+
+# 全功能（MinerU 云端 + anydoc office 后端 + 本地 ASR）
+cargo build --release --features full
+
+# 安装到本地
+cargo install --path . --features full
+```
+
+### 💡 最小示例
+
+```bash
+# 转换到 stdout
 alch convert paper.pdf
 
-# 写文件 + 引擎偏好 + 资产模式
+# 写文件 + 引擎偏好 + 资产模式（父目录自动创建）
 alch convert report.docx -o report.md --engine anydoc --assets dir|inline
 
+# stderr 摘要行：质量层级与实际引擎一目了然
+# converted report.docx -> report.md [local_full] (engine: anydoc)
+```
+
+```bash
 # 引擎诊断 / 支持格式
 alch doctor
 alch formats
 ```
 
-退出码：`0` 成功（含降级产出）；`1` 其他错误（输入不存在、写文件失败等）；`2` 不支持格式；`3` 全链失败（stderr 列出各引擎失败原因）。
+退出码：`0` 成功（含降级产出）；`1` 其他错误；`2` 不支持格式；`3` 全链失败（stderr 列出各引擎失败原因）。
 
-## 📚 文档
+### 🧭 核心概念
 
-| 文档 | 说明 |
-|------|------|
-| [🏗️ 架构文档](docs/ARCHITECTURE.md) | 设计原则、模块划分与 fallback 链机制 |
-| [📘 API 参考](docs/API_REFERENCE.md) | 库公开 API、CLI 接口、环境变量 |
-| [📖 用户指南](docs/USER_GUIDE.md) | 从安装到进阶的完整使用教程 |
-| [❓ FAQ](docs/FAQ.md) | 常见问题解答 |
-| [📋 更新日志](docs/CHANGELOG.md) | 版本变更记录 |
-| [🤝 贡献指南](docs/CONTRIBUTING.md) | 开发环境、测试与提交约定 |
-| [🔒 安全文档](docs/SECURITY.md) | 信任边界、SSRF 防护、漏洞报告 |
+- **注册表与 fallback 链**：同扩展名的引擎按 `priority()` 降序尝试，前序失败自动降级，`Unavailable` 引擎跳过并记录原因。
+- **质量分层**：每次产出标注 `api`（云端高保真）/ `local_full`（本地全功能）/ `local_fallback`（本地降级），与实际引擎名一起记录在 `metadata` 与 stderr 摘要行。
+- **本地优先**：PDF 链为 anydoc(15) → pdf-extract(10) → MinerU(5 链尾，配置端点后)——云端只在本地链失败后兜底。
 
-## 架构
+---
 
-单 crate DDD 三层：`domain`（类型与规则，无网络/进程 IO）→ `application`（Converter 注册表 priority fallback 链 + 端口）→ `infrastructure`（各格式转换器 + MinerU/ASR 后端）。
+## 🎨 特性标志
 
-fallback 链（PDF 例）：anydoc（feature `anydoc`，`local_full`，priority 15）→ pdf-extract 本地文本 + TOC 剔除/结构启发（`local_fallback`，priority 10）→ MinerU 云端（feature `mineru` 且配置端点，`api`，priority 5）——本地优先，云端仅在本地链失败后兜底。转换结果的质量分层与实际引擎记录在 `metadata` 与 stderr 摘要行。
+### 📦 功能预设
 
-## Features
+| 预设 | 命令 | 适用场景 |
+| --- | --- | --- |
+| 最小化 | `cargo build` | 纯本地转换，零外部服务依赖 |
+| 推荐 | `cargo build --features anydoc` | + office 全格式（含旧版二进制 Office） |
+| 生产 | `cargo build --features full` | + MinerU 云端 PDF + 本地 ASR |
+
+### 📋 功能矩阵
 
 | feature | 引入 | 说明 |
 | --- | --- | --- |
-| `mineru` | MinerU 云端 PDF 引擎 | `ALCHEMIZE_MINERU_URL` 配置端点 |
-| `anydoc` | office 全格式后端（firecrawl/anydoc, MIT） | 含旧版二进制 Office；图片字节按文档序导出 |
-| `asr` | vecboost 转录 + Whisper 兼容 API | 自研 [vecboost](../vecboost)（Qwen3-ASR ONNX + silero VAD） |
+| `mineru` | MinerU 云端 PDF 引擎（reqwest/limiteron） | 端点经 `ALCHEMIZE_MINERU_URL` 配置后才注册 |
+| `anydoc` | office 全格式后端（firecrawl/anydoc, MIT） | priority 15 压过原生解析；图片按文档序导出 |
+| `asr` | vecboost 转录门面 + Whisper 兼容 API | Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
+| `full` | 以上全部 | |
 
-`full` = 上述全部。默认零外部服务依赖。
+默认 `default = []`——feature 关闭的引擎根本不参与编译。
 
-## 转录（feature `asr`）
+---
 
-音频/视频转录调用自研 vecboost `transcribe` 门面（完全本地 ONNX 推理）：
+## 📚 文档
 
-- 模型 bundle：`ALCHEMIZE_TRANSCRIBE_MODELS` 指向目录，缺省探测 `~/.cache/alchemize/models/transcribe/`；布局为 `qwen3-conv_frontend.onnx`、`qwen3-encoder.int8.onnx`、`qwen3-decoder.int8.onnx`、`silero_vad.onnx`、`tokenizer/`（与 vecboost 契约一致）。缺失时引擎如实报 Unavailable 并附获取指引，不静默、不自动联网。
-- 运行时动态库：`ORT_DYLIB_PATH` 指向 onnxruntime 动态库。
-- 输出为 VAD 段级文本 + 时间戳；分段来自 silero VAD（语音活动检测），**非说话人识别**——输出不提供 SpeakerN 归属。
-- Whisper 兼容云端后端仅在显式注入配置时激活。
+<details>
+<summary>📋 表格</summary>
 
-发布顺序约束：vecboost 先于 alchemize 发布到 crates.io（当前为 path 依赖）。
+| 文档 | 说明 |
+|------|------|
+| [📖 用户指南](docs/USER_GUIDE.md) | 从安装到进阶的完整使用教程 |
+| [📘 API 参考](docs/API_REFERENCE.md) | 全部公开 API、CLI 接口与环境变量 |
+| [🏗️ 架构文档](docs/ARCHITECTURE.md) | 设计原则、模块划分与 fallback 链机制 |
+| [❓ FAQ](docs/FAQ.md) | 常见问题解答 |
+| [🔒 安全文档](docs/SECURITY.md) | 信任边界、SSRF 防护与漏洞报告 |
+| [🤝 贡献指南](docs/CONTRIBUTING.md) | 开发环境、TDD 工作流与提交约定 |
+| [📋 更新日志](docs/CHANGELOG.md) | 版本变更记录 |
 
-## 许可证
+</details>
 
-Apache-2.0。致谢与边界：
+能力域规格真源（转换/降级链/媒体/CLI 输出等可验证行为）在 `specmark/specs/`。
 
-- [firecrawl/anydoc](https://github.com/firecrawl/anydoc)（MIT）——office 格式后端依赖。
-- [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate)（AGPL-3.0）——**仅吸收设计思想（版面区域分类、图像页 OCR fallback、段落重组），零代码复制**，alchemize 保持 Apache-2.0。
-- [mnemis](../mnemis)（自有）——转换器骨架迁移源。
+---
+
+## 💻 示例
+
+### 🤖 CLI 工具
+
+```bash
+# 管道友好：stdout 直出
+alch convert paper.pdf | head -50
+
+# 批量：shell 循环
+for f in docs/*.docx; do alch convert "$f" -o "md/$(basename "${f%.docx}").md"; done
+
+# 离线/合规环境：进程零网络出口
+alch convert --no-remote secret.docx -o secret.md
+
+# 不可信扩展名时强制指定格式
+alch convert payload.bin --format pdf
+```
+
+### 🦀 作为库使用
+
+```rust
+use alchemize::{AlchemizeBuilder, Input};
+
+#[tokio::main]
+async fn main() -> Result<(), alchemize::AlchemizeError> {
+    let alch = AlchemizeBuilder::new().build();
+    let result = alch.convert(&Input::Path("paper.pdf".into())).await?;
+    println!("engine: {}", result.metadata["converter"]);   // 实际引擎
+    println!("quality: {}", result.quality);                // 质量层级
+    println!("{}", result.markdown);
+    Ok(())
+}
+```
+
+更多示例（自定义视觉/转录提供方、资产模式、注册表装配）见 [API 参考 · 使用示例](docs/API_REFERENCE.md#-使用示例)。
+
+---
+
+## 🏗️ 架构
+
+单 crate DDD 三层：`domain`（类型与规则，无网络/进程 IO）→ `application`（Converter 注册表 priority fallback 链 + 端口）→ `infrastructure`（各格式转换器 + MinerU/ASR 后端）。
+
+```
+alch CLI ──> Alchemize 门面 ──> ConverterRegistry（priority 降序）
+                                  │  anydoc(15) → 原生解析(10) → MinerU(5 链尾)
+                                  ▼
+                        ConvertResult { markdown, metadata.converter, quality, assets }
+```
+
+设计原则、模块划分与数据流详见 [🏗️ 架构文档](docs/ARCHITECTURE.md)。
+
+---
+
+## 🧪 测试
+
+### 🎯 测试策略
+
+- **双档矩阵**：default 档（无外部服务依赖）与 `--features full` 档全量运行。
+- **真实文件套件**：12 项真实文件测试硬断言，素材为 9 个仓库内 fixtures 与 1 个外部视频源，不止合成样例。
+- **金样输出**：`tests/golden.rs` 钉住各格式转换产出的文本形态。
+- **CLI e2e**：退出码、stderr 摘要、资产落盘全链路验证。
+
+### ▶️ 运行命令
+
+```bash
+cargo test                    # default 档（317 例）
+cargo test --features full    # full 档（396 例）
+cargo clippy --all-features   # 零新增告警
+cargo fmt --check             # 格式化零 diff
+cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
+```
+
+### 📊 测试规模
+
+| 档位 | 通过 | 失败 | 忽略 |
+| --- | --- | --- | --- |
+| default | 317 | 0 | 0 |
+| full | 396 | 0 | 1（真模型端到端，待 ASR bundle） |
+
+行覆盖率 **90.49%**（门禁 ≥90%）。
+
+---
+
+## 📊 性能
+
+本仓暂无 criterion 基准数据，不提供性能数字（不编造）。设计层面的取舍：单线程 runtime、异步远端路径（limiteron 轮询退避）、无全局健康缓存（每次转换即时探测）、响应内存有界（分级限量、预分配上限 8MB）。设计要点见 [🏗️ 架构文档 · 性能设计](docs/ARCHITECTURE.md#-性能设计)；基准数据将在引入 criterion 后补充。
+
+---
+
+## 🔒 安全
+
+### 🛡️ 安全设计
+
+四道防线：不可信输入的结构化错误处理（不 panic）；MinerU 下载 URL 的 SSRF 校验（HTTPS-only、拒环回/RFC1918/CGNAT/链路本地、域名白名单、预签名）；远端响应按用途分级限量（64KB/8KB/50MB/50MB）；凭据只经环境变量且三通路脱敏。详见 [🔒 安全文档](docs/SECURITY.md)。
+
+### ⛓️ 供应链与门禁
+
+`Cargo.lock` 入库锁定依赖图；全部源文件带 `SPDX-License-Identifier: Apache-2.0` 头（59/59，license 扫描工具可机器识别）；`cargo audit` 纳入升级流程，已知可接受风险在[安全文档](docs/SECURITY.md#已知且可接受的风险)登记。
+
+### 🚨 报告安全漏洞
+
+**不要**开公开 Issue。使用 GitHub 私密安全通告（**Security → Report a vulnerability**），流程与响应承诺见[安全文档 · 漏洞报告流程](docs/SECURITY.md#-漏洞报告流程)。
+
+---
+
+## 🗺️ 开发路线图
+
+<details>
+<summary>📋 表格</summary>
+
+<table style="width:100%; border-collapse: collapse">
+<tr><th style="text-align:center">状态</th><th style="text-align:left">方向</th><th style="text-align:left">条目</th></tr>
+<tr><td align="center">✅</td><td>转换引擎</td><td>注册表 fallback 链、文档全格式、代码围栏化、zip 递归、多编码探测</td></tr>
+<tr><td align="center">✅</td><td>可选后端</td><td>anydoc office 全格式、MinerU 云端 PDF（SSRF 防护 + 限量）、vecboost 本地 ASR</td></tr>
+<tr><td align="center">✅</td><td>媒体链路</td><td>图片视觉端口、ffmpeg 抽轨、字幕原生解析、帧去重、VAD 段级转录</td></tr>
+<tr><td align="center">✅</td><td>CLI 与诊断</td><td>convert/doctor/formats、退出码语义化、引擎偏好与资产模式</td></tr>
+<tr><td align="center">✅</td><td>文档与合规</td><td>七篇文档套件（结构对齐 confers）、双语 README、SPDX 版权头 59/59、覆盖率 90.49%</td></tr>
+<tr><td align="center">🔲</td><td>供应链收口</td><td>fork anydoc 换 zip 9.4（一行改动已实证）消除 cargo-audit 通告</td></tr>
+<tr><td align="center">🔲</td><td>发布</td><td>首次 crates.io 发布（vecboost 先行）+ crates.io/docs.rs 徽章</td></tr>
+<tr><td align="center">🔲</td><td>CI 与质量</td><td>GitHub Actions 双档矩阵 + codecov 覆盖率徽章</td></tr>
+<tr><td align="center">🔲</td><td>性能</td><td>criterion 基准 → 补 PERFORMANCE 篇真实数据</td></tr>
+<tr><td align="center">🔲</td><td>ASR 真链路</td><td>模型 bundle 就绪后跑真模型端到端（现以 #[ignore] 标注）</td></tr>
+</table>
+
+</details>
+
+---
+
+## 🤝 参与贡献
+
+### 🛠️ 开发环境
+
+Rust 1.91+，`cargo build --features full` 一键起（依赖兄弟仓 vecboost）。详见 [🤝 贡献指南](docs/CONTRIBUTING.md#-环境准备)。
+
+### 💖 贡献方式
+
+- 新格式引擎：实现 `Converter` trait + 在 `engines.rs` 装配 + 钉住行为的测试
+- 缺陷修复：先写暴露缺陷的失败测试再修（TDD）
+- 文档与规格：文档沿用 confers 骨架版式；行为变更同步 `specmark/specs/`
+
+### 🐛 报告 Bug
+
+开 [GitHub Issue](https://github.com/Kirky-X/alchemize/issues)，附最小复现文件（脱敏）、`alch --version`、期望与实际输出。
+
+### 💡 功能建议
+
+开 Issue 并标注 `enhancement`；涉及网络出口或凭据处理的提案请先读[安全文档](docs/SECURITY.md)。
+
+### 🔧 提交 PR
+
+Conventional Commits（feat/fix/test/docs/chore）；提交前本地门禁：`cargo fmt --check` + `cargo clippy --all-features` 零新增 + 双档测试全绿。
+
+---
+
+## 📋 更新日志
+
+见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+
+---
+
+## 📄 许可证
+
+Apache-2.0（[LICENSE](LICENSE)）。全部源文件带 SPDX 头；自其他仓库迁移的文件保留原版权年份区间。
+
+---
+
+## 🙏 致谢
+
+### 🌟 核心依赖
+
+- [firecrawl/anydoc](https://github.com/firecrawl/anydoc)（MIT）——office 全格式后端依赖。
+- [vecboost](https://github.com/Kirky-X/vecboost)（自有）——Qwen3-ASR ONNX + silero VAD 本地转录门面。
+- [pdf-extract](https://crates.io/crates/pdf-extract)、[calamine](https://crates.io/crates/calamine)、[quick-xml](https://crates.io/crates/quick-xml)、[aspasia](https://crates.io/crates/aspasia)、[rbook](https://crates.io/crates/rbook)、[htmd](https://crates.io/crates/htmd) 等优秀开源 crate。
+
+### 💝 特别感谢
+
+- [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate)（AGPL-3.0）——仅吸收设计思想（版面区域分类、图像页 OCR fallback、段落重组），零代码复制，alchemize 保持 Apache-2.0。
+- mnemis（自有，未公开）——转换器骨架迁移源。
+- [confers](https://github.com/Kirky-X/confers)——文档版式与工程惯例的参考基准。
+
+---
+
+## 📞 联系与支持
+
+<table style="width:100%; max-width: 600px">
+<tr>
+<td align="center" width="33%">
+<a href="https://github.com/Kirky-X/alchemize/issues"><b style="color:#991B1B">Issues</b></a><br>
+<span style="color:#64748B">报告问题和 Bug</span>
+</td>
+<td align="center" width="33%">
+<a href="https://github.com/Kirky-X/alchemize/security/advisories"><b style="color:#1E40AF">安全通告</b></a><br>
+<span style="color:#64748B">私密漏洞报告</span>
+</td>
+<td align="center" width="33%">
+<a href="https://github.com/Kirky-X/alchemize"><b style="color:#1E293B">GitHub</b></a><br>
+<span style="color:#64748B">查看源代码</span>
+</td>
+</tr>
+</table>
+
+---
+
+## ⭐ Star 历史
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Kirky-X/alchemize&type=Date)](https://star-history.com/#Kirky-X/alchemize&Date)
+
+如果这个项目对您有帮助，请考虑给它一个 ⭐️！
