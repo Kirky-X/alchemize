@@ -34,6 +34,8 @@ pub fn default_converters(
     engines.push(Box::new(crate::infrastructure::document::DocxConverter::new()));
     // PDF local fallback tier.
     engines.push(Box::new(crate::infrastructure::document::PdfConverter::new()));
+    // LaTeX source (pandoc-gated, fenced fallback).
+    engines.push(Box::new(crate::infrastructure::document::LatexSourceConverter::new()));
     // MinerU remote tier (config-gated; falls through to local on failure).
     #[cfg(feature = "mineru")]
     if let Some(cfg) = mineru {

@@ -116,8 +116,9 @@ fn extract_annotation(body: &str) -> Option<String> {
     Some(unescape_entities(&content[..end]))
 }
 
-/// Strip tags from a fragment, keeping text content.
-fn strip_tags(fragment: &str) -> String {
+/// Strip tags from a fragment, keeping text content (public: shared by the
+/// LaTeX converter for figcaption bodies).
+pub fn strip_tags(fragment: &str) -> String {
     let mut out = String::new();
     let mut rest = fragment;
     while let Some(lt) = rest.find('<') {
