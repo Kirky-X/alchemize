@@ -33,40 +33,39 @@ Alchemize 的目标是「一处输入，任意格式，产出 Markdown」。它�
 
 ## 🏛️ 系统架构
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  src/main.rs（CLI：clap）                                │
-│  alch convert | doctor | formats                         │
-└──────────────────────────┬──────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────┐
-│  application/builder.rs — Alchemize 门面                 │
-│  AlchemizeBuilder（流式配置）→ Alchemize                  │
-│  ├─ ConverterRegistry（优先级 fallback 注册表）           │
-│  └─ ZipConverter（门面层递归，共享注册表）                 │
-└──────────────────────────┬──────────────────────────────┘
-                           │ Converter trait（ports.rs）
-┌──────────────────────────▼──────────────────────────────┐
-│  infrastructure/                                         │
-│  ├─ engines.rs 引擎装配（feature→引擎列表）                │
-│  ├─ document/  text csv html epub docx pptx xlsx ipynb   │
-│  │             latex_source pdf anydoc anydoc_render zip │
-│  │             shared（detect_encoding 等共享原语）        │
-│  ├─ media/     image audio video subtitle timeline dedup │
-│  │             subtitle_converter asr/{vecboost, whisper}│
-│  ├─ remote/    mineru/{client, factory, agent,           │
-│  │             precision, backoff, http_limit,           │
-│  │             validated_url, types, wrapper}            │
-│  └─ tools/     pandoc（外部二进制探测）                    │
-└──────────────────────────┬──────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────┐
-│  domain/  input（Input/InputFormat/detect_format）        │
-│           result（ConvertResult/ConversionQuality）       │
-│           asset（Asset/AssetSink：DirSink/InlineSink）    │
-│           error（AlchemizeError）                         │
-│           latex_validate（纯规则校验）                     │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph CLI["src/main.rs（CLI：clap）"]
+        CMD["alch convert · doctor · formats"]
+    end
+    subgraph APP["application/builder.rs — Alchemize 门面"]
+        BUILDER["AlchemizeBuilder（流式配置）→ Alchemize"]
+        REG["ConverterRegistry（优先级 fallback 注册表）"]
+        ZIP["ZipConverter（门面层递归，共享注册表）"]
+        BUILDER --> REG
+        BUILDER -.-> ZIP
+    end
+    subgraph INFRA["infrastructure/"]
+        ENG["engines.rs 引擎装配（feature → 引擎列表）"]
+        DOC["document/：text csv html epub docx pptx xlsx ipynb<br/>latex_source pdf anydoc anydoc_render zip<br/>shared（detect_encoding 等共享原语）"]
+        MEDIA["media/：image audio video subtitle subtitle_converter<br/>timeline dedup asr（vecboost · whisper_api）"]
+        REMOTE["remote/mineru/：client factory agent precision<br/>backoff http_limit validated_url types wrapper"]
+        TOOLS["tools/：pandoc（外部二进制探测）"]
+    end
+    subgraph DOM["domain/（无网络/进程 IO）"]
+        INPUT["input：Input / InputFormat / detect_format"]
+        RESULT["result：ConvertResult / ConversionQuality"]
+        ASSET["asset：Asset / AssetSink（DirSink / InlineSink）"]
+        ERROR["error：AlchemizeError"]
+        LATEX["latex_validate（纯规则校验）"]
+    end
+    CMD --> BUILDER
+    REG -- "Converter trait（ports.rs）" --> ENG
+    ENG --> DOC
+    ENG --> MEDIA
+    ENG --> REMOTE
+    ENG --> TOOLS
+    INFRA --> DOM
 ```
 
 ## 🧩 模块划分
@@ -106,19 +105,16 @@ alchemize 为**单 crate**（`[package]` + `[lib]` + `[[bin]] alch`），无 wor
 
 ### 转换主流程
 
-```
-输入文件
-  │ detect_format / can_convert 过滤
-  ▼
-候选引擎链（priority 降序，no-remote 过滤，prefer 提前）
-  │ 逐个尝试（Unavailable 跳过 → attempts 记录）
-  ▼
-首个成功结果 ConvertResult
-  │ metadata.converter 注入实际引擎名
-  ▼
-资产分流：AssetMode::Dir → images/ 目录 / Inline → base64 data URL
-  ▼
-markdown → stdout 或 -o 文件（stderr 摘要行：converted X → Y [quality] (engine: N)）
+```mermaid
+flowchart TD
+    IN["输入文件"] --> FMT["detect_format / can_convert 过滤"]
+    FMT --> CHAIN["候选引擎链<br/>priority 降序 · no-remote 过滤 · prefer 提前"]
+    CHAIN --> TRY{"逐个尝试<br/>Unavailable 跳过 → attempts 记录"}
+    TRY -- "首个成功" --> RES["ConvertResult<br/>metadata.converter 注入实际引擎名"]
+    RES --> ASSET["资产分流<br/>AssetMode::Dir → images/ 目录 · Inline → base64 data URL"]
+    ASSET --> OUT["markdown → stdout 或 -o 文件<br/>stderr 摘要行：converted X → Y · quality · engine"]
+    TRY -- "无候选" --> E2["UnsupportedFormat<br/>（退出码 2）"]
+    TRY -- "全链失败" --> E3["AllBackendsFailed · attempts 明细<br/>（退出码 3，stderr 列明细）"]
 ```
 
 失败终态两条：无候选 → `UnsupportedFormat`（退出码 2）；全链失败 → `AllBackendsFailed{ext, attempts}`（退出码 3，stderr 列明细）。

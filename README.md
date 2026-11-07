@@ -225,11 +225,11 @@ async fn main() -> Result<(), alchemize::AlchemizeError> {
 
 单 crate DDD 三层：`domain`（类型与规则，无网络/进程 IO）→ `application`（Converter 注册表 priority fallback 链 + 端口）→ `infrastructure`（各格式转换器 + MinerU/ASR 后端）。
 
-```
-alch CLI ──> Alchemize 门面 ──> ConverterRegistry（priority 降序）
-                                  │  anydoc(15) → 原生解析(10) → MinerU(5 链尾)
-                                  ▼
-                        ConvertResult { markdown, metadata.converter, quality, assets }
+```mermaid
+flowchart LR
+    CLI["alch CLI"] --> FACADE["Alchemize 门面"]
+    FACADE --> REG["ConverterRegistry<br/>priority 降序"]
+    REG -- "anydoc 15 → 原生解析 10 → MinerU 5 链尾" --> RESULT["ConvertResult<br/>markdown · metadata.converter · quality · assets"]
 ```
 
 设计原则、模块划分与数据流详见 [🏗️ 架构文档](docs/ARCHITECTURE.md)。

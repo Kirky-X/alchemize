@@ -225,11 +225,11 @@ More examples (custom vision/transcription providers, asset modes, registry asse
 
 Single-crate DDD three layers: `domain` (types and rules, no network/process IO) → `application` (converter registry with a priority fallback chain + ports) → `infrastructure` (per-format converters + MinerU/ASR backends).
 
-```
-alch CLI ──> Alchemize facade ──> ConverterRegistry (priority descending)
-                                  │  anydoc(15) → native parsers(10) → MinerU(5, tail)
-                                  ▼
-                        ConvertResult { markdown, metadata.converter, quality, assets }
+```mermaid
+flowchart LR
+    CLI["alch CLI"] --> FACADE["Alchemize facade"]
+    FACADE --> REG["ConverterRegistry<br/>priority descending"]
+    REG -- "anydoc 15 → native parsers 10 → MinerU 5, tail" --> RESULT["ConvertResult<br/>markdown · metadata.converter · quality · assets"]
 ```
 
 Design principles, module layout and data flows in the [🏗️ Architecture doc](docs/ARCHITECTURE.md).
