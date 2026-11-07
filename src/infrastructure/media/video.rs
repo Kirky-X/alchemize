@@ -452,4 +452,152 @@ mod tests {
         assert!(!VideoProcessingMode::Disabled.supports_frame_analysis());
         assert!(!VideoProcessingMode::Disabled.supports_audio());
     }
+
+    fn converter_with_ffmpeg_flag(mode: VideoProcessingMode, ffmpeg: bool) -> VideoConverter {
+        VideoConverter {
+            mode,
+            transcribe: None,
+            vision_provider: None,
+            ffmpeg_available: ffmpeg,
+        }
+    }
+
+    struct StubTranscriber(&'static str);
+
+    #[async_trait::async_trait]
+    impl crate::application::ports::TranscribeProvider for StubTranscriber {
+        async fn transcribe(
+            &self,
+            _audio: &[u8],
+        ) -> Result<crate::application::ports::Transcript, AlchemizeError> {
+            Ok(crate::application::ports::Transcript {
+                language: None,
+                duration: Some(1.0),
+                segments: vec![crate::application::ports::TranscriptSegment {
+                    start_sec: 0.0,
+                    end_sec: 1.0,
+                    text: self.0.to_string(),
+                }],
+            })
+        }
+        fn availability(&self) -> crate::application::ports::Availability {
+            crate::application::ports::Availability::Available
+        }
+        fn name(&self) -> &'static str {
+            "stub-video"
+        }
+    }
+
+    #[tokio::test]
+    async fn ffmpeg_extraction_failure_degrades_to_metadata() {
+        // ffmpeg_available forced true but the binary is absent on this host:
+        // the spawn fails inside extract_audio and the converter degrades.
+        let has_ffmpeg = !std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if has_ffmpeg {
+            return; // host has ffmpeg: the failure branch is unreachable here
+        }
+        let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::AudioOnly, true);
+        converter.transcribe = Some(std::sync::Arc::new(StubTranscriber("should not run")));
+        let input = Input::bytes(vec![0, 0, 0, 24, b'f', b't', b'y', b'p'], "v.mp4");
+        let result = converter.convert(input).await.unwrap();
+        assert!(!result.markdown.is_empty());
+        assert!(!result.markdown.contains("should not run"));
+    }
+
+    #[tokio::test]
+    async fn gpu_mode_without_ffmpeg_still_degrades() {
+        let has_ffmpeg = !std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if has_ffmpeg {
+            return;
+        }
+        let converter = converter_with_ffmpeg_flag(VideoProcessingMode::Gpu, true);
+        let input = Input::bytes(vec![0, 0, 0, 24, b'f', b't', b'y', b'p'], "v.mp4");
+        let result = converter.convert(input).await.unwrap();
+        assert!(!result.markdown.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ffmpeg_extraction_success_with_transcriber() {
+        // Fake ffmpeg on PATH: emits a canned WAV; stub transcriber runs.
+        let dir = tempfile::tempdir().unwrap();
+        let wav: Vec<u8> = {
+            let mut w = Vec::new();
+            w.extend_from_slice(b"RIFF");
+            w.extend_from_slice(&36u32.to_le_bytes());
+            w.extend_from_slice(b"WAVEfmt ");
+            w.extend_from_slice(&16u32.to_le_bytes());
+            w.extend_from_slice(&[1, 0, 1, 0]);
+            w.extend_from_slice(&16000u32.to_le_bytes());
+            w.extend_from_slice(&32000u32.to_le_bytes());
+            w.extend_from_slice(&[2, 0, 16, 0]);
+            w.extend_from_slice(b"data");
+            w.extend_from_slice(&0u32.to_le_bytes());
+            w
+        };
+        std::fs::write(dir.path().join("wav.payload"), &wav).unwrap();
+        let script = format!(
+            "#!/bin/sh\ncat > /dev/null\ncat '{}'\nexit 0\n",
+            dir.path().join("wav.payload").display()
+        );
+        let fake = dir.path().join("ffmpeg");
+        std::fs::write(&fake, script).unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            use std::sync::OnceLock;
+            static CHMOD: OnceLock<()> = OnceLock::new();
+            let _ = fake.as_os_str().to_string_lossy();
+            let _ = CHMOD.set(());
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let old_path = std::env::var("PATH").unwrap_or_default();
+        // Tests run multi-threaded: mutate env inside the unsafe block (2024
+        // edition) and restore immediately after the conversion completes.
+        unsafe { std::env::set_var("PATH", format!("{}:{}", dir.path().display(), old_path)) };
+        let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::AudioOnly, true);
+        converter.transcribe = Some(std::sync::Arc::new(StubTranscriber("stub transcript")));
+        let input = Input::bytes(vec![0, 0, 0, 24, b'f', b't', b'y', b'p'], "v.mp4");
+        let result = converter.convert(input).await.unwrap();
+        unsafe { std::env::set_var("PATH", old_path) };
+
+        assert!(
+            result.markdown.contains("stub transcript"),
+            "md: {}",
+            result.markdown
+        );
+        assert!(result.markdown.contains("## Video Transcript"));
+        assert_eq!(result.quality, ConversionQuality::LocalFull);
+    }
+
+    #[tokio::test]
+    async fn audioonly_with_provider_and_ffmpeg_missing_stubs_not_called() {
+        let has_ffmpeg = !std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if has_ffmpeg {
+            return;
+        }
+        let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::AudioOnly, true);
+        converter.transcribe = Some(std::sync::Arc::new(StubTranscriber("stub text")));
+        let input = Input::bytes(b"RIFF0000WAVE".to_vec(), "a.mp4");
+        let result = converter.convert(input).await.unwrap();
+        // extraction failed -> degraded metadata path, stub never invoked
+        assert!(!result.markdown.contains("stub text"));
+    }
 }

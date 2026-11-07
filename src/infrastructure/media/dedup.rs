@@ -280,3 +280,64 @@ mod tests {
         assert!(dedup.last_accepted_frame.is_none());
     }
 }
+
+#[cfg(test)]
+mod boost_tests {
+    use super::*;
+
+    /// Textured gradient frame (passes entropy filtering).
+    fn textured(width: u32, height: u32, seed: u8) -> Vec<u8> {
+        let mut buf = Vec::with_capacity((width * height * 3) as usize);
+        for i in 0..width * height {
+            let v = (i as u8).wrapping_mul(7).wrapping_add(seed);
+            buf.extend_from_slice(&[v, v.wrapping_mul(3), 255 - v]);
+        }
+        buf
+    }
+
+    /// Flat frame of one value (low entropy by construction).
+    fn flat(width: u32, height: u32, value: u8) -> Vec<u8> {
+        vec![value; (width * height * 3) as usize]
+    }
+
+    #[test]
+    fn should_process_accepts_first_textured_frame() {
+        let mut d = FrameDeduplicator::new();
+        assert!(d.should_process(&textured(8, 8, 1), 8, 8));
+    }
+
+    #[test]
+    fn should_process_rejects_identical_frame() {
+        let mut d = FrameDeduplicator::new();
+        let frame = textured(8, 8, 3);
+        assert!(d.should_process(&frame, 8, 8));
+        assert!(!d.should_process(&frame, 8, 8), "identical frame must dedup");
+    }
+
+    #[test]
+    fn should_process_rejects_low_entropy_flat() {
+        let mut d = FrameDeduplicator::new();
+        assert!(!d.should_process(&flat(8, 8, 7), 8, 8), "flat frame is low info");
+    }
+
+    #[test]
+    fn should_process_accepts_large_change() {
+        let mut d = FrameDeduplicator::new();
+        assert!(d.should_process(&textured(8, 8, 10), 8, 8));
+        assert!(
+            d.should_process(&textured(8, 8, 200), 8, 8),
+            "large change accepted"
+        );
+    }
+
+    #[test]
+    fn entropy_flat_vs_textured() {
+        assert!(compute_entropy(&textured(8, 8, 1)) > compute_entropy(&flat(8, 8, 42)));
+    }
+
+    #[test]
+    fn pixel_diff_zero_for_identical() {
+        let f = textured(4, 4, 5);
+        assert_eq!(pixel_diff_ratio(&f, &f, 4, 4), 0.0);
+    }
+}

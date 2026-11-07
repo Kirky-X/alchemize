@@ -50,7 +50,10 @@ impl Converter for XlsxConverter {
 
         // calamine 0.38 lazy Sheets only opens from a path (from_rs is
         // eager and unsupported for Sheets); stage bytes in a temp file.
-        let tmp = tempfile::NamedTempFile::new()
+        let suffix = format!(".{extension}");
+        let tmp = tempfile::Builder::new()
+            .suffix(&suffix)
+            .tempfile()
             .map_err(|e| AlchemizeError::other(format!("spreadsheet temp file failed: {e}")))?;
         std::fs::write(tmp.path(), &bytes)
             .map_err(|e| AlchemizeError::other(format!("spreadsheet staging failed: {e}")))?;

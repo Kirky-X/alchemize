@@ -95,6 +95,14 @@ async fn golden_zip_recursive() {
 }
 
 #[tokio::test]
+async fn golden_epub_chapters() {
+    let md = golden("epub", "epub").await;
+    assert!(md.contains("Fixture Book"), "md: {md}");
+    assert!(md.contains("Chapter One"), "md: {md}");
+    assert!(md.contains("Epub body text."), "md: {md}");
+}
+
+#[tokio::test]
 async fn golden_docx_text() {
     let md = golden("docx", "docx").await;
     assert!(md.contains("Hello DOCX"), "md: {md}");

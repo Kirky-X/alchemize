@@ -200,6 +200,42 @@ mod tests {
     }
 
     #[test]
+    fn lang_tag_remaining_arms() {
+        for (ext, tag) in [
+            ("pyi", "python"),
+            ("mjs", "javascript"),
+            ("cjs", "javascript"),
+            ("jsx", "jsx"),
+            ("kts", "kotlin"),
+            ("cc", "cpp"),
+            ("cxx", "cpp"),
+            ("hpp", "cpp"),
+            ("rb", "ruby"),
+            ("php", "php"),
+            ("lua", "lua"),
+            ("sql", "sql"),
+            ("bash", "bash"),
+            ("zsh", "bash"),
+            ("fish", "fish"),
+            ("yml", "yaml"),
+            ("ini", "ini"),
+            ("cfg", "ini"),
+            ("conf", "ini"),
+            ("proto", "proto"),
+            ("gql", "graphql"),
+            ("css", "css"),
+            ("scss", "scss"),
+            ("markdown", "fallback-passthrough"),
+        ] {
+            if tag == "fallback-passthrough" {
+                assert_eq!(lang_tag(ext), None, "{ext}");
+            } else {
+                assert_eq!(lang_tag(ext), Some(tag), "{ext}");
+            }
+        }
+    }
+
+    #[test]
     fn lang_tag_mapping_samples() {
         assert_eq!(lang_tag("rs"), Some("rust"));
         assert_eq!(lang_tag("tsx"), Some("typescript"));
