@@ -13,7 +13,7 @@ use crate::domain::result::{ConvertResult, VideoProcessingMode};
 use crate::domain::error::AlchemizeError;
 
 /// Configuration for MinerU remote conversion (local + cloud endpoints).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct MineruConfig {
     /// Base URL for a local MinerU service.
@@ -38,6 +38,22 @@ impl Default for MineruConfig {
             api_token: None,
             timeout_secs: 300,
         }
+    }
+}
+
+impl std::fmt::Debug for MineruConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // api_token deliberately excluded: never leak secrets in Debug output.
+        f.debug_struct("MineruConfig")
+            .field("base_url", &self.base_url)
+            .field("agent_base_url", &self.agent_base_url)
+            .field("precision_base_url", &self.precision_base_url)
+            .field(
+                "api_token",
+                &if self.api_token.is_some() { "<redacted>" } else { "None" },
+            )
+            .field("timeout_secs", &self.timeout_secs)
+            .finish()
     }
 }
 
@@ -275,6 +291,10 @@ mod tests {
         let msg = format!("{c}");
         assert!(msg.contains("<redacted>"));
         assert!(!msg.contains("secret-token"));
+        // Manual Debug impl also redacts the token (derived Debug would print it).
+        let dbg = format!("{c:?}");
+        assert!(dbg.contains("<redacted>"));
+        assert!(!dbg.contains("secret-token"));
         // serde serialization also skips the token
         let json = serde_json::to_string(&c).unwrap();
         assert!(!json.contains("secret-token"));
