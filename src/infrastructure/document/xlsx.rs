@@ -5,8 +5,7 @@
 //! separate section with a header. Empty cells are rendered as empty strings.
 
 use async_trait::async_trait;
-use calamine::{open_workbook_from_rs, Data, Reader, Sheets};
-use std::io::Cursor;
+use calamine::{Data, Reader, Sheets};
 
 use crate::application::ports::Converter;
 use crate::domain::error::AlchemizeError;
@@ -49,8 +48,14 @@ impl Converter for XlsxConverter {
         // Determine format from extension
         let extension = filename.rsplit('.').next().unwrap_or("xlsx").to_lowercase();
 
-        let mut workbook: Sheets<_> = open_workbook_from_rs(Cursor::new(&bytes))
-            .map_err(|e| AlchemizeError::Other(format!("failed to open spreadsheet: {e}")))?;
+        // calamine 0.38 lazy Sheets only opens from a path (from_rs is
+        // eager and unsupported for Sheets); stage bytes in a temp file.
+        let tmp = tempfile::NamedTempFile::new()
+            .map_err(|e| AlchemizeError::other(format!("spreadsheet temp file failed: {e}")))?;
+        std::fs::write(tmp.path(), &bytes)
+            .map_err(|e| AlchemizeError::other(format!("spreadsheet staging failed: {e}")))?;
+        let mut workbook: Sheets<_> = calamine::open_workbook_auto(tmp.path())
+            .map_err(|e| AlchemizeError::other(format!("failed to open spreadsheet: {e}")))?;
 
         let sheet_names = workbook.sheet_names();
         let mut markdown_parts = Vec::new();

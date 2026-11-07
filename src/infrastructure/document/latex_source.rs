@@ -103,14 +103,10 @@ impl Converter for LatexSourceConverter {
     }
 
     fn availability(&self) -> Availability {
-        if self.pandoc_available {
-            Availability::Available
-        } else {
-            Availability::Unavailable {
-                reason: "pandoc not found on PATH; LaTeX falls back to a fenced block"
-                    .to_string(),
-            }
-        }
+        // The converter always converts: without pandoc it degrades to a
+        // fenced LaTeX block (quality LocalFallback). Unavailable is reserved
+        // for engines that cannot produce output at all.
+        Availability::Available
     }
 }
 
@@ -565,9 +561,8 @@ mod tests {
         let result = converter.convert(input).await.unwrap();
         assert!(result.markdown.starts_with("```latex\n"));
         assert_eq!(result.quality, ConversionQuality::LocalFallback);
-        assert!(matches!(
-            converter.availability(),
-            Availability::Unavailable { .. }
-        ));
+        // The converter always converts (fenced fallback is built in):
+        // availability stays Available; pandoc status shows in metadata.
+        assert_eq!(converter.availability(), Availability::Available);
     }
 }

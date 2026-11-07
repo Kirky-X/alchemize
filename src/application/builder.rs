@@ -66,7 +66,11 @@ pub enum AssetMode {
 
 /// Built converter facade over the registry.
 pub struct Alchemize {
-    registry: ConverterRegistry,
+    registry: std::sync::Arc<ConverterRegistry>,
+    /// ZIP handled at the facade level: it shares the main registry for
+    /// nested conversion; zip itself is not a registry member (unbounded
+    /// self-recursion), so nested zips report unsupported.
+    zip: Option<crate::infrastructure::document::ZipConverter>,
     asset_mode: AssetMode,
     no_remote: bool,
 }
@@ -74,7 +78,7 @@ pub struct Alchemize {
 impl Alchemize {
     /// Convert an input to markdown using the fallback chain.
     pub async fn convert(&self, input: &Input) -> Result<ConvertResult, AlchemizeError> {
-        self.registry.convert(input).await
+        self.convert_pref(input, None).await
     }
 
     /// Convert with a preferred engine name.
@@ -83,6 +87,13 @@ impl Alchemize {
         input: &Input,
         prefer: Option<&str>,
     ) -> Result<ConvertResult, AlchemizeError> {
+        if input.extension().as_deref() == Some("zip") {
+            if let Some(ref zip) = self.zip {
+                use crate::application::ports::Converter as _;
+                return zip.convert(input.clone()).await;
+            }
+            return Err(AlchemizeError::UnsupportedFormat("zip".to_string()));
+        }
         self.registry.convert_pref(input, prefer).await
     }
 
@@ -90,7 +101,15 @@ impl Alchemize {
     pub fn availability(
         &self,
     ) -> Vec<(String, Vec<String>, crate::application::ports::Availability)> {
-        self.registry.availability()
+        let mut rows = self.registry.availability();
+        if self.zip.is_some() {
+            rows.push((
+                "zip".to_string(),
+                vec!["zip".to_string()],
+                crate::application::ports::Availability::Available,
+            ));
+        }
+        rows
     }
 
     /// Registered engine names.
@@ -98,7 +117,7 @@ impl Alchemize {
         self.registry.converters().map(|c| c.name()).collect()
     }
 
-    /// Number of registered engines.
+    /// Number of registered engines (zip excluded; see [`Alchemize`]).
     pub fn engine_count(&self) -> usize {
         self.registry.len()
     }
@@ -216,8 +235,15 @@ impl AlchemizeBuilder {
             registry.register(converter);
         }
 
+        // Shared registry: the facade and the zip converter (nested
+        // conversion) use the same engine set; zip is not a member itself.
+        let registry = std::sync::Arc::new(registry);
+        let zip =
+            crate::infrastructure::document::ZipConverter::with_arc(std::sync::Arc::clone(&registry));
+
         Alchemize {
             registry,
+            zip: Some(zip),
             asset_mode: self.asset_mode,
             no_remote: self.no_remote,
         }
