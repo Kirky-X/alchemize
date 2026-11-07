@@ -2,7 +2,7 @@
 
 <img src="docs/assets/alchemize.svg" alt="Alchemize Logo" width="240">
 
-[![Rust 2024](https://img.shields.io/badge/Rust-2024-edded?logo=rust&style=for-the-badge)](https://www.rust-lang.org/) [![Rustc 1.91+](https://img.shields.io/badge/Rustc-1.91+-orange.svg?style=for-the-badge)](https://www.rust-lang.org/) [![license](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024-edded?logo=rust&style=for-the-badge)](https://www.rust-lang.org/) [![Rustc 1.97.1+](https://img.shields.io/badge/Rustc-1.97.1+-orange.svg?style=for-the-badge)](https://www.rust-lang.org/) [![license](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
 
 [中文](README.md) | **English**
 
@@ -97,7 +97,7 @@ Beyond these core capabilities, video track extraction and frame dedup, video pr
 ### 📦 Installation
 
 ```bash
-# Check the Rust version (1.91+ required)
+# Check the Rust version (1.97.1+ required)
 rustc --version
 
 # Default features (zero external-service dependencies)
@@ -156,9 +156,10 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | `mineru` | MinerU cloud PDF engine (reqwest/limiteron) | registered only after the endpoint is configured via `ALCHEMIZE_MINERU_URL` |
 | `anydoc` | office full-format backend (firecrawl/anydoc, MIT) | priority 15 above native parsers; image bytes exported in document order |
 | `asr` | vecboost transcription facade + Whisper-compatible API | Qwen3-ASR ONNX + silero VAD, path dependency on sibling crate vecboost |
+| `mcp` | MCP tool surface (`alch-mcp` stdio server) | convert/doctor/formats exposed as MCP tools; CLI wrapping (sdforge) always on |
 | `full` | all of the above | |
 
-Default is `default = []` — engines behind disabled features are not compiled at all.
+Default is `default = ["cli"]` (CLI wrapping always on) — engines behind disabled features are not compiled at all.
 
 ---
 
@@ -298,7 +299,7 @@ Four defense lines: structured error handling for untrusted input (no panics); S
 <tr><td align="center">✅</td><td>Conversion engines</td><td>registry fallback chain, full document formats, code fencing, recursive zip, multi-encoding detection</td></tr>
 <tr><td align="center">✅</td><td>Optional backends</td><td>anydoc office formats, MinerU cloud PDF (SSRF guards + limits), vecboost local ASR</td></tr>
 <tr><td align="center">✅</td><td>Media pipelines</td><td>vision port, ffmpeg track extraction, native subtitle parsing, frame dedup, VAD-segmented transcription</td></tr>
-<tr><td align="center">✅</td><td>CLI & diagnostics</td><td>convert/doctor/formats, semantic exit codes, engine preference & asset modes</td></tr>
+<tr><td align="center">✅</td><td>CLI & diagnostics</td><td>sdforge-wrapped (CLI+MCP dual surface), convert/doctor/formats, semantic exit codes, engine preference & asset modes</td></tr>
 <tr><td align="center">✅</td><td>Docs & compliance</td><td>seven-doc suite (structure aligned with confers), bilingual README, SPDX headers 59/59, coverage 90.49%</td></tr>
 <tr><td align="center">🔲</td><td>Supply chain</td><td>fork anydoc onto zip 9.4 (one-line change already proven) to clear cargo-audit advisories</td></tr>
 <tr><td align="center">🔲</td><td>Release</td><td>first crates.io publish (vecboost first) + crates.io/docs.rs badges</td></tr>

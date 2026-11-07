@@ -2,7 +2,7 @@
 
 <img src="docs/assets/alchemize.svg" alt="Alchemize Logo" width="240">
 
-[![Rust 2024](https://img.shields.io/badge/Rust-2024-edded?logo=rust&style=for-the-badge)](https://www.rust-lang.org/) [![Rustc 1.91+](https://img.shields.io/badge/Rustc-1.91+-orange.svg?style=for-the-badge)](https://www.rust-lang.org/) [![license](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
+[![Rust 2024](https://img.shields.io/badge/Rust-2024-edded?logo=rust&style=for-the-badge)](https://www.rust-lang.org/) [![Rustc 1.97.1+](https://img.shields.io/badge/Rustc-1.97.1+-orange.svg?style=for-the-badge)](https://www.rust-lang.org/) [![license](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
 
 **中文** | [English](README_EN.md)
 
@@ -97,7 +97,7 @@
 ### 📦 安装
 
 ```bash
-# 检查 Rust 版本（要求 1.91+）
+# 检查 Rust 版本（要求 1.97.1+）
 rustc --version
 
 # 默认特性构建（零外部服务依赖）
@@ -156,9 +156,10 @@ alch formats
 | `mineru` | MinerU 云端 PDF 引擎（reqwest/limiteron） | 端点经 `ALCHEMIZE_MINERU_URL` 配置后才注册 |
 | `anydoc` | office 全格式后端（firecrawl/anydoc, MIT） | priority 15 压过原生解析；图片按文档序导出 |
 | `asr` | vecboost 转录门面 + Whisper 兼容 API | Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
+| `mcp` | MCP 工具面（`alch-mcp` stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；CLI 封装（sdforge）恒在 |
 | `full` | 以上全部 | |
 
-默认 `default = []`——feature 关闭的引擎根本不参与编译。
+默认 `default = ["cli"]`（CLI 封装恒在）——feature 关闭的引擎根本不参与编译。
 
 ---
 
@@ -298,7 +299,7 @@ cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
 <tr><td align="center">✅</td><td>转换引擎</td><td>注册表 fallback 链、文档全格式、代码围栏化、zip 递归、多编码探测</td></tr>
 <tr><td align="center">✅</td><td>可选后端</td><td>anydoc office 全格式、MinerU 云端 PDF（SSRF 防护 + 限量）、vecboost 本地 ASR</td></tr>
 <tr><td align="center">✅</td><td>媒体链路</td><td>图片视觉端口、ffmpeg 抽轨、字幕原生解析、帧去重、VAD 段级转录</td></tr>
-<tr><td align="center">✅</td><td>CLI 与诊断</td><td>convert/doctor/formats、退出码语义化、引擎偏好与资产模式</td></tr>
+<tr><td align="center">✅</td><td>CLI 与诊断</td><td>sdforge 封装（CLI+MCP 双面）、convert/doctor/formats、退出码语义化、引擎偏好与资产模式</td></tr>
 <tr><td align="center">✅</td><td>文档与合规</td><td>七篇文档套件（结构对齐 confers）、双语 README、SPDX 版权头 59/59、覆盖率 90.49%</td></tr>
 <tr><td align="center">🔲</td><td>供应链收口</td><td>fork anydoc 换 zip 9.4（一行改动已实证）消除 cargo-audit 通告</td></tr>
 <tr><td align="center">🔲</td><td>发布</td><td>首次 crates.io 发布（vecboost 先行）+ crates.io/docs.rs 徽章</td></tr>

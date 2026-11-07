@@ -19,7 +19,7 @@
 
 ### 前置条件
 
-- **Rust 1.91+**（`Cargo.toml` 的 `rust-version`，edition 2024）
+- **Rust 1.97.1+**（`Cargo.toml` 的 `rust-version`，edition 2024；下限由 sdforge MSRV 决定）
 - 组件：`rustfmt`（代码格式化）、`clippy`（静态分析）、`cargo-llvm-cov`（覆盖率，可选）
 
 ```bash
@@ -55,6 +55,7 @@ cargo build --features full
 | `mineru` | MinerU 云端 PDF 引擎 | 需 `ALCHEMIZE_MINERU_URL` 配置端点才注册 |
 | `anydoc` | office 全格式后端（firecrawl/anydoc, MIT） | priority 15，压过原生 office 解析 |
 | `asr` | vecboost 转录门面（Qwen3-ASR ONNX + silero VAD） | 需模型 bundle + `ORT_DYLIB_PATH` |
+| `mcp` | MCP 工具面（alch-mcp，rmcp stdio） | CLI 封装（sdforge cli）恒在 |
 | `full` | 以上全部 | |
 
 ### 构建与测试

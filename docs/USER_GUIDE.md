@@ -27,7 +27,7 @@ Alchemize 把任意文档炼成 Markdown：一份 PDF、一个 Word、一段音�
 ```bash
 # 检查 Rust 版本
 rustc --version
-# 期望输出：rustc 1.91（或更高）
+# 期望输出：rustc 1.97.1（或更高）
 ```
 
 ### 📦 安装
@@ -134,11 +134,15 @@ bundle 缺失时引擎如实报 Unavailable 并附获取指引——**不会自�
 
 ### 💻 命令行工具
 
+CLI 由 sdforge `#[forge]` 端点封装（`src/forge_app.rs`）：一份端点定义同时出 CLI 与 MCP 工具面。
+
 ```bash
 alch convert <INPUT> [-o <PATH>] [--engine <NAME>] [--assets <dir|inline>] [--no-remote] [--format <EXT>]
 alch doctor      # 每个已注册引擎一行：AVAILABLE 或 UNAVAILABLE + 原因
 alch formats     # 全部支持扩展名，排序去重空格分隔
 ```
+
+`--format` 双语义：**convert 语境**内是扩展名覆盖（旧契约）；**根级**（子命令之前）是 sdforge 输出格式 `text|json`（如 `alch --format json formats`）。
 
 注意：**未编译进特性的引擎、未配置端点的 MinerU 不会出现在 doctor 列表中**（根本不注册）；媒体引擎的依赖缺失在转换时降级，doctor 仍显示 AVAILABLE。退出码：`0` 成功（含降级）、`1` 其他错误、`2` 不支持格式、`3` 全链失败（stderr 逐行列出各引擎失败原因）。
 
@@ -163,6 +167,16 @@ srt/vtt/ass/ssa 原生解析（aspasia），输出时间码列表，不经 ffmpe
 ### 🔐 注入自定义 Provider
 
 图片视觉与音频转录都是端口：`with_vision_provider(Arc<dyn VisionProvider>)`、`with_transcribe_provider(Arc<dyn TranscribeProvider>)`。不注入时对应转换降级为元数据 markdown（含尺寸/时长/哈希），无内置云兜底。
+
+### 🤖 MCP 服务（feature `mcp`）
+
+```bash
+cargo build --release --features mcp   # 产出 alch-mcp
+# 在 MCP 客户端配置中以 stdio 方式接入：
+# { "command": "/path/to/alch-mcp" }
+```
+
+`alch-mcp` 经 sdforge（rmcp，stdio 传输——传输面无网络出口，convert 工具本身的网络能力随 mineru 特性）把 convert / doctor / formats 暴露为 MCP 工具，参数 schema 由端点签名生成；与 CLI 共享同一份端点定义。
 
 ### 🔭 作为库集成
 

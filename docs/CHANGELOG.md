@@ -9,6 +9,7 @@ alchemize 所有显著变更记录于此文件。
 
 ### 新增
 
+- **MCP 工具面**（feature `mcp`）：`alch-mcp` 二进制经 sdforge（rmcp，stdio）把 convert/doctor/formats 暴露为 MCP 工具。
 - 文档套件（七篇专题文档）与全部源文件版权头（Apache-2.0 SPDX）。
 - 文档骨架与 confers 对齐：七篇逐篇映射 confers 章节序列（概述→设计原则→系统架构→模块划分→数据流→安全设计→性能设计→相关文档等，逐篇见「📋 目录」）。
 - 文档导航节：README.md「📚 文档」表格与 README_EN.md「Docs」表格。
@@ -20,6 +21,7 @@ alchemize 所有显著变更记录于此文件。
 
 ### 变更
 
+- **CLI 改为 sdforge 封装**：convert/doctor/formats 改写为 `#[forge]` 端点（`src/forge_app.rs`），`alch` 经 CliBuilder + 自定义 runner 驱动；退出码 0/1/2/3、位置参数、stdout/stderr 形态、`-o`/`--no-remote`/`--format` 契约全部保留（tests/cli.rs 零改动全绿）。MSRV 1.91 → 1.97.1（sdforge 要求）；直接依赖 clap 移除（sdforge 自带）。
 - 文档表述对齐代码事实：domain 层 IO 例外（`Input::to_bytes` 读盘、`DirSink` 落盘）、doctor/availability 语义（未注册引擎不出现、媒体依赖缺失走转换时降级）、模块树补齐 engines/shared/subtitle_converter。
 
 ## [0.1.0] - 2026-11-07

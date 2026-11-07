@@ -1,223 +1,122 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! `alch` — transmute documents into Markdown from the command line.
+//! `alch` — sdforge 封装的命令行入口（`#[forge]` 端点见 `forge_app`）。
+//!
+//! 契约（退出码 0/1/2/3、位置参数、stdout/stderr 形态）由
+//! `specmark/specs/cli-output/spec.md` 钉死；`tests/cli.rs` 是机械证明
+//! （含 `--` 透传用例）。
+//!
+//! runner 不用 `CliBuilder::execute()`（其硬编码 exit 0/1），改用公开的
+//! `build()` + `dispatch()` + `OutputFormat` 自管退出码与输出；argv 预处理
+//! 归一 sdforge 无法表达的三处契约：`-o` 短旗标、`--no-remote` 裸旗标
+//! （sdforge 生成下划线 long 名且 bool 恒为取值式）、根 `--version` 的
+//! 正确版本号（build() 的根 version 取自 sdforge crate）。
 
 use std::io::Write as _;
-use std::path::PathBuf;
-use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use sdforge::cli::{CliBuilder, OutputFormat};
+use sdforge::core::ApiError;
 
-use alchemize::application::builder::{Alchemize, AlchemizeBuilder, AssetMode, MineruConfig};
-use alchemize::application::ports::Availability;
-use alchemize::domain::input::Input;
+#[path = "forge_app.rs"]
+mod forge_app;
 
-#[derive(Parser)]
-#[command(name = "alch", version, about = "Transmute any document into Markdown")]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Convert one input file to markdown.
-    Convert {
-        /// Input file path.
-        input: PathBuf,
-        /// Output file path (default: stdout).
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-        /// Prefer a specific engine by name (falls back to the chain).
-        #[arg(long)]
-        engine: Option<String>,
-        /// Asset mode: dir (images/ next to output) or inline (base64).
-        #[arg(long, default_value = "dir")]
-        assets: AssetModeArg,
-        /// Exclude remote (cloud API) engines entirely.
-        #[arg(long)]
-        no_remote: bool,
-        /// Override format detection (extension without dot).
-        #[arg(long)]
-        format: Option<String>,
-    },
-    /// Report engine availability.
-    Doctor,
-    /// List supported extensions.
-    Formats,
-}
-
-/// Clap-friendly mirror of [`AssetMode`].
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum AssetModeArg {
-    Dir,
-    Inline,
-}
-
-impl std::str::FromStr for AssetModeArg {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "dir" => Ok(Self::Dir),
-            "inline" => Ok(Self::Inline),
-            other => Err(format!("unknown asset mode '{other}' (dir|inline)")),
+/// 契约恢复层：sdforge 生成的参数面与本仓 CLI 契约之间的差异在此归一。
+///
+/// 规则（按 token 序处理）：
+/// - `--version` / `-V`：仅限子命令之前，直出本仓版本（build() 的根
+///   version 取自 sdforge crate）
+/// - `-o` → `--output`（sdforge 不为 per-command 参数生成短旗标）
+/// - `convert` 语境内的 `--format` → `--input_format`（扩展名覆盖；根级
+///   全局 `--format text|json` 同名撞车 + 默认值会污染取值，且旧契约中
+///   convert 的 --format 本就是扩展名覆盖。根级输出格式旗标须放在子命令
+///   之前，如 `alch --format json formats`）
+/// - `--no-remote` → `--no_remote true`（裸旗标语义归一；sdforge long 名
+///   取参数标识符的下划线形式且 bool 恒为取值式）
+/// - `--` 之后原样透传（位置参数字面量，不重写）
+fn normalize_argv(raw: Vec<String>) -> Vec<String> {
+    use std::collections::VecDeque;
+    let mut rest: VecDeque<_> = raw.into_iter().collect();
+    let mut out = Vec::with_capacity(rest.len() + 2);
+    let mut in_convert = false;
+    let mut seen_subcommand = false;
+    while let Some(arg) = rest.pop_front() {
+        // `--` 之后的 token 是位置参数字面量（如文件名）：原样透传。
+        if arg == "--" {
+            out.push(arg);
+            out.extend(rest);
+            return out;
         }
-    }
-}
-
-impl From<AssetModeArg> for AssetMode {
-    fn from(arg: AssetModeArg) -> Self {
-        match arg {
-            AssetModeArg::Dir => AssetMode::Dir,
-            AssetModeArg::Inline => AssetMode::Inline,
-        }
-    }
-}
-
-fn build_alch(no_remote: bool, asset_mode: AssetMode) -> Alchemize {
-    let mut builder = AlchemizeBuilder::new().with_asset_mode(asset_mode);
-    if no_remote {
-        builder = builder.with_no_remote();
-    }
-    // MinerU endpoints come from env when present; otherwise local-only chain.
-    if let Ok(base) = std::env::var("ALCHEMIZE_MINERU_URL") {
-        let mut cfg = MineruConfig::default();
-        cfg.base_url = base;
-        builder = builder.with_mineru(cfg);
-    }
-    builder.build()
-}
-
-fn run(runtime: &tokio::runtime::Runtime) -> Result<ExitCode, String> {
-    let cli = Cli::parse();
-    match cli.command {
-        Command::Formats => {
-            let alch = build_alch(false, AssetMode::Dir);
-            let mut exts: Vec<String> = alch
-                .availability()
-                .into_iter()
-                .flat_map(|(_, exts, _)| exts)
-                .collect();
-            exts.sort();
-            exts.dedup();
-            println!("{}", exts.join(" "));
-            Ok(ExitCode::SUCCESS)
-        }
-        Command::Doctor => {
-            let alch = build_alch(false, AssetMode::Dir);
-            for (name, exts, availability) in alch.availability() {
-                match availability {
-                    Availability::Available => {
-                        println!("{name:<16} AVAILABLE   {}", exts.join(","));
-                    }
-                    Availability::Unavailable { reason } => {
-                        println!("{name:<16} UNAVAILABLE {reason}");
-                    }
-                }
+        match arg.as_str() {
+            "--version" | "-V" if !seen_subcommand => {
+                println!("alch {}", alchemize::VERSION);
+                std::process::exit(0);
             }
-            Ok(ExitCode::SUCCESS)
-        }
-        Command::Convert {
-            input,
-            output,
-            engine,
-            assets,
-            no_remote,
-            format,
-        } => {
-            if !input.is_file() {
-                return Err(format!("input file not found: {}", input.display()));
+            "convert" | "doctor" | "formats" => {
+                seen_subcommand = true;
+                in_convert = arg == "convert";
+                out.push(arg);
             }
-            let alch = build_alch(no_remote, assets.into());
-            let converted_input = match format {
-                Some(fmt) => {
-                    let data =
-                        std::fs::read(&input).map_err(|e| format!("failed to read input: {e}"))?;
-                    Input::Bytes {
-                        data,
-                        filename: input
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "input".into()),
-                        mimetype: None,
-                        extension: Some(fmt.to_lowercase()),
-                    }
-                }
-                None => Input::Path(input.clone()),
-            };
-
-            let result = runtime.block_on(alch.convert_pref(&converted_input, engine.as_deref()));
-
-            match result {
-                Ok(convert_result) => {
-                    let engine_used = convert_result
-                        .metadata
-                        .get("converter")
-                        .and_then(|c| c.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    let quality = convert_result.quality;
-                    match output {
-                        Some(path) => {
-                            if let Some(parent) = path.parent() {
-                                let _ = std::fs::create_dir_all(parent);
-                            }
-                            std::fs::write(&path, &convert_result.markdown)
-                                .map_err(|e| format!("write failed: {e}"))?;
-                            // Dir mode: write extracted assets at their
-                            // converter-assigned names next to the output.
-                            for asset in &convert_result.assets {
-                                let asset_path = path
-                                    .parent()
-                                    .unwrap_or(std::path::Path::new("."))
-                                    .join(&asset.filename);
-                                if let Some(dir) = asset_path.parent() {
-                                    let _ = std::fs::create_dir_all(dir);
-                                }
-                                std::fs::write(&asset_path, &asset.bytes)
-                                    .map_err(|e| format!("asset write failed: {e}"))?;
-                            }
-                            eprintln!(
-                                "converted {} -> {} [{quality}] (engine: {engine_used})",
-                                input.display(),
-                                path.display(),
-                            );
-                        }
-                        None => {
-                            let mut stdout = std::io::stdout().lock();
-                            let _ = writeln!(stdout, "{}", convert_result.markdown);
-                        }
-                    }
-                    Ok(ExitCode::SUCCESS)
-                }
-                Err(alchemize::AlchemizeError::UnsupportedFormat(ext)) => {
-                    eprintln!("unsupported format: {ext}");
-                    Ok(ExitCode::from(2))
-                }
-                Err(alchemize::AlchemizeError::AllBackendsFailed { ext, attempts }) => {
-                    eprintln!("all backends failed for {ext}:");
-                    for (engine, reason) in &attempts {
-                        eprintln!("  - {engine}: {reason}");
-                    }
-                    Ok(ExitCode::from(3))
-                }
-                Err(other) => Err(other.to_string()),
+            "-o" if in_convert => out.push("--output".into()),
+            "--no-remote" if in_convert => {
+                out.push("--no_remote".into());
+                out.push("true".into());
             }
+            s if in_convert && s.starts_with("--no-remote=") => {
+                out.push(format!(
+                    "--no_remote={}",
+                    s.trim_start_matches("--no-remote=")
+                ));
+            }
+            "--format" if in_convert => out.push("--input_format".into()),
+            s if in_convert && s.starts_with("--format=") => {
+                out.push(format!(
+                    "--input_format={}",
+                    s.trim_start_matches("--format=")
+                ));
+            }
+            other => out.push(other.into()),
         }
     }
+    out
 }
 
-fn main() -> ExitCode {
-    let runtime = tokio::runtime::Builder::new_current_thread()
+fn main() {
+    // init_all_plugins 触碰 inventory 注册，防止链接器优化掉端点注册项。
+    sdforge::init_all_plugins();
+
+    // multi_thread 运行时：与 alch-mcp 的 #[tokio::main] 默认一致（MCP
+    // 工具包装器内部使用 tokio::task::block_in_place，要求 multi-thread）。
+    let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("tokio runtime");
-    match run(&runtime) {
-        Ok(code) => code,
-        Err(message) => {
-            eprintln!("alch: {message}");
-            ExitCode::FAILURE
+
+    let argv = normalize_argv(std::env::args().collect());
+    let cmd = CliBuilder::new().with_name("alch").build();
+    let matches = cmd.try_get_matches_from(argv).unwrap_or_else(|e| e.exit());
+    let format = OutputFormat::from_matches(&matches);
+
+    match runtime.block_on(sdforge::cli::dispatch(&matches, None)) {
+        Ok((_, value)) => {
+            // `Value::Null` 是「handler 已自行输出」哨兵（写文件路径，
+            // 摘要走 stderr）；其余按 --format 契约渲染。stdout 写入对
+            // EPIPE 容错（管道下游提前关闭不是错误，与旧实现一致）。
+            if !value.is_null() {
+                let rendered = format.render_success(&value);
+                let _ = writeln!(std::io::stdout(), "{rendered}");
+            }
+            std::process::exit(0);
         }
+        Err(e) => match e {
+            // 领域 stderr 行已由 handler（map_error）输出：变体只承载
+            // 退出码，不再补打错误行。
+            ApiError::NotFound { resource, .. } if resource == "format" => std::process::exit(2),
+            ApiError::ServiceUnavailable { .. } => std::process::exit(3),
+            other => {
+                format.emit_error(&other);
+                std::process::exit(1);
+            }
+        },
     }
 }

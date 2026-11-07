@@ -272,3 +272,24 @@ fn convert_video_with_fake_ffmpeg_extracts_audio() {
         "stdout: {stdout}"
     );
 }
+
+#[test]
+fn double_dash_positional_passthrough() {
+    // `--` 之后的 token 是位置参数字面量：文件名字面 `-o`/`--version`
+    // 不得被 runner 的契约归一层改写。
+    let dir = temp_dir("double-dash");
+    // 文件名以 `-o` 开头（危险字面量）但带扩展名，可成功转换。
+    let file = dir.join("-o.txt");
+    std::fs::write(&file, "dash dash body").unwrap();
+    let out = alch()
+        .args(["convert", "--", file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("dash dash body"));
+}

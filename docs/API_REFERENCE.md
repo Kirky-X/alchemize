@@ -240,6 +240,12 @@ URL 校验拒绝的六类原因：`InvalidScheme`（非 HTTPS）、`LoopbackAddr
 - 模型探测：`ALCHEMIZE_TRANSCRIBE_MODELS` → 缺省 `~/.cache/alchemize/models/transcribe/`（布局 `qwen3-conv_frontend.onnx`、`qwen3-encoder.int8.onnx`、`qwen3-decoder.int8.onnx`、`silero_vad.onnx`、`tokenizer/`）；`ORT_DYLIB_PATH` 指向 onnxruntime 动态库。缺失时 provider 自述 `Unavailable` 并附获取指引，不自动联网。
 - 测试专用：`ALCHEMIZE_ASR_TEST_WAV`（集成测试输入路径）。
 
+### MCP（`mcp` 特性）
+
+- 装配产物：`alch-mcp` 二进制——`sdforge::mcp::serve_stdio(build())` 承载 convert / doctor / formats 三个 MCP 工具（`#[forge(tool_name)]` 注册，参数 schema 由端点签名生成），stdio 传输——传输面无网络出口（convert 工具本身的网络能力随 mineru 特性）。
+- CLI 同源：三个端点同时以 `cli = true` 注册进 `alch`（CliBuilder + 自定义 runner，退出码 0/1/2/3 契约见主 spec cli-output）。
+- 注意：根级内置全局 `--format text|json`（sdforge 输出格式）；convert 的扩展名覆盖参数名为 `input_format`，CLI 侧由 runner 在 convert 语境把 `--format` 归一为 `--input_format`。
+
 ## 💡 使用示例
 
 ### 基础转换

@@ -8,7 +8,7 @@ license = "Apache-2.0"
 repository = "https://github.com/Kirky-X/alchemize"
 homepage = "https://github.com/Kirky-X/alchemize"
 documentation = "https://docs.rs/alchemize"
-rust-version = "1.91"
+rust-version = "1.97.1"
 
 [package]
 name = "alchemize"
@@ -33,14 +33,24 @@ path = "src/lib.rs"
 name = "alch"
 path = "src/main.rs"
 
+[[bin]]
+name = "alch-mcp"
+path = "src/bin/alch_mcp.rs"
+required-features = ["mcp"]
+
 [features]
-default = []
+# sdforge 宏生成的 CLI 注册项带 #[cfg(feature = "cli")]，按调用方 crate 解析——
+# 本仓必须开启同名 feature，否则 alch 命令树为空（forms/doctor/convert 不可达）
+default = ["cli"]
+cli = []
 # MinerU 云端 PDF 高保真（HTTP 客户端）
 mineru = ["dep:reqwest", "dep:limiteron", "dep:futures", "reqwest/multipart", "reqwest/stream"]
 # anydoc office 全格式后端（firecrawl/anydoc crate, MIT）
 anydoc = ["dep:anydoc"]
 # ASR：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
 asr = ["dep:vecboost", "dep:reqwest", "reqwest/multipart"]
+# MCP 工具面：sdforge rmcp stdio 服务（alch-mcp）；CLI 封装（cli feature）恒在
+mcp = ["sdforge/mcp"]
 full = ["mineru", "anydoc", "asr"]
 
 [dependencies]
@@ -64,12 +74,12 @@ serde_json = { version = "1.0", default-features = false, features = ["std"] }
 sha2 = { version = "0.10", default-features = false }
 thiserror = { version = "2.0", default-features = false }
 tempfile = { version = "3", default-features = false, features = ["getrandom"] }
-tokio = { version = "1.0", default-features = false, features = ["rt", "macros", "fs", "process", "io-util", "time", "sync"] }
+tokio = { version = "1.0", default-features = false, features = ["rt", "rt-multi-thread", "macros", "fs", "process", "io-util", "time", "sync"] }
 tracing = { version = "0.1", default-features = false }
 zip = { version = "9.3", default-features = false, features = ["deflate"] }
 
-# CLI
-clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+# CLI/MCP 封装框架：#[forge] 端点 → CliBuilder + rmcp stdio（MSRV 1.97.1 的来源）
+sdforge = { version = "0.5.0-rc.10", features = ["cli"] }
 
 # 可选后端
 anydoc = { version = "0.2", default-features = false, optional = true }

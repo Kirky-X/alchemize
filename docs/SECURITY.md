@@ -20,7 +20,7 @@ Alchemize 的安全模型：**不可信输入、受限出口、密钥最小化**
 
 ### 最低支持 Rust 版本（MSRV）
 
-Rust **1.91**（`Cargo.toml` 的 `rust-version`，edition 2024）。安全修复不提高 MSRV。
+Rust **1.97.1**（`Cargo.toml` 的 `rust-version`，edition 2024；下限由 sdforge MSRV 决定）。安全修复不提高 MSRV。
 
 ### 依赖安全
 
@@ -48,6 +48,7 @@ cargo update -d          # 更新漏洞通告数据库
 - `Cargo.lock` 入库锁定依赖图；依赖升级需过 `cargo audit`。
 - 全部源文件带 `SPDX-License-Identifier: Apache-2.0` 两行头（59/59），license 扫描工具可机器识别文件级权属。
 - specmark 规格目录不入库（gitignore），主 specs 作为本地规格真源。
+- CLI/MCP 封装框架 sdforge（MIT，crates.io 版本钉 0.5.0-rc.10）与 rmcp（`mcp` feature 独占）经 `cargo audit` 一并纳管。
 
 ## 🐛 漏洞报告流程
 
@@ -96,7 +97,7 @@ cargo update -d          # 更新漏洞通告数据库
 
 ### SSRF 防护
 
-全部网络出口集中在 MinerU 后端（feature `mineru`），下载 URL 必须通过 `ValidatedFileUrl` 校验（`validated_url.rs`）：
+全部网络出口集中在 MinerU 后端（feature `mineru`），下载 URL 必须通过 `ValidatedFileUrl` 校验（`validated_url.rs`）。MCP 面（`alch-mcp`）走 stdio 传输——**传输面无网络出口**（convert 工具在 `mineru` 特性与端点环境变量齐备时可出网，属业务能力而非传输）；HTTP/gRPC/WS 协议未启用：
 
 - 仅允许 HTTPS scheme；
 - 拒绝环回（`127.0.0.0/8`、`::1`、`localhost`）、`0.0.0.0/8`、广播地址；
