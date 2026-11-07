@@ -33,6 +33,116 @@ impl Default for HtmlConverter {
     }
 }
 
+/// Replace every `<math>…</math>` element with an alphanumeric placeholder,
+/// returning the rewritten HTML plus the LaTeX fragments (delimiter included)
+/// keyed by placeholder index.
+///
+/// Extraction priority mirrors the liuxiang `_get_latex` rule: `alttext`
+/// first, then the `annotation[encoding=x-tex]` child. Block-display math
+/// becomes `$$…$$`; inline stays `$…$`. Placeholders survive htmd untouched
+/// (no escapable characters); [`restore_math`] swaps them back afterwards.
+pub fn preprocess_math(html: &str) -> (String, Vec<String>) {
+    let mut out = String::with_capacity(html.len());
+    let mut fragments: Vec<String> = Vec::new();
+    let mut rest = html;
+    loop {
+        let Some(start_rel) = rest.find("<math") else {
+            out.push_str(rest);
+            return (out, fragments);
+        };
+        let (head, tail) = rest.split_at(start_rel);
+        out.push_str(head);
+        let Some(tag_end_rel) = tail.find('>') else {
+            out.push_str(tail);
+            return (out, fragments);
+        };
+        let open_tag = &tail[..tag_end_rel];
+        let body_start = tag_end_rel + 1;
+        let close_rel = tail[body_start..].find("</math>");
+        let Some(close_rel) = close_rel else {
+            out.push_str(tail);
+            return (out, fragments);
+        };
+        let body = &tail[body_start..body_start + close_rel];
+        let after = &tail[body_start + close_rel + "</math>".len()..];
+
+        let latex = extract_alttext(open_tag).or_else(|| extract_annotation(body));
+        match latex {
+            Some(tex) if !tex.is_empty() => {
+                let fragment = if open_tag.contains("display=\"block\"") {
+                    format!("$${tex}$$")
+                } else {
+                    format!("${tex}$")
+                };
+                out.push_str(&format!("ALCHEMIZEMATH{}Z", fragments.len()));
+                fragments.push(fragment);
+            }
+            _ => {
+                out.push_str(&strip_tags(body));
+            }
+        }
+        rest = after;
+    }
+}
+
+/// Swap `ALCHEMIZEMATH{i}Z` placeholders back to their LaTeX fragments.
+pub fn restore_math(markdown: &str, fragments: &[String]) -> String {
+    let mut out = markdown.to_string();
+    for (i, fragment) in fragments.iter().enumerate() {
+        let placeholder = format!("ALCHEMIZEMATH{i}Z");
+        out = out.replace(&placeholder, fragment);
+    }
+    out
+}
+
+/// Read `alttext="…"` from the open tag, unescaping HTML entities.
+fn extract_alttext(open_tag: &str) -> Option<String> {
+    let idx = open_tag.find("alttext=")?;
+    let after = &open_tag[idx + "alttext=".len()..];
+    let quote = after.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let end = after[1..].find(quote)? + 1;
+    Some(unescape_entities(&after[1..end]))
+}
+
+/// Read the `<annotation encoding="application/x-tex">…</annotation>` body.
+fn extract_annotation(body: &str) -> Option<String> {
+    let start = body.find("encoding=\"application/x-tex\"")?;
+    let tag_open_end = body[start..].find('>')? + start;
+    let content = &body[tag_open_end + 1..];
+    let end = content.find("</annotation>")?;
+    Some(unescape_entities(&content[..end]))
+}
+
+/// Strip tags from a fragment, keeping text content.
+fn strip_tags(fragment: &str) -> String {
+    let mut out = String::new();
+    let mut rest = fragment;
+    while let Some(lt) = rest.find('<') {
+        out.push_str(&rest[..lt]);
+        match rest[lt..].find('>') {
+            Some(gt) => rest = &rest[lt + gt + 1..],
+            None => {
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Unescape the common XML entities found inside alttext payloads.
+fn unescape_entities(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
 #[async_trait]
 impl Converter for HtmlConverter {
     fn name(&self) -> &'static str {
@@ -49,10 +159,17 @@ impl Converter for HtmlConverter {
             AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}"))
         })?;
 
+        // LaTeXML-style math must survive as LaTeX: extract before htmd
+        // would flatten the element tree, and restore after — htmd escapes
+        // backslashes inside `$…$`, so the LaTeX travels as a placeholder.
+        let (preprocessed, fragments) = preprocess_math(&html);
+
         let markdown = self
             .converter
-            .convert(&html)
+            .convert(&preprocessed)
             .map_err(|e| AlchemizeError::other(format!("HTML conversion failed: {e}")))?;
+
+        let markdown = restore_math(&markdown, &fragments);
 
         let markdown = if markdown.trim().is_empty() {
             "*HTML document contains no extractable content.*\n".to_string()
@@ -119,5 +236,76 @@ mod tests {
         );
         let result = converter.convert(input).await.unwrap();
         assert!(result.markdown.contains("no extractable content"));
+    }
+
+    // -- LaTeXML math preprocessing -------------------------------------------
+
+    #[test]
+    fn math_alttext_inline_becomes_dollar() {
+        let html = r#"<p>value <math alttext="x+y" display="inline"><mi>x</mi></math> here</p>"#;
+        let (out, fragments) = preprocess_math(html);
+        assert!(out.contains("ALCHEMIZEMATH0Z"), "placeholder present: {out}");
+        assert!(!out.contains("<math"));
+        let restored = restore_math(&out, &fragments);
+        assert!(restored.contains("$x+y$"), "got: {restored}");
+    }
+
+    #[test]
+    fn math_block_becomes_double_dollar() {
+        let html = r#"<math alttext="E=mc^2" display="block"><mi>E</mi></math>"#;
+        let (out, fragments) = preprocess_math(html);
+        let restored = restore_math(&out, &fragments);
+        assert!(restored.contains("$$E=mc^2$$"), "got: {restored}");
+    }
+
+    #[test]
+    fn math_annotation_fallback_when_no_alttext() {
+        let html = r#"<math><semantics><mi>x</mi><annotation encoding="application/x-tex">x^2</annotation></semantics></math>"#;
+        let (out, fragments) = preprocess_math(html);
+        let restored = restore_math(&out, &fragments);
+        assert!(restored.contains("$x^2$"), "got: {restored}");
+    }
+
+    #[test]
+    fn math_alttext_takes_priority_over_annotation() {
+        let html = r#"<math alttext="\alpha"><annotation encoding="application/x-tex">\beta</annotation></math>"#;
+        let (out, fragments) = preprocess_math(html);
+        let restored = restore_math(&out, &fragments);
+        assert!(restored.contains(r"$\alpha$"));
+        assert!(!restored.contains("beta"));
+    }
+
+    #[test]
+    fn math_entities_unescaped() {
+        let html = r#"<math alttext="a &lt; b"><mi>a</mi></math>"#;
+        let (out, fragments) = preprocess_math(html);
+        let restored = restore_math(&out, &fragments);
+        assert!(restored.contains("$a < b$"), "got: {restored}");
+    }
+
+    #[test]
+    fn math_without_latex_falls_back_to_text() {
+        let html = r#"<math><mi>E</mi><mo>=</mo><mn>2</mn></math>"#;
+        let (out, _) = preprocess_math(html);
+        assert!(!out.contains("<math"));
+        assert!(out.contains("E"), "plain text kept, got: {out}");
+    }
+
+    #[test]
+    fn math_unterminated_left_untouched() {
+        let html = "<math alttext=\"x\">";
+        let (out, fragments) = preprocess_math(html);
+        assert!(out.contains("<math"), "unterminated left untouched");
+        assert!(fragments.is_empty());
+    }
+
+    #[tokio::test]
+    async fn convert_latexml_document_end_to_end() {
+        let converter = HtmlConverter::new();
+        let html = r#"<html><body><p>Given <math alttext="\alpha+\beta" display="inline"><mi>α</mi></math> we get</p><math alttext="c^2 = a^2 + b^2" display="block"><mi>c</mi></math></body></html>"#;
+        let input = Input::bytes(html.as_bytes().to_vec(), "paper.html");
+        let result = converter.convert(input).await.unwrap();
+        assert!(result.markdown.contains(r"$\alpha+\beta$"), "md: {}", result.markdown);
+        assert!(result.markdown.contains("$$c^2 = a^2 + b^2$$"), "md: {}", result.markdown);
     }
 }
