@@ -64,9 +64,11 @@ impl Converter for PdfConverter {
             markdown = "*PDF contains no extractable text.*\n".to_string();
         }
 
+        let warnings = crate::domain::latex_validate::validate_markdown_math(&markdown);
         let metadata = serde_json::json!({
             "page_count": page_count,
             "source_format": "pdf",
+            "latex_warnings": warnings,
         });
 
         Ok(ConvertResult::with_metadata(markdown, ContentType::Document, metadata)

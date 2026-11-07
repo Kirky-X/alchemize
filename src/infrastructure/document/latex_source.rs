@@ -55,10 +55,11 @@ impl Converter for LatexSourceConverter {
 
         if !self.pandoc_available {
             let markdown = format!("```latex\n{latex}\n```\n");
+            let warnings = crate::domain::latex_validate::validate_markdown_math(&markdown);
             return Ok(ConvertResult::with_metadata(
                 markdown,
                 ContentType::Document,
-                serde_json::json!({"source_format": "tex", "engine": "fenced-fallback"}),
+                serde_json::json!({"source_format": "tex", "engine": "fenced-fallback", "latex_warnings": warnings}),
             )
             .with_quality(ConversionQuality::LocalFallback));
         }
@@ -81,10 +82,12 @@ impl Converter for LatexSourceConverter {
         let mut assets = Vec::new();
         collect_media_files(media_dir.path(), "", &mut assets);
 
+        let warnings = crate::domain::latex_validate::validate_markdown_math(&markdown);
         let metadata = serde_json::json!({
             "source_format": "tex",
             "engine": "pandoc",
             "asset_count": assets.len(),
+            "latex_warnings": warnings,
         });
 
         let mut result = ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
