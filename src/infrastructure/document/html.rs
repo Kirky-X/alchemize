@@ -33,6 +33,42 @@ impl Default for HtmlConverter {
     }
 }
 
+/// Remove `<style>…</style>` and `<script>…</script>` blocks (case-insensitive
+/// open/close tags). Their content is not prose and must not reach the body.
+pub fn strip_style_and_script(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    loop {
+        let lower = rest.to_ascii_lowercase();
+        let style = lower.find("<style");
+        let script = lower.find("<script");
+        let next = match (style, script) {
+            (None, None) => {
+                out.push_str(rest);
+                return out;
+            }
+            (Some(a), None) => Some((a, "style")),
+            (None, Some(b)) => Some((b, "script")),
+            (Some(a), Some(b)) => Some(if a < b { (a, "style") } else { (b, "script") }),
+        };
+        let (pos, tag) = next.expect("tag kind");
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos..];
+        let lower_after = after.to_ascii_lowercase();
+        let close = format!("</{tag}");
+        match lower_after.find(&close) {
+            Some(rel) => {
+                let tail = &after[rel..];
+                match tail.find('>') {
+                    Some(gt) => rest = &tail[gt + 1..],
+                    None => return out,
+                }
+            }
+            None => return out,
+        }
+    }
+}
+
 /// Replace every `<math>…</math>` element with an alphanumeric placeholder,
 /// returning the rewritten HTML plus the LaTeX fragments (delimiter included)
 /// keyed by placeholder index.
@@ -160,6 +196,10 @@ impl Converter for HtmlConverter {
             AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}"))
         })?;
 
+        // Real-world HTML carries <style>/<script> whose text would leak
+        // into the body; strip them before any other processing.
+        let html = strip_style_and_script(&html);
+
         // LaTeXML-style math must survive as LaTeX: extract before htmd
         // would flatten the element tree, and restore after — htmd escapes
         // backslashes inside `$…$`, so the LaTeX travels as a placeholder.
@@ -237,6 +277,32 @@ mod tests {
         );
         let result = converter.convert(input).await.unwrap();
         assert!(result.markdown.contains("no extractable content"));
+    }
+
+    // -- style/script stripping -----------------------------------------------
+
+    #[test]
+    fn style_block_removed_from_body() {
+        let html = "<html><head><style>:root { --x: red; }</style></head><body><p>Real prose</p></body></html>";
+        let out = strip_style_and_script(html);
+        assert!(!out.contains("--x: red"));
+        assert!(out.contains("Real prose"));
+    }
+
+    #[test]
+    fn script_block_removed_case_insensitive() {
+        let html = "<SCRIPT>alert(1)</SCRIPT><p>text</p>";
+        let out = strip_style_and_script(html);
+        assert!(!out.contains("alert"));
+        assert!(out.contains("text"));
+    }
+
+    #[test]
+    fn unterminated_style_keeps_prefix() {
+        let html = "before<style>unclosed";
+        let out = strip_style_and_script(html);
+        assert!(out.contains("before"));
+        assert!(!out.contains("unclosed"));
     }
 
     // -- LaTeXML math preprocessing -------------------------------------------
