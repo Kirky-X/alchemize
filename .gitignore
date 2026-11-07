@@ -1,1 +1,4 @@
 /target
+
+# specmark 规格驱动工作目录（归档保留在本地，不入 git）
+specmark/
