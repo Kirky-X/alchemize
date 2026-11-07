@@ -73,8 +73,10 @@ impl Converter for PdfConverter {
             "latex_warnings": warnings,
         });
 
-        Ok(ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
-            .with_quality(ConversionQuality::LocalFallback))
+        Ok(
+            ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
+                .with_quality(ConversionQuality::LocalFallback),
+        )
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -194,7 +196,10 @@ fn starts_with_section_number(s: &str) -> bool {
     rest = &rest[digits.len()..];
     // zero or more (.digits) groups
     while let Some(stripped) = rest.strip_prefix('.') {
-        let group: String = stripped.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let group: String = stripped
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         if group.is_empty() {
             return false;
         }
@@ -293,7 +298,10 @@ mod tests {
         let out = cleanup_text(text);
         assert!(out.contains("some text"));
         assert!(!out.contains("\n12\n"));
-        assert!(out.contains("12345"), "5-digit numbers are not page numbers");
+        assert!(
+            out.contains("12345"),
+            "5-digit numbers are not page numbers"
+        );
     }
 
     #[test]
@@ -316,12 +324,17 @@ mod tests {
 
     #[test]
     fn toc_block_removed_when_sustained_run() {
-        let toc: Vec<String> = (1..=12).map(|i| format!("{i} Section Number {i}")).collect();
+        let toc: Vec<String> = (1..=12)
+            .map(|i| format!("{i} Section Number {i}"))
+            .collect();
         let mut text = String::from("Paper Title\n\n");
         text.push_str(&toc.join("\n"));
         text.push_str("\n\n1 Introduction\nBody content here.");
         let out = remove_toc_block(&text);
-        assert!(!out.contains("Section Number 5"), "TOC entries must be removed");
+        assert!(
+            !out.contains("Section Number 5"),
+            "TOC entries must be removed"
+        );
         assert!(out.contains("Body content"));
     }
 
@@ -347,7 +360,10 @@ mod tests {
         // Python semantics: ^\d+(\.\d+)+ requires at least one dot group.
         assert!(is_bare_section_number("3.2.1"));
         assert!(is_bare_section_number("3.2"));
-        assert!(!is_bare_section_number("8"), "bare integer is NOT a TOC line");
+        assert!(
+            !is_bare_section_number("8"),
+            "bare integer is NOT a TOC line"
+        );
         assert!(!is_bare_section_number("3.2.1 "));
         assert!(!is_bare_section_number("3.a"));
     }

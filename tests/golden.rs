@@ -31,42 +31,66 @@ async fn golden(name: &str, ext: &str) -> String {
 
 #[tokio::test]
 async fn golden_txt() {
-    assert_eq!(golden("txt", "txt").await, include_str!("fixtures/txt/expected.md"));
+    assert_eq!(
+        golden("txt", "txt").await,
+        include_str!("fixtures/txt/expected.md")
+    );
 }
 
 #[tokio::test]
 async fn golden_md_passthrough() {
-    assert_eq!(golden("md", "md").await, include_str!("fixtures/md/expected.md"));
+    assert_eq!(
+        golden("md", "md").await,
+        include_str!("fixtures/md/expected.md")
+    );
 }
 
 #[tokio::test]
 async fn golden_py_fenced() {
-    assert_eq!(golden("py", "py").await, include_str!("fixtures/py/expected.md"));
+    assert_eq!(
+        golden("py", "py").await,
+        include_str!("fixtures/py/expected.md")
+    );
 }
 
 #[tokio::test]
 async fn golden_yaml_fenced() {
-    assert_eq!(golden("yaml", "yaml").await, include_str!("fixtures/yaml/expected.md"));
+    assert_eq!(
+        golden("yaml", "yaml").await,
+        include_str!("fixtures/yaml/expected.md")
+    );
 }
 
 #[tokio::test]
 async fn golden_csv_table() {
-    assert_eq!(golden("csv", "csv").await, include_str!("fixtures/csv/expected.md"));
+    assert_eq!(
+        golden("csv", "csv").await,
+        include_str!("fixtures/csv/expected.md")
+    );
 }
 
 #[tokio::test]
 async fn golden_tsv_table() {
-    assert_eq!(golden("tsv", "tsv").await, include_str!("fixtures/tsv/expected.md"));
+    assert_eq!(
+        golden("tsv", "tsv").await,
+        include_str!("fixtures/tsv/expected.md")
+    );
 }
 
 #[tokio::test]
 async fn golden_srt() {
-    assert_eq!(golden("srt", "srt").await, include_str!("fixtures/srt/expected.md"));
+    assert_eq!(
+        golden("srt", "srt").await,
+        include_str!("fixtures/srt/expected.md")
+    );
 }
 
 #[tokio::test]
 async fn golden_vtt() {
-    assert_eq!(golden("vtt", "vtt").await, include_str!("fixtures/vtt/expected.md"));
+    assert_eq!(
+        golden("vtt", "vtt").await,
+        include_str!("fixtures/vtt/expected.md")
+    );
 }
 
 #[tokio::test]

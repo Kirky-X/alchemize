@@ -113,7 +113,10 @@ fn check_ipv4_ssrf(octets: [u8; 4], host: &str, label: &str) -> Result<(), Alche
 /// 3. **Private IPv4**: RFC1918 ranges (10/8, 172.16/12, 192.168/16) rejected
 /// 4. **Link-local**: 169.254/16 rejected
 /// 5. **Hostname allowlist**: Optional, defaults to MinerU official domains
-pub fn validate_file_url(raw: &str, allowlist: &[&str]) -> Result<ValidatedFileUrl, AlchemizeError> {
+pub fn validate_file_url(
+    raw: &str,
+    allowlist: &[&str],
+) -> Result<ValidatedFileUrl, AlchemizeError> {
     let parsed = reqwest::Url::parse(raw).map_err(|e| AlchemizeError::SecurityViolation {
         kind: SecurityViolationType::InvalidScheme,
         message: format!("invalid URL '{raw}': {e}"),

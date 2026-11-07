@@ -10,19 +10,19 @@
 //!
 //! Limits: max 200MB, max 200 pages.
 
-use async_trait::async_trait;
 use crate::application::builder::MineruConfig;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use super::http_limit::{
-    read_limited_json, read_limited_text, MAX_ERROR_RESPONSE_BYTES, MAX_POLL_RESPONSE_BYTES,
-    MAX_RESULT_RESPONSE_BYTES, MAX_SUBMIT_RESPONSE_BYTES,
+    MAX_ERROR_RESPONSE_BYTES, MAX_POLL_RESPONSE_BYTES, MAX_RESULT_RESPONSE_BYTES,
+    MAX_SUBMIT_RESPONSE_BYTES, read_limited_json, read_limited_text,
 };
 use super::types::DEFAULT_TIMEOUT_SECS;
-use super::validated_url::{validate_base_url, validate_file_url, DEFAULT_MINERU_ALLOWLIST};
+use super::validated_url::{DEFAULT_MINERU_ALLOWLIST, validate_base_url, validate_file_url};
 use super::{MineruClient, ParseOptions, TaskId, TaskStatus, ValidatedFileUrl};
 use crate::domain::error::AlchemizeError;
 
@@ -206,7 +206,9 @@ impl MineruPrecisionClient {
             read_limited_json(resp, MAX_SUBMIT_RESPONSE_BYTES)
                 .await
                 .map_err(|e| {
-                    AlchemizeError::MineruConversion(format!("failed to parse MinerU response: {e}"))
+                    AlchemizeError::MineruConversion(format!(
+                        "failed to parse MinerU response: {e}"
+                    ))
                 })?;
 
         info!(task_id = %result.task_id, "MinerU Precision task submitted");
@@ -245,7 +247,9 @@ impl MineruPrecisionClient {
         let result: PrecisionTaskStatusResponse = read_limited_json(resp, MAX_POLL_RESPONSE_BYTES)
             .await
             .map_err(|e| {
-                AlchemizeError::MineruConversion(format!("failed to parse MinerU poll response: {e}"))
+                AlchemizeError::MineruConversion(format!(
+                    "failed to parse MinerU poll response: {e}"
+                ))
             })?;
 
         let status = match result.status.as_str() {
@@ -287,7 +291,9 @@ impl MineruPrecisionClient {
             .bearer_auth(&self.token)
             .send()
             .await
-            .map_err(|e| AlchemizeError::MineruConversion(format!("failed to fetch result: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::MineruConversion(format!("failed to fetch result: {e}"))
+            })?;
 
         if !resp.status().is_success() {
             return Err(AlchemizeError::MineruConversion(format!(

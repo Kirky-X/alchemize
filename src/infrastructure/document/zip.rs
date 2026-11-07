@@ -134,8 +134,8 @@ fn extract_zip_contents(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, Alchemiz
 mod tests {
     use super::*;
     use std::io::Write;
-    use zip::write::SimpleFileOptions;
     use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
 
     fn create_zip_bytes(files: &[(&str, &[u8])]) -> Vec<u8> {
         let buf = Cursor::new(Vec::new());
@@ -151,7 +151,9 @@ mod tests {
 
     fn registry_with_text() -> Arc<ConverterRegistry> {
         let mut registry = ConverterRegistry::new();
-        registry.register(Box::new(crate::infrastructure::document::text::TextConverter::new()));
+        registry.register(Box::new(
+            crate::infrastructure::document::text::TextConverter::new(),
+        ));
         Arc::new(registry)
     }
 
@@ -220,10 +222,7 @@ mod tests {
 
     #[test]
     fn extract_zip_contents_multiple_files() {
-        let zip_data = create_zip_bytes(&[
-            ("file1.txt", b"content1"),
-            ("file2.txt", b"content2"),
-        ]);
+        let zip_data = create_zip_bytes(&[("file1.txt", b"content1"), ("file2.txt", b"content2")]);
         let files = extract_zip_contents(&zip_data).unwrap();
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].0, "file1.txt");

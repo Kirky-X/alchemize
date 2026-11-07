@@ -59,7 +59,8 @@ impl Converter for AnydocConverter {
                 let doc = anydoc::to_document(&bytes, None)?;
                 let mut doc = doc;
                 let assets = rewrite_asset_references(&mut doc);
-                let markdown = crate::infrastructure::document::anydoc_render::render_markdown(&doc);
+                let markdown =
+                    crate::infrastructure::document::anydoc_render::render_markdown(&doc);
                 Ok::<_, anydoc::ConvertError>((markdown, assets))
             }))
         })
@@ -117,7 +118,10 @@ fn rewrite_asset_references(doc: &mut anydoc::model::Document) -> Vec<crate::dom
             let mut hasher = Sha256::new();
             hasher.update(&asset.bytes);
             let digest = hasher.finalize();
-            digest[..4].iter().map(|b| format!("{b:02x}")).collect::<String>()
+            digest[..4]
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
         };
         let ext = asset
             .media_type
@@ -146,7 +150,14 @@ fn rewrite_asset_references(doc: &mut anydoc::model::Document) -> Vec<crate::dom
         for block in blocks.iter_mut() {
             match block {
                 Block::Heading { content, .. } | Block::Paragraph(content) => {
-                    walk_inlines(content, refs, collected, doc_assets, seq_counter, reference_for);
+                    walk_inlines(
+                        content,
+                        refs,
+                        collected,
+                        doc_assets,
+                        seq_counter,
+                        reference_for,
+                    );
                 }
                 Block::List(list) => {
                     for item in list.items.iter_mut() {
@@ -177,7 +188,14 @@ fn rewrite_asset_references(doc: &mut anydoc::model::Document) -> Vec<crate::dom
                     }
                 }
                 Block::BlockQuote(nested) => {
-                    walk_blocks(nested, refs, collected, doc_assets, seq_counter, reference_for);
+                    walk_blocks(
+                        nested,
+                        refs,
+                        collected,
+                        doc_assets,
+                        seq_counter,
+                        reference_for,
+                    );
                 }
                 Block::CodeBlock { .. } | Block::Rule | Block::Math(_) => {}
             }
@@ -204,8 +222,7 @@ fn rewrite_asset_references(doc: &mut anydoc::model::Document) -> Vec<crate::dom
                             continue;
                         };
                         let reference = reference_for(doc_asset, *seq_counter);
-                        let filename =
-                            reference.trim_start_matches("images/").to_string();
+                        let filename = reference.trim_start_matches("images/").to_string();
                         collected.push(crate::domain::asset::Asset::new(
                             filename,
                             doc_asset.bytes.clone(),
@@ -217,7 +234,14 @@ fn rewrite_asset_references(doc: &mut anydoc::model::Document) -> Vec<crate::dom
                     *source = ImageSource::External(reference);
                 }
                 Inline::Link { content, .. } => {
-                    walk_inlines(content, refs, collected, doc_assets, seq_counter, reference_for);
+                    walk_inlines(
+                        content,
+                        refs,
+                        collected,
+                        doc_assets,
+                        seq_counter,
+                        reference_for,
+                    );
                 }
                 _ => {}
             }

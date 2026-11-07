@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 
 use async_trait::async_trait;
 
-use crate::application::ports::{Availability, Transcript, TranscribeProvider, TranscriptSegment};
+use crate::application::ports::{Availability, TranscribeProvider, Transcript, TranscriptSegment};
 use crate::domain::error::AlchemizeError;
 
 /// Environment variable that names the transcribe model bundle directory.
@@ -61,7 +61,9 @@ fn ort_dylib_available() -> bool {
     // vecboost reads ORT_DYLIB_PATH itself; a missing env var surfaces as an
     // error on session open, which we translate to Unavailable below. Here
     // we only pre-check the obvious absence for a clearer reason string.
-    std::env::var("ORT_DYLIB_PATH").map(|v| !v.is_empty()).unwrap_or(false)
+    std::env::var("ORT_DYLIB_PATH")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
 }
 
 /// Transcriber backed by the local vecboost ONNX engine.
@@ -122,8 +124,9 @@ impl TranscribeProvider for VecboostTranscriber {
         .await
         .map_err(|e| AlchemizeError::AudioUnavailable(format!("vecboost task panicked: {e}")))?;
 
-        result
-            .map_err(|e| AlchemizeError::AudioUnavailable(format!("vecboost transcription failed: {e}")))
+        result.map_err(|e| {
+            AlchemizeError::AudioUnavailable(format!("vecboost transcription failed: {e}"))
+        })
     }
 
     fn availability(&self) -> Availability {

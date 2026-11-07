@@ -14,7 +14,6 @@ use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 
-
 /// Converts Jupyter Notebook (.ipynb) files to markdown.
 ///
 /// Each cell is rendered with appropriate markers:
@@ -48,8 +47,9 @@ impl Converter for IpynbConverter {
             .await
             .map_err(|e| AlchemizeError::Other(format!("failed to read notebook input: {e}")))?;
 
-        let json = String::from_utf8(bytes)
-            .map_err(|e| AlchemizeError::Other(format!("notebook content is not valid UTF-8: {e}")))?;
+        let json = String::from_utf8(bytes).map_err(|e| {
+            AlchemizeError::Other(format!("notebook content is not valid UTF-8: {e}"))
+        })?;
 
         let notebook: Notebook = serde_json::from_str(&json)
             .map_err(|e| AlchemizeError::Other(format!("failed to parse notebook JSON: {e}")))?;

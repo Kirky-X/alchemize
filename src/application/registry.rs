@@ -108,7 +108,10 @@ impl ConverterRegistry {
                     reason = %reason,
                     "skipping unavailable converter"
                 );
-                attempts.push((converter.name().to_string(), format!("unavailable: {reason}")));
+                attempts.push((
+                    converter.name().to_string(),
+                    format!("unavailable: {reason}"),
+                ));
                 continue;
             }
             debug!(
@@ -246,14 +249,22 @@ mod tests {
     async fn convert_pref_tries_named_converter_first() {
         let mut registry = ConverterRegistry::new();
         registry.register(stub(&["pdf"], 20, "primary", ConversionQuality::Api));
-        registry.register(stub(&["pdf"], 5, "fallback", ConversionQuality::LocalFallback));
+        registry.register(stub(
+            &["pdf"],
+            5,
+            "fallback",
+            ConversionQuality::LocalFallback,
+        ));
         let input = Input::bytes(vec![], "t.pdf");
 
         let default = registry.convert(&input).await.unwrap();
         assert_eq!(default.markdown, "primary");
         assert_eq!(default.metadata["converter"], "primary");
 
-        let preferred = registry.convert_pref(&input, Some("fallback")).await.unwrap();
+        let preferred = registry
+            .convert_pref(&input, Some("fallback"))
+            .await
+            .unwrap();
         assert_eq!(preferred.markdown, "fallback");
         assert_eq!(preferred.metadata["converter"], "fallback");
     }
@@ -285,7 +296,12 @@ mod tests {
     #[tokio::test]
     async fn convert_uses_highest_priority() {
         let mut registry = ConverterRegistry::new();
-        registry.register(stub(&["pdf"], 5, "fallback", ConversionQuality::LocalFallback));
+        registry.register(stub(
+            &["pdf"],
+            5,
+            "fallback",
+            ConversionQuality::LocalFallback,
+        ));
         registry.register(stub(&["pdf"], 20, "primary", ConversionQuality::Api));
 
         let input = Input::bytes(vec![], "test.pdf");
@@ -311,7 +327,12 @@ mod tests {
         }
 
         let mut registry = ConverterRegistry::new();
-        registry.register(stub(&["pdf"], 10, "fallback", ConversionQuality::LocalFallback));
+        registry.register(stub(
+            &["pdf"],
+            10,
+            "fallback",
+            ConversionQuality::LocalFallback,
+        ));
         registry.register(Box::new(FailConverter));
 
         let input = Input::bytes(vec![], "test.pdf");
@@ -344,7 +365,12 @@ mod tests {
         }
 
         let mut registry = ConverterRegistry::new();
-        registry.register(stub(&["pdf"], 10, "fallback", ConversionQuality::LocalFallback));
+        registry.register(stub(
+            &["pdf"],
+            10,
+            "fallback",
+            ConversionQuality::LocalFallback,
+        ));
         registry.register(Box::new(UnavailableConverter));
 
         let input = Input::bytes(vec![], "test.pdf");

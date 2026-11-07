@@ -13,6 +13,4 @@ pub use asset::{Asset, AssetRole, AssetSink, DirSink, InlineSink};
 pub use error::AlchemizeError;
 pub use input::{Input, InputFormat, detect_format, ext_to_format};
 pub use latex_validate::validate_markdown_math;
-pub use result::{
-    ContentType, ConversionQuality, ConvertResult, DetailLevel, VideoProcessingMode,
-};
+pub use result::{ContentType, ConversionQuality, ConvertResult, DetailLevel, VideoProcessingMode};

@@ -107,7 +107,11 @@ mod tests {
         let ass = "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello ASS\n";
         let input = Input::bytes(ass.as_bytes().to_vec(), "sample.ass");
         let result = SubtitleConverter::new().convert(input).await.unwrap();
-        assert!(result.markdown.contains("Hello ASS"), "md: {}", result.markdown);
+        assert!(
+            result.markdown.contains("Hello ASS"),
+            "md: {}",
+            result.markdown
+        );
     }
 
     #[tokio::test]

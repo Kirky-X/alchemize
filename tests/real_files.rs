@@ -35,7 +35,10 @@ async fn convert(name: &str) -> (String, serde_json::Value) {
 async fn real_pdf_extracts_license_text() {
     let (md, meta) = convert("real.pdf").await;
     let chars = md.chars().count();
-    assert!(chars > 2000, "extracted only {chars} chars from a 100KB PDF");
+    assert!(
+        chars > 2000,
+        "extracted only {chars} chars from a 100KB PDF"
+    );
     // Real license documents carry these tokens (case-insensitive check).
     let lower = md.to_lowercase();
     assert!(
@@ -44,9 +47,16 @@ async fn real_pdf_extracts_license_text() {
         &md.chars().take(500).collect::<String>()
     );
     // Page structure from the local extractor.
-    assert!(md.contains("## Page 1"), "missing page markers: {}", &md[..md.len().min(300)]);
+    assert!(
+        md.contains("## Page 1"),
+        "missing page markers: {}",
+        &md[..md.len().min(300)]
+    );
     let pages = meta["page_count"].as_u64().unwrap_or(0);
-    assert!(pages >= 3, "expected a multi-page document, got {pages} pages");
+    assert!(
+        pages >= 3,
+        "expected a multi-page document, got {pages} pages"
+    );
 }
 
 // -- DOCX (real 英语专业四八级词汇表 Word document) ---------------------------
@@ -55,7 +65,10 @@ async fn real_pdf_extracts_license_text() {
 async fn real_docx_extracts_wordlist() {
     let (md, _) = convert("real.docx").await;
     let chars = md.chars().count();
-    assert!(chars > 5000, "extracted only {chars} chars from a 900KB DOCX");
+    assert!(
+        chars > 5000,
+        "extracted only {chars} chars from a 900KB DOCX"
+    );
     // A vocabulary list: many alphabetic runs, some long lines.
     let words = md.split_whitespace().count();
     assert!(words > 500, "expected a dense wordlist, got {words} words");
@@ -70,7 +83,10 @@ async fn real_xlsx_extracts_tables() {
     let (md, meta) = convert("real.xlsx").await;
     assert!(md.contains('|'), "no markdown table emitted");
     let rows = md.lines().filter(|l| l.starts_with('|')).count();
-    assert!(rows > 20, "expected a populated lexicon table, got {rows} table lines");
+    assert!(
+        rows > 20,
+        "expected a populated lexicon table, got {rows} table lines"
+    );
     // Engine-sensitive metadata: the native calamine engine reports
     // total_rows; anydoc (higher priority when the feature is on) reports
     // its own key set. Assert on the markdown itself either way.
@@ -103,7 +119,11 @@ async fn real_png_degrades_with_metadata() {
 #[tokio::test]
 async fn real_html_extracts_license_body_without_css() {
     let (md, _) = convert("real.html").await;
-    assert!(md.chars().count() > 1000, "html body too short: {}", md.len());
+    assert!(
+        md.chars().count() > 1000,
+        "html body too short: {}",
+        md.len()
+    );
     let lower = md.to_lowercase();
     assert!(
         lower.contains("licen") || lower.contains("apple"),
@@ -128,7 +148,10 @@ async fn real_rtf_via_anydoc() {
     assert!(md.chars().count() > 500, "rtf body too short");
     assert_eq!(meta["converter"], "anydoc", "rtf must route to anydoc");
     let lower = md.to_lowercase();
-    assert!(lower.contains("licen") || lower.contains("apple"), "rtf vocabulary missing");
+    assert!(
+        lower.contains("licen") || lower.contains("apple"),
+        "rtf vocabulary missing"
+    );
 }
 
 #[cfg(not(feature = "anydoc"))]
@@ -138,10 +161,7 @@ async fn real_rtf_without_anydoc_reports_unsupported() {
     let alch = AlchemizeBuilder::new().build();
     let result = alch.convert(&Input::Path(path)).await;
     assert!(
-        matches!(
-            result,
-            Err(alchemize::AlchemizeError::UnsupportedFormat(_))
-        ),
+        matches!(result, Err(alchemize::AlchemizeError::UnsupportedFormat(_))),
         "default build has no rtf engine, expected UnsupportedFormat"
     );
 }

@@ -8,9 +8,9 @@ use std::sync::Arc;
 use crate::application::ports::{TranscribeProvider, VisionProvider};
 use crate::application::registry::ConverterRegistry;
 use crate::domain::asset::{AssetSink, DirSink, InlineSink};
+use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ConvertResult, VideoProcessingMode};
-use crate::domain::error::AlchemizeError;
 
 /// Configuration for MinerU remote conversion (local + cloud endpoints).
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -50,7 +50,11 @@ impl std::fmt::Debug for MineruConfig {
             .field("precision_base_url", &self.precision_base_url)
             .field(
                 "api_token",
-                &if self.api_token.is_some() { "<redacted>" } else { "None" },
+                &if self.api_token.is_some() {
+                    "<redacted>"
+                } else {
+                    "None"
+                },
             )
             .field("timeout_secs", &self.timeout_secs)
             .finish()
@@ -67,7 +71,11 @@ impl std::fmt::Display for MineruConfig {
             self.agent_base_url,
             self.precision_base_url,
             self.timeout_secs,
-            if self.api_token.is_some() { "<redacted>" } else { "none" }
+            if self.api_token.is_some() {
+                "<redacted>"
+            } else {
+                "none"
+            }
         )
     }
 }
@@ -256,8 +264,9 @@ impl AlchemizeBuilder {
         // Shared registry: the facade and the zip converter (nested
         // conversion) use the same engine set; zip is not a member itself.
         let registry = std::sync::Arc::new(registry);
-        let zip =
-            crate::infrastructure::document::ZipConverter::with_arc(std::sync::Arc::clone(&registry));
+        let zip = crate::infrastructure::document::ZipConverter::with_arc(std::sync::Arc::clone(
+            &registry,
+        ));
 
         Alchemize {
             registry,
@@ -319,14 +328,14 @@ mod tests {
         // Without with_mineru, no engine name contains "mineru" —
         // regardless of the cargo feature flag.
         let alch = AlchemizeBuilder::new().build();
-        assert!(alch
-            .engines()
-            .iter()
-            .all(|name| !name.contains("mineru")));
+        assert!(alch.engines().iter().all(|name| !name.contains("mineru")));
     }
 
     #[test]
     fn video_mode_default_is_audio_only() {
-        assert_eq!(VideoProcessingMode::default(), VideoProcessingMode::AudioOnly);
+        assert_eq!(
+            VideoProcessingMode::default(),
+            VideoProcessingMode::AudioOnly
+        );
     }
 }

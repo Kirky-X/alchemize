@@ -194,9 +194,8 @@ impl Converter for HtmlConverter {
             .await
             .map_err(|e| AlchemizeError::other(format!("failed to read HTML input: {e}")))?;
 
-        let html = String::from_utf8(bytes).map_err(|e| {
-            AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}"))
-        })?;
+        let html = String::from_utf8(bytes)
+            .map_err(|e| AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}")))?;
 
         // Real-world HTML carries <style>/<script> whose text would leak
         // into the body; strip them before any other processing.
@@ -243,7 +242,10 @@ mod tests {
 
     #[test]
     fn supported_extensions() {
-        assert_eq!(HtmlConverter::new().supported_extensions(), &["html", "htm"]);
+        assert_eq!(
+            HtmlConverter::new().supported_extensions(),
+            &["html", "htm"]
+        );
     }
 
     #[tokio::test]
@@ -262,7 +264,9 @@ mod tests {
     async fn convert_html_with_list() {
         let converter = HtmlConverter::new();
         let input = Input::bytes(
-            "<ul><li>Item 1</li><li>Item 2</li></ul>".as_bytes().to_vec(),
+            "<ul><li>Item 1</li><li>Item 2</li></ul>"
+                .as_bytes()
+                .to_vec(),
             "test.html",
         );
         let result = converter.convert(input).await.unwrap();
@@ -313,7 +317,10 @@ mod tests {
     fn math_alttext_inline_becomes_dollar() {
         let html = r#"<p>value <math alttext="x+y" display="inline"><mi>x</mi></math> here</p>"#;
         let (out, fragments) = preprocess_math(html);
-        assert!(out.contains("ALCHEMIZEMATH0Z"), "placeholder present: {out}");
+        assert!(
+            out.contains("ALCHEMIZEMATH0Z"),
+            "placeholder present: {out}"
+        );
         assert!(!out.contains("<math"));
         let restored = restore_math(&out, &fragments);
         assert!(restored.contains("$x+y$"), "got: {restored}");
@@ -374,7 +381,15 @@ mod tests {
         let html = r#"<html><body><p>Given <math alttext="\alpha+\beta" display="inline"><mi>α</mi></math> we get</p><math alttext="c^2 = a^2 + b^2" display="block"><mi>c</mi></math></body></html>"#;
         let input = Input::bytes(html.as_bytes().to_vec(), "paper.html");
         let result = converter.convert(input).await.unwrap();
-        assert!(result.markdown.contains(r"$\alpha+\beta$"), "md: {}", result.markdown);
-        assert!(result.markdown.contains("$$c^2 = a^2 + b^2$$"), "md: {}", result.markdown);
+        assert!(
+            result.markdown.contains(r"$\alpha+\beta$"),
+            "md: {}",
+            result.markdown
+        );
+        assert!(
+            result.markdown.contains("$$c^2 = a^2 + b^2$$"),
+            "md: {}",
+            result.markdown
+        );
     }
 }

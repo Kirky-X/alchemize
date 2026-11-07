@@ -5,7 +5,7 @@
 
 use super::factory::create_mineru_client;
 use super::types::{ParseOptions, TaskId, TaskStatus};
-use super::validated_url::{validate_file_url, DEFAULT_MINERU_ALLOWLIST};
+use super::validated_url::{DEFAULT_MINERU_ALLOWLIST, validate_file_url};
 use crate::domain::error::{AlchemizeError, SecurityViolationType};
 
 #[test]

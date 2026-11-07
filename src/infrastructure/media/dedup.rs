@@ -313,13 +313,19 @@ mod boost_tests {
         let mut d = FrameDeduplicator::new();
         let frame = textured(8, 8, 3);
         assert!(d.should_process(&frame, 8, 8));
-        assert!(!d.should_process(&frame, 8, 8), "identical frame must dedup");
+        assert!(
+            !d.should_process(&frame, 8, 8),
+            "identical frame must dedup"
+        );
     }
 
     #[test]
     fn should_process_rejects_low_entropy_flat() {
         let mut d = FrameDeduplicator::new();
-        assert!(!d.should_process(&flat(8, 8, 7), 8, 8), "flat frame is low info");
+        assert!(
+            !d.should_process(&flat(8, 8, 7), 8, 8),
+            "flat frame is low info"
+        );
     }
 
     #[test]

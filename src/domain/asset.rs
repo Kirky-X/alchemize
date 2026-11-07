@@ -213,13 +213,15 @@ mod tests {
     #[test]
     fn inline_sink_mime_by_extension() {
         let mut sink = InlineSink;
-        assert!(sink
-            .put(Asset::new("a.svg", vec![]))
-            .unwrap()
-            .starts_with("data:image/svg+xml"));
-        assert!(sink
-            .put(Asset::new("a.bin", vec![]))
-            .unwrap()
-            .starts_with("data:application/octet-stream"));
+        assert!(
+            sink.put(Asset::new("a.svg", vec![]))
+                .unwrap()
+                .starts_with("data:image/svg+xml")
+        );
+        assert!(
+            sink.put(Asset::new("a.bin", vec![]))
+                .unwrap()
+                .starts_with("data:application/octet-stream")
+        );
     }
 }

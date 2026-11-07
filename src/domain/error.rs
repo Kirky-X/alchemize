@@ -153,24 +153,36 @@ mod tests {
 
     #[test]
     fn error_display_domain_variants() {
-        assert!(AlchemizeError::Pdf("bad".into())
-            .to_string()
-            .contains("PDF"));
-        assert!(AlchemizeError::Zip("bad".into())
-            .to_string()
-            .contains("ZIP"));
-        assert!(AlchemizeError::Xml("bad".into())
-            .to_string()
-            .contains("XML"));
-        assert!(AlchemizeError::VideoUnavailable("no ffmpeg".into())
-            .to_string()
-            .contains("video processing"));
-        assert!(AlchemizeError::AudioUnavailable("no engine".into())
-            .to_string()
-            .contains("audio transcription"));
-        assert!(AlchemizeError::MineruUnavailable("refused".into())
-            .to_string()
-            .contains("MinerU"));
+        assert!(
+            AlchemizeError::Pdf("bad".into())
+                .to_string()
+                .contains("PDF")
+        );
+        assert!(
+            AlchemizeError::Zip("bad".into())
+                .to_string()
+                .contains("ZIP")
+        );
+        assert!(
+            AlchemizeError::Xml("bad".into())
+                .to_string()
+                .contains("XML")
+        );
+        assert!(
+            AlchemizeError::VideoUnavailable("no ffmpeg".into())
+                .to_string()
+                .contains("video processing")
+        );
+        assert!(
+            AlchemizeError::AudioUnavailable("no engine".into())
+                .to_string()
+                .contains("audio transcription")
+        );
+        assert!(
+            AlchemizeError::MineruUnavailable("refused".into())
+                .to_string()
+                .contains("MinerU")
+        );
     }
 
     #[test]

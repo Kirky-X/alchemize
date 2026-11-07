@@ -114,7 +114,11 @@ impl Converter for LatexSourceConverter {
 
 /// Recursively collect media files under `root`, mapping each to an asset
 /// whose filename is its path relative to `root` under `images/`.
-fn collect_media_files(root: &std::path::Path, rel: &str, out: &mut Vec<crate::domain::asset::Asset>) {
+fn collect_media_files(
+    root: &std::path::Path,
+    rel: &str,
+    out: &mut Vec<crate::domain::asset::Asset>,
+) {
     let dir = if rel.is_empty() {
         root.to_path_buf()
     } else {
@@ -255,8 +259,18 @@ fn replace_fenced_environments(md: &str) -> String {
 }
 
 const ENVIRONMENTS: &[&str] = &[
-    "equation", "equation*", "eqnarray", "eqnarray*", "align", "align*", "gather", "gather*",
-    "multline", "multline*", "cases", "split",
+    "equation",
+    "equation*",
+    "eqnarray",
+    "eqnarray*",
+    "align",
+    "align*",
+    "gather",
+    "gather*",
+    "multline",
+    "multline*",
+    "cases",
+    "split",
 ];
 
 fn strip_environment_wrappers(body: &str) -> String {

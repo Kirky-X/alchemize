@@ -167,7 +167,8 @@ fn render_inlines(inlines: &[Inline]) -> String {
             Inline::Link { content, target } => {
                 let label = render_inlines(content);
                 let url = match target {
-                    anydoc::model::LinkTarget::External(u) | anydoc::model::LinkTarget::Relative(u) => u.clone(),
+                    anydoc::model::LinkTarget::External(u)
+                    | anydoc::model::LinkTarget::Relative(u) => u.clone(),
                     anydoc::model::LinkTarget::Anchor(id) => format!("#anchor-{id:?}"),
                 };
                 out.push_str(&format!("[{label}]({url})"));

@@ -8,8 +8,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::application::ports::Converter;
-use crate::domain::error::AlchemizeError;
 use crate::application::ports::VisionProvider;
+use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 

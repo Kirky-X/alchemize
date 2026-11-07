@@ -91,13 +91,17 @@ pub(super) async fn read_limited_text(
 }
 
 /// Read and JSON-decode a response body with a hard size limit.
-pub(super) async fn read_limited_json<T>(resp: Response, max_bytes: u64) -> Result<T, AlchemizeError>
+pub(super) async fn read_limited_json<T>(
+    resp: Response,
+    max_bytes: u64,
+) -> Result<T, AlchemizeError>
 where
     T: serde::de::DeserializeOwned,
 {
     let bytes = read_limited_bytes(resp, max_bytes).await?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| AlchemizeError::MineruConversion(format!("failed to parse JSON response: {e}")))
+    serde_json::from_slice(&bytes).map_err(|e| {
+        AlchemizeError::MineruConversion(format!("failed to parse JSON response: {e}"))
+    })
 }
 
 #[cfg(test)]

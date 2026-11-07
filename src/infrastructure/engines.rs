@@ -31,13 +31,21 @@ pub fn default_converters(
     engines.push(Box::new(TextConverter::new()));
     // Office full-format backend (priority 15, above native parsers).
     #[cfg(feature = "anydoc")]
-    engines.push(Box::new(crate::infrastructure::document::AnydocConverter::new()));
+    engines.push(Box::new(
+        crate::infrastructure::document::AnydocConverter::new(),
+    ));
     // Office XML (fallback tier below anydoc).
-    engines.push(Box::new(crate::infrastructure::document::DocxConverter::new()));
+    engines.push(Box::new(
+        crate::infrastructure::document::DocxConverter::new(),
+    ));
     // PDF local fallback tier.
-    engines.push(Box::new(crate::infrastructure::document::PdfConverter::new()));
+    engines.push(Box::new(
+        crate::infrastructure::document::PdfConverter::new(),
+    ));
     // LaTeX source (pandoc-gated, fenced fallback).
-    engines.push(Box::new(crate::infrastructure::document::LatexSourceConverter::new()));
+    engines.push(Box::new(
+        crate::infrastructure::document::LatexSourceConverter::new(),
+    ));
     // Media family.
     let image_converter = match vision.clone() {
         Some(vision) => crate::infrastructure::media::ImageConverter::with_vision(vision),
@@ -52,14 +60,15 @@ pub fn default_converters(
     engines.push(Box::new(audio_converter));
 
     let video_converter = match vision.clone() {
-        Some(vision) => {
-            crate::infrastructure::media::VideoConverter::new(video_mode).with_vision_provider(vision)
-        }
+        Some(vision) => crate::infrastructure::media::VideoConverter::new(video_mode)
+            .with_vision_provider(vision),
         None => crate::infrastructure::media::VideoConverter::new(video_mode),
     };
     engines.push(Box::new(video_converter));
 
-    engines.push(Box::new(crate::infrastructure::media::SubtitleConverter::new()));
+    engines.push(Box::new(
+        crate::infrastructure::media::SubtitleConverter::new(),
+    ));
 
     // MinerU remote tier (config-gated; falls through to local on failure).
     #[cfg(feature = "mineru")]
@@ -70,16 +79,26 @@ pub fn default_converters(
             engines.push(Box::new(conv));
         }
     }
-    engines.push(Box::new(crate::infrastructure::document::PptxConverter::new()));
+    engines.push(Box::new(
+        crate::infrastructure::document::PptxConverter::new(),
+    ));
     // Tables (csv/tsv).
     engines.push(Box::new(CsvConverter::new()));
     // Hypertext / e-book.
-    engines.push(Box::new(crate::infrastructure::document::HtmlConverter::new()));
-    engines.push(Box::new(crate::infrastructure::document::EpubConverter::new()));
+    engines.push(Box::new(
+        crate::infrastructure::document::HtmlConverter::new(),
+    ));
+    engines.push(Box::new(
+        crate::infrastructure::document::EpubConverter::new(),
+    ));
     // Spreadsheets (xlsx/xls/ods).
-    engines.push(Box::new(crate::infrastructure::document::XlsxConverter::new()));
+    engines.push(Box::new(
+        crate::infrastructure::document::XlsxConverter::new(),
+    ));
     // Notebooks.
-    engines.push(Box::new(crate::infrastructure::document::IpynbConverter::new()));
+    engines.push(Box::new(
+        crate::infrastructure::document::IpynbConverter::new(),
+    ));
 
     // ZipConverter needs a registry for nested conversion: built without it
     // here (nested support wired when the registry is fully assembled — the

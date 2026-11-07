@@ -76,9 +76,9 @@ impl TaskId {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            return Err(crate::domain::error::AlchemizeError::MineruUnavailable(format!(
-                "MinerU returned a task_id with disallowed characters: {s}"
-            )));
+            return Err(crate::domain::error::AlchemizeError::MineruUnavailable(
+                format!("MinerU returned a task_id with disallowed characters: {s}"),
+            ));
         }
         Ok(Self(s))
     }

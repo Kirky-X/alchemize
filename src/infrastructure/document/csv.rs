@@ -46,11 +46,7 @@ impl CsvConverter {
         let header = decoded.lines().next().unwrap_or("");
         let tabs = header.matches('\t').count();
         let commas = header.matches(',').count();
-        if tabs > commas {
-            b'\t'
-        } else {
-            b','
-        }
+        if tabs > commas { b'\t' } else { b',' }
     }
 }
 
@@ -197,9 +193,6 @@ mod tests {
     #[test]
     fn effective_delimiter_fixed_override() {
         let converter = CsvConverter::with_delimiter(b';');
-        assert_eq!(
-            converter.effective_delimiter("csv", "a;b\nc;d"),
-            b';'
-        );
+        assert_eq!(converter.effective_delimiter("csv", "a;b\nc;d"), b';');
     }
 }

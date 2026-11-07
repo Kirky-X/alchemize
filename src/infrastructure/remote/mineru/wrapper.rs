@@ -10,14 +10,14 @@
 //! For direct URL-based parsing (files already hosted on CDN), use
 //! [`MineruAgentClient`] or [`MineruPrecisionClient`] directly.
 
-use async_trait::async_trait;
 use crate::application::builder::MineruConfig;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{debug, info};
 
-use super::validated_url::validate_base_url;
 use super::TaskStatus;
+use super::validated_url::validate_base_url;
 use crate::application::ports::Converter;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
@@ -136,7 +136,11 @@ impl MinerUConverter {
     }
 
     /// Submit a PDF file to the MinerU lightweight API.
-    async fn submit_lightweight(&self, data: &[u8], filename: &str) -> Result<String, AlchemizeError> {
+    async fn submit_lightweight(
+        &self,
+        data: &[u8],
+        filename: &str,
+    ) -> Result<String, AlchemizeError> {
         let url = format!("{}/api/v1/agent/parse/url", self.config.base_url);
 
         let part = reqwest::multipart::Part::bytes(data.to_vec())

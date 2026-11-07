@@ -9,7 +9,7 @@ pub mod registry;
 
 pub use builder::{Alchemize, AlchemizeBuilder, AssetMode, MineruConfig};
 pub use ports::{
-    Availability, Converter, ExternalTool, Transcript, TranscriptSegment, TranscribeProvider,
+    Availability, Converter, ExternalTool, TranscribeProvider, Transcript, TranscriptSegment,
     VisionProvider,
 };
 pub use registry::ConverterRegistry;

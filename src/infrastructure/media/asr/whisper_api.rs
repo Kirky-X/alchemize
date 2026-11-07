@@ -7,7 +7,7 @@
 
 use async_trait::async_trait;
 
-use crate::application::ports::{Availability, Transcript, TranscribeProvider, TranscriptSegment};
+use crate::application::ports::{Availability, TranscribeProvider, Transcript, TranscriptSegment};
 use crate::domain::error::AlchemizeError;
 
 /// Configuration for a Whisper-compatible endpoint.
@@ -80,7 +80,9 @@ impl TranscribeProvider for WhisperApiTranscriber {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| AlchemizeError::AudioUnavailable(format!("whisper api request failed: {e}")))?
+            .map_err(|e| {
+                AlchemizeError::AudioUnavailable(format!("whisper api request failed: {e}"))
+            })?
             .error_for_status()
             .map_err(|e| AlchemizeError::AudioUnavailable(format!("whisper api status: {e}")))?
             .json()

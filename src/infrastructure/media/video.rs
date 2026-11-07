@@ -367,7 +367,10 @@ impl VideoConverter {
         for i in 0..frame_count {
             let timestamp = i as f64 * interval;
             if let Ok(frame_data) = self.extract_frame(video_bytes, timestamp).await {
-                if let Ok(desc) = provider.describe(&frame_data, crate::domain::result::DetailLevel::Low).await {
+                if let Ok(desc) = provider
+                    .describe(&frame_data, crate::domain::result::DetailLevel::Low)
+                    .await
+                {
                     if !desc.trim().is_empty() {
                         descriptions.push(format!("Frame @ {:.1}s: {}", timestamp, desc));
                     }

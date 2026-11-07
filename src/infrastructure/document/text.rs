@@ -79,10 +79,10 @@ impl Default for TextConverter {
 
 /// Code/config extensions recognized by the converter.
 pub const CODE_EXTENSIONS: &[&str] = &[
-    "py", "pyi", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "go", "java", "kt", "kts",
-    "swift", "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "lua", "r", "sql", "sh",
-    "bash", "zsh", "fish", "json", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf", "proto",
-    "graphql", "gql", "css", "scss",
+    "py", "pyi", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "go", "java", "kt", "kts", "swift",
+    "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "lua", "r", "sql", "sh", "bash", "zsh",
+    "fish", "json", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf", "proto", "graphql", "gql",
+    "css", "scss",
 ];
 
 #[async_trait]
@@ -157,7 +157,10 @@ mod tests {
     #[tokio::test]
     async fn convert_utf8_text_passthrough() {
         let converter = TextConverter::new();
-        let input = Input::bytes("Hello, world!\nThis is a test.".as_bytes().to_vec(), "t.txt");
+        let input = Input::bytes(
+            "Hello, world!\nThis is a test.".as_bytes().to_vec(),
+            "t.txt",
+        );
         let result = converter.convert(input).await.unwrap();
         assert!(result.markdown.contains("Hello"));
         assert!(!result.markdown.contains("```"));

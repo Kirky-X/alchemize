@@ -8,16 +8,16 @@
 //!
 //! Endpoint: `/api/v1/agent/parse/url`
 
-use async_trait::async_trait;
 use crate::application::builder::MineruConfig;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use super::http_limit::{
-    read_limited_json, read_limited_text, MAX_ERROR_RESPONSE_BYTES, MAX_POLL_RESPONSE_BYTES,
-    MAX_SUBMIT_RESPONSE_BYTES,
+    MAX_ERROR_RESPONSE_BYTES, MAX_POLL_RESPONSE_BYTES, MAX_SUBMIT_RESPONSE_BYTES,
+    read_limited_json, read_limited_text,
 };
 use super::types::DEFAULT_TIMEOUT_SECS;
 use super::validated_url::validate_base_url;
@@ -106,7 +106,10 @@ impl MineruAgentClient {
         debug!(url = %url, file_url = %file_url.as_str(), "submitting task to MinerU Agent API");
 
         let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {
-            AlchemizeError::MineruUnavailable(format!("cannot reach MinerU at {}: {e}", self.base_url))
+            AlchemizeError::MineruUnavailable(format!(
+                "cannot reach MinerU at {}: {e}",
+                self.base_url
+            ))
         })?;
 
         if !resp.status().is_success() {
@@ -155,7 +158,9 @@ impl MineruAgentClient {
         let result: AgentTaskStatusResponse = read_limited_json(resp, MAX_POLL_RESPONSE_BYTES)
             .await
             .map_err(|e| {
-                AlchemizeError::MineruConversion(format!("failed to parse MinerU poll response: {e}"))
+                AlchemizeError::MineruConversion(format!(
+                    "failed to parse MinerU poll response: {e}"
+                ))
             })?;
 
         let status = match result.status.as_str() {

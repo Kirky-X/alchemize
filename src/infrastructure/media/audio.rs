@@ -35,9 +35,7 @@ pub struct AudioConverter {
 impl AudioConverter {
     /// Create an audio converter without ASR capabilities.
     pub fn new() -> Self {
-        Self {
-            transcribe: None,
-        }
+        Self { transcribe: None }
     }
 
     /// Create an audio converter with a transcription function.
@@ -73,10 +71,9 @@ impl Converter for AudioConverter {
         let byte_count = bytes.len();
 
         if let Some(ref provider) = self.transcribe {
-            let transcript = provider
-                .transcribe(&bytes)
-                .await
-                .map_err(|e| AlchemizeError::AudioUnavailable(format!("transcription failed: {e}")))?;
+            let transcript = provider.transcribe(&bytes).await.map_err(|e| {
+                AlchemizeError::AudioUnavailable(format!("transcription failed: {e}"))
+            })?;
             let transcript = transcript.full_text();
 
             let markdown = if transcript.trim().is_empty() {
@@ -201,8 +198,7 @@ mod tests {
                 "stub"
             }
         }
-        let converter =
-            AudioConverter::with_transcriber(std::sync::Arc::new(StubTranscriber));
+        let converter = AudioConverter::with_transcriber(std::sync::Arc::new(StubTranscriber));
         let input = Input::Bytes {
             data: vec![0x52, 0x49, 0x46, 0x46],
             filename: "speech.wav".to_string(),

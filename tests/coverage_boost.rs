@@ -6,12 +6,12 @@
 use std::sync::Arc;
 
 use alchemize::application::builder::{Alchemize, AlchemizeBuilder, AssetMode, MineruConfig};
+use alchemize::application::ports::Converter as _;
 use alchemize::application::ports::{
-    Availability, Transcript, TranscriptSegment, TranscribeProvider, VisionProvider,
+    Availability, TranscribeProvider, Transcript, TranscriptSegment, VisionProvider,
 };
 use alchemize::domain::error::AlchemizeError;
 use alchemize::domain::input::Input;
-use alchemize::application::ports::Converter as _;
 use alchemize::domain::result::ConvertResult;
 
 // -- builder ----------------------------------------------------------------
@@ -105,7 +105,10 @@ async fn ipynb_execute_result_text_plain() {
 #[tokio::test]
 async fn ipynb_kernel_header() {
     let converter = alchemize::infrastructure::document::IpynbConverter::new();
-    let input = Input::bytes(ipynb_json(r#"{"cell_type":"raw","source":["meta"]}"#).into_bytes(), "n.ipynb");
+    let input = Input::bytes(
+        ipynb_json(r#"{"cell_type":"raw","source":["meta"]}"#).into_bytes(),
+        "n.ipynb",
+    );
     let result = converter.convert(input).await.unwrap();
     assert!(result.markdown.contains("Jupyter Notebook (Python 3)"));
 }
@@ -124,7 +127,10 @@ async fn ipynb_markdown_cell_passthrough_and_raw_skip() {
 #[tokio::test]
 async fn ipynb_empty_notebook_message() {
     let converter = alchemize::infrastructure::document::IpynbConverter::new();
-    let input = Input::bytes(br#"{"cells":[],"metadata":{},"nbformat":4}"#.to_vec(), "e.ipynb");
+    let input = Input::bytes(
+        br#"{"cells":[],"metadata":{},"nbformat":4}"#.to_vec(),
+        "e.ipynb",
+    );
     let result = converter.convert(input).await.unwrap();
     assert!(result.markdown.contains("no extractable content"));
 }
@@ -147,11 +153,12 @@ async fn xlsx_multi_sheet_markdown_tables() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/xlsx_multi/sample.xlsx");
     let converter = alchemize::infrastructure::document::XlsxConverter::new();
-    let result = converter
-        .convert(Input::Path(path.clone()))
-        .await
-        .unwrap();
-    assert!(result.markdown.contains("## Alpha"), "md: {}", result.markdown);
+    let result = converter.convert(Input::Path(path.clone())).await.unwrap();
+    assert!(
+        result.markdown.contains("## Alpha"),
+        "md: {}",
+        result.markdown
+    );
     assert!(result.markdown.contains("## Beta"));
 }
 
@@ -161,7 +168,11 @@ async fn xlsx_hidden_sheet_skipped() {
         .join("tests/fixtures/xlsx_hidden/sample.xlsx");
     let converter = alchemize::infrastructure::document::XlsxConverter::new();
     let result = converter.convert(Input::Path(path.clone())).await.unwrap();
-    assert!(result.markdown.contains("no extractable data"), "md: {}", result.markdown);
+    assert!(
+        result.markdown.contains("no extractable data"),
+        "md: {}",
+        result.markdown
+    );
 }
 
 // -- video branches (no ffmpeg required) ----------------------------------------
@@ -194,7 +205,11 @@ struct EchoVision;
 
 #[async_trait::async_trait]
 impl VisionProvider for EchoVision {
-    async fn describe(&self, _image: &[u8], _detail: alchemize::domain::result::DetailLevel) -> anyhow::Result<String> {
+    async fn describe(
+        &self,
+        _image: &[u8],
+        _detail: alchemize::domain::result::DetailLevel,
+    ) -> anyhow::Result<String> {
         Ok("a chart".to_string())
     }
     async fn ocr(&self, _image: &[u8]) -> anyhow::Result<String> {
@@ -207,12 +222,20 @@ impl VisionProvider for EchoVision {
 
 #[tokio::test]
 async fn image_with_vision_describe_and_ocr() {
-    let converter = alchemize::infrastructure::media::ImageConverter::with_vision(Arc::new(EchoVision));
+    let converter =
+        alchemize::infrastructure::media::ImageConverter::with_vision(Arc::new(EchoVision));
     let input = Input::bytes(vec![0x89, b'P', b'N', b'G', 0, 0, 0, 0], "i.png");
     let result = converter.convert(input).await.unwrap();
-    assert!(result.markdown.contains("a chart"), "md: {}", result.markdown);
+    assert!(
+        result.markdown.contains("a chart"),
+        "md: {}",
+        result.markdown
+    );
     assert!(result.markdown.contains("chart text"));
-    assert_eq!(result.quality, alchemize::domain::result::ConversionQuality::LocalFull);
+    assert_eq!(
+        result.quality,
+        alchemize::domain::result::ConversionQuality::LocalFull
+    );
 }
 
 // -- transcribe plumbing (audio provider path) ------------------------------------
@@ -242,13 +265,18 @@ impl TranscribeProvider for EchoTranscriber {
 
 #[tokio::test]
 async fn audio_with_transcriber_full_pipeline() {
-    let converter =
-        alchemize::infrastructure::media::AudioConverter::with_transcriber(Arc::new(EchoTranscriber));
+    let converter = alchemize::infrastructure::media::AudioConverter::with_transcriber(Arc::new(
+        EchoTranscriber,
+    ));
     // Minimal WAV header (zero data) is enough: the stub ignores bytes.
     let wav = b"RIFF\x24\x00\x00\x00WAVEfmt ".to_vec();
     let input = Input::bytes(wav, "a.wav");
     let result = converter.convert(input).await.unwrap();
-    assert!(result.markdown.contains("你好世界"), "md: {}", result.markdown);
+    assert!(
+        result.markdown.contains("你好世界"),
+        "md: {}",
+        result.markdown
+    );
     assert!(result.markdown.contains("Transcript"));
 }
 

@@ -244,8 +244,7 @@ mod tests {
 
     #[test]
     fn parse_simple_srt() {
-        let srt_content =
-            "1\n00:00:01,000 --> 00:00:03,000\nHello world\n\n2\n00:00:05,000 --> 00:00:07,000\nNext line\n";
+        let srt_content = "1\n00:00:01,000 --> 00:00:03,000\nHello world\n\n2\n00:00:05,000 --> 00:00:07,000\nNext line\n";
         let parser = SubtitleParser::with_format(SubtitleFormat::Srt);
         let events = parser.parse(srt_content, None);
         assert_eq!(events.len(), 2);
@@ -258,8 +257,7 @@ mod tests {
 
     #[test]
     fn parse_simple_vtt() {
-        let vtt_content =
-            "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello world\n\n00:00:05.000 --> 00:00:07.000\nNext line\n";
+        let vtt_content = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello world\n\n00:00:05.000 --> 00:00:07.000\nNext line\n";
         let parser = SubtitleParser::with_format(SubtitleFormat::Vtt);
         let events = parser.parse(vtt_content, None);
         assert_eq!(events.len(), 2);
