@@ -13,7 +13,7 @@ use super::local_tag_name;
 use crate::application::ports::Converter;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
-use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
+use crate::domain::result::{ContentType, ConvertResult};
 
 /// Converts PPTX files to markdown by parsing ZIP-embedded XML slides.
 ///

@@ -1,6 +1,7 @@
 //! Document format converters.
 
 pub mod anydoc;
+pub mod anydoc_render;
 pub mod csv;
 pub mod epub;
 pub mod xlsx;
