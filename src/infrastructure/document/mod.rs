@@ -1,5 +1,6 @@
 //! Document format converters.
 
+pub mod anydoc;
 pub mod csv;
 pub mod epub;
 pub mod xlsx;
@@ -12,6 +13,8 @@ pub mod pptx;
 pub mod text;
 pub mod zip;
 
+#[cfg(feature = "anydoc")]
+pub use anydoc::AnydocConverter;
 pub use csv::CsvConverter;
 pub use epub::EpubConverter;
 pub use xlsx::XlsxConverter;

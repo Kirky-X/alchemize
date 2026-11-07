@@ -27,6 +27,9 @@ pub fn default_converters(
 
     // Text family (plain text + code/config fence).
     engines.push(Box::new(TextConverter::new()));
+    // Office full-format backend (priority 15, above native parsers).
+    #[cfg(feature = "anydoc")]
+    engines.push(Box::new(crate::infrastructure::document::AnydocConverter::new()));
     // Office XML (fallback tier below anydoc).
     engines.push(Box::new(crate::infrastructure::document::DocxConverter::new()));
     // PDF local fallback tier.
