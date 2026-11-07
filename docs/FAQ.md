@@ -4,77 +4,119 @@
 
 ## 📋 目录
 
-- [转换行为](#转换行为)
-- [引擎与 fallback 链](#引擎与-fallback-链)
-- [音视频与转录](#音视频与转录)
-- [格式细节](#格式细节)
+- [通用问题](#-通用问题)
+- [安装与配置](#-安装与配置)
+- [使用与特性](#️-使用与特性)
+- [性能](#-性能)
+- [故障排查](#-故障排查)
+- [还有其他问题？](#-还有其他问题)
 
-## 转换行为
+## 🧭 通用问题
 
-### Q：转换降级了为什么退出码还是 0？
+### ❓ 什么是 Alchemize？
 
-退出码表达「是否产出了 Markdown」：`0` 成功（含降级）、`2` 不支持格式、`3` 全链失败。降级属于「产出成功但保真度较低」——是否可接受由 stderr 摘要行的质量标签（`api`/`local_full`/`local_fallback`）判断，工具不替你做取舍，也不静默失败。
+一个 Rust 文档转 Markdown 工具（CLI `alch` + 同名库）：支持 PDF、Office 全格式、HTML/EPUB、CSV、代码/配置文本、图片、音视频、字幕、zip 递归容器等输入，按优先级 fallback 链自动选择引擎，产出带质量标注的 Markdown。
 
-### Q：怎么知道这次转换用了哪个引擎、质量如何？
+### ❓ 为什么要使用 Alchemize？
 
-两个位置：stderr 摘要行 `converted X -> Y [quality] (engine: N)`（写文件时输出）；库使用者读结果 `metadata.converter`（实际引擎名）与 `quality` 字段。`quality` 由实际产出的引擎如实标注，与它在链中的位置无关。
+三个理由：① 一条命令统一任意格式到 Markdown，不需要为每种格式找单独工具；② 降级显性——每次产出标注 `api`/`local_full`/`local_fallback` 质量层级与实际引擎名，不吞错、不静默；③ 默认构建零外部服务依赖，`--no-remote` 可完全离线。
 
-### Q：为什么 `-o` 指定的输出旁边多了 `images/` 目录？
+### ❓ Alchemize 可以用于生产环境吗？
 
-默认资产模式 `--assets dir`：文档内嵌图片按文档序抽取后写到输出同目录的 `images/`（重名自动加序号前缀），markdown 里用相对路径引用。要单文件交付用 `--assets inline`（base64 data URL 内联）。
+可以。测试规模 default 档 317 例、full 档 396 例（0 失败），行覆盖率 90.49%（门禁 ≥90%），真实文件套件 11 fixtures 覆盖 PDF/DOCX/XLSX/RTF 等真实文档。安全模型见[安全文档](SECURITY.md)。
 
-## 引擎与 fallback 链
+### ❓ 支持哪些平台？
 
-### Q：PDF 的引擎链是怎么排的？
+任何 Rust 1.91+ 支持的平台（macOS/Linux/Windows）。外部二进制依赖（ffmpeg/pandoc）按 PATH 探测，缺失时对应能力降级。ASR 本地推理另需 onnxruntime 动态库。
 
-以「本地优先、云端兜底」为原则，按注册表优先级降序：
+### ❓ 如何参与贡献？
 
-1. `anydoc`（priority 15，feature `anydoc`，产出 `local_full`）
-2. `pdf`——pdf-extract 本地文本提取 + TOC 剔除/结构启发（priority 10，产出 `local_fallback`）
-3. `mineru`（priority 5，feature `mineru` 且设置了 `ALCHEMIZE_MINERU_URL`，产出 `api`）——仅在本地链全部失败后尝试
+见[贡献指南](CONTRIBUTING.md)：环境准备、TDD 工作流、代码规范、提交与 PR 流程。仓库采用 specmark 规格驱动流程，能力域规格真源在 `specmark/specs/`。
 
-要强制某个引擎用 `--engine <name>`；要完全离线用 `--no-remote`。
+### ❓ 在哪里可以获得帮助？
 
-### Q：`--engine` 写错名字会怎样？
+先查本 FAQ 与[用户指南](USER_GUIDE.md)的故障排查节；再查[架构文档](ARCHITECTURE.md)与[API 参考](API_REFERENCE.md)；仍无解则开 GitHub Issue（附最小复现与 `alch doctor` 输出）。
 
-静默回落默认优先级路由，不报错——过期的偏好配置不应阻塞转换。名称匹配支持前缀且大小写不敏感（`--engine any` 命中 `anydoc`）。
+### ❓ 项目采用什么许可证？
 
-### Q：zip 递归转换的边界在哪？
+Apache-2.0（`LICENSE` 与 Cargo.toml 一致，全部源文件带 SPDX 头）。致谢与边界：anydoc（MIT）为依赖；PDFMathTranslate（AGPL-3.0）仅吸收设计思想、零代码复制。
 
-zip 在门面层处理，与主注册表共享引擎集：压缩包内的普通文件按扩展名走各自引擎。**嵌套 zip 明确不支持**（报错而非递归）——zip 自身不注册进注册表正是为了避免无界自递归。
+## 📦 安装与配置
 
-### Q：`doctor` 显示 UNAVAILABLE 的引擎还会被尝试吗？
+### ❓ 如何安装？
 
-不会。`Unavailable` 引擎在候选链中直接跳过（其原因此时记入 attempts），不消耗转换尝试次数。全链失败时 stderr 的明细里能看到它为何不可用。
+```bash
+cargo install --path . --features full   # 或 cargo build --release
+```
 
-## 音视频与转录
+详见[用户指南](USER_GUIDE.md#-安装)。
 
-### Q：ASR 模型缺失时为什么报错而不是自动下载？
+### ❓ 如何选择合适的特性组合？
 
-设计原则：不静默、不自动联网。模型 bundle 缺失时引擎如实报 `Unavailable` 并附获取指引——自动从网上拉模型涉及完整性与供应链问题，交给用户显式决策。布局要求见[用户指南](USER_GUIDE.md#音视频转录feature-asr)。
+```bash
+cargo build                        # 最小化：纯本地，零外部服务
+cargo build --features anydoc      # office 全格式（含旧版二进制 Office）
+cargo build --features mineru      # 云端 PDF 高保真（还需配置端点）
+cargo build --features asr         # 本地转录（还需模型 bundle + ORT 库）
+cargo build --features full        # 全量
+```
 
-### Q：为什么转录结果没有说话人归属？
+### ❓ 不同特性组合的依赖数量差别有多大？
 
-分段来自 silero VAD（语音活动检测），VAD 只回答「这段是不是语音」，不携带说话人身份。宁缺毋假：输出不虚构 SpeakerN 标签，且每份转录携带免责声明常量。这不是功能缺失被隐藏，是能力边界的显性声明。
+default 档无任何网络/云相关依赖（reqwest/limiteron/futures 均为可选）；`mineru` 引入 reqwest+limiteron+futures；`asr` 引入 vecboost（ort/ONNX 栈，path 依赖）。特性关闭的引擎不参与编译，二进制更小、审计面更小。
 
-### Q：视频直接转录吗？
+### ❓ 系统要求是什么？
 
-不。视频先由 ffmpeg 抽出音轨，再走音频转录链；ffmpeg 不在 PATH 时视频引擎报 `VideoUnavailable`。帧去重与关键帧策略用于视觉描述路径，与转录互不影响。
+Rust 1.91+（`rust-version` 门禁）。可选外部工具：ffmpeg（视频）、pandoc（LaTeX 高保真）。ASR 另需模型 bundle 与 onnxruntime 动态库（路径见[用户指南](USER_GUIDE.md#-asr-模型-bundle)）。
 
-## 格式细节
+## 🛠️ 使用与特性
 
-### Q：txt/csv 是乱码时怎么办？支持哪些编码？
+### ❓ 如何快速上手基本用法？
 
-解码顺序（`src/infrastructure/document/shared.rs` 的 `detect_encoding`）：先按 UTF-8 直读；失败后按 **GBK → Big5 → Shift-JIS → EUC-JP → ISO-2022-JP → EUC-KR → windows-1252** 探测（CJK 优先，因为 windows-1252 几乎能解码任何字节序列、放前面会遮蔽 CJK 内容）；全部失败落 lossy UTF-8（坏字节变 U+FFFD，不报错）。csv 另有分隔符自探测（首行 tab 多于逗号按 TSV 处理）。
+```bash
+alch convert file.pdf > out.md      # stdout
+alch convert file.pdf -o out.md     # 写文件 + stderr 摘要行
+alch doctor && alch formats         # 先看引擎与格式
+```
 
-### Q：`.md` 文件交给谁处理？
+### ❓ 支持哪些格式和来源？
 
-`md` 归入纯文本族（`txt/text/log/md`）由 `text` 引擎处理；代码/配置扩展名（py/rs/json/toml/…）输出带语言标签的围栏代码块。
+文档族（pdf/docx/pptx/xlsx/xls/ods/odt/odp/rtf/旧版二进制 Office/html/epub/csv/tsv/txt/md/zip 递归/ipynb/tex）、代码配置族（~45 扩展名围栏化）、图片（png/jpg/gif/bmp/webp/tiff/svg）、音频（wav/mp3/ogg/opus/flac/aac/m4a/wma）、视频（mp4/avi/mkv/mov/wmv/flv/webm/m4v，ffmpeg 抽轨）、字幕（srt/vtt/ass/ssa）。以 `alch formats` 实时输出为准。
 
-### Q：旧版二进制 Office（`.doc`/`.ppt`）为什么转不了？
+### ❓ 转换质量怎么判读？有校验功能吗？
 
-原生 XML 解析器只认 OOXML（docx/pptx/xlsx）。旧版格式由 `anydoc` 后端支持——需以 `--features anydoc`（或 `full`）编译。未编译该特性时这些扩展名不在 `alch formats` 清单中。
+没有独立的「校验」功能；质量判读靠产出标注：stderr 摘要行与 `metadata.converter`/`quality` 字段。降级（`local_fallback`）属预期行为而非错误；zip 嵌套、不支持格式等边界属显式报错。
 
-### Q：LaTeX 必须装 pandoc 吗？
+### ❓ Alchemize 安全吗？
 
-不必。`latex-source` 引擎优先探测 pandoc（PATH 上有则用其转换）；缺失时退回围栏兜底（源码按 latex 代码块输出，质量标注 `local_fallback`），转换仍然成功——该引擎的 doctor 状态恒为 AVAILABLE。
+安全模型四道防线：不可信输入的结构化错误处理（不 panic）、MinerU 下载 URL 的 SSRF 校验（HTTPS-only/私网拒绝/域名白名单/签名）、远端响应分级限量、凭据三通路脱敏。默认构建零网络出口。完整说明见[安全文档](SECURITY.md)。
+
+### ❓ 如何报告安全漏洞？
+
+不要开公开 Issue。用 GitHub 私密安全通告（仓库 Security 标签页 → Report a vulnerability），流程与响应承诺见[安全文档](SECURITY.md#-漏洞报告流程)。
+
+## ⚡ 性能
+
+### ❓ Alchemize 有多快？
+
+本仓暂无 criterion 基准数据，不提供性能数字（不编造）。设计层面的取舍见[架构文档·性能设计](ARCHITECTURE.md#-性能设计)：单线程 runtime、异步远端路径、无全局健康缓存、响应内存有界。
+
+### ❓ 内存占用如何？
+
+转换以单文件为粒度流式处理；远端响应读取按用途分级限量（提交 64KB/错误 8KB/轮询与结果 50MB，预分配上限 8MB）；zip 拒绝嵌套递归，无界深度在结构上不可能。builder 的 `with_max_file_size` 当前未被引擎装配消费（已知限制，见 [API 参考](API_REFERENCE.md#-核心-api)）。
+
+## 🔧 故障排查
+
+### ❓ 出现 "unsupported format" 错误
+
+退出码 2。三种可能：扩展名确实不支持（`alch formats` 确认）、需要的引擎未编译进特性、扩展名被误判（用 `--format <ext>` 显式指定）。
+
+### ❓ 出现 "all backends failed" 错误
+
+退出码 3。stderr 逐行列出 `- <engine>: <reason>`：端点不可达就查服务、文件损坏就换源、依赖缺失就补装。全链失败不会产出半成品文件。
+
+## 🎯 还有其他问题？
+
+- 先翻[用户指南](USER_GUIDE.md)与[API 参考](API_REFERENCE.md)
+- 行为有疑问时 `alch doctor` + 最小复现文件开 GitHub Issue
+- 想动手改代码 → [贡献指南](CONTRIBUTING.md)

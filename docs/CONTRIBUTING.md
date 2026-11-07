@@ -1,56 +1,135 @@
 # 🤝 Alchemize 贡献指南
 
-感谢关注 alchemize。本文档说明开发环境、测试与质量门禁、代码规范与提交约定。
+感谢关注 alchemize。本文档说明开发环境、TDD 工作流、代码规范与提交/PR 流程。
 
 ## 📋 目录
 
-- [开发环境](#开发环境)
-- [测试与覆盖率](#测试与覆盖率)
-- [代码规范](#代码规范)
-- [提交约定](#提交约定)
-- [变更流程](#变更流程)
-- [报告问题](#报告问题)
+- [欢迎](#-欢迎)
+- [环境准备](#-环境准备)
+- [开发工作流（TDD）](#-开发工作流tdd)
+- [代码规范](#-代码规范)
+- [提交与 PR 流程](#-提交与-pr-流程)
+- [行为准则](#-行为准则)
 
-## 开发环境
+## 👋 欢迎
 
-- **Rust 1.91+**（`Cargo.toml` 的 `rust-version`，edition 2024）。
-- 可选外部依赖：`ffmpeg`（视频抽轨，PATH 探测）、`pandoc`（LaTeX 高保真路径，缺失时围栏兜底）。
-- ASR 本地推理需 onnxruntime 动态库与模型 bundle（见[用户指南](USER_GUIDE.md#音视频转录feature-asr)）。
+任何规模的贡献都受欢迎：报告缺陷、改进文档、补测试、加引擎。本项目采用 specmark 规格驱动流程（proposal → apply → converge → archive），能力域规格真源在 `specmark/specs/`——改行为前先看对应能力域的 spec 是否需要同步。
+
+## 🧰 环境准备
+
+### 前置条件
+
+- **Rust 1.91+**（`Cargo.toml` 的 `rust-version`，edition 2024）
+- 组件：`rustfmt`（代码格式化）、`clippy`（静态分析）、`cargo-llvm-cov`（覆盖率，可选）
 
 ```bash
-git clone https://github.com/Kirky-X/alchemize.git
+rustup component add rustfmt clippy
+cargo install cargo-llvm-cov   # 可选：覆盖率度量
+```
+
+### Fork 与 Clone
+
+```bash
+# Fork（GitHub 界面）后：
+git clone https://github.com/<you>/alchemize.git
 cd alchemize
-cargo build                 # 默认特性
-cargo build --features full # 全功能（含 vecboost path 依赖）
+git remote add upstream https://github.com/Kirky-X/alchemize.git
 ```
 
-注意：`full` 特性依赖同工作区兄弟仓 [vecboost](https://github.com/Kirky-X/vecboost)（path 依赖 `../vecboost`）；发布顺序 vecboost 先于 alchemize。
-
-## 测试与覆盖率
-
-两档测试，提交前至少跑满其中一档：
+### 完成环境搭建
 
 ```bash
-cargo test                    # default 档（317 例，无外部服务依赖）
-cargo test --features full    # full 档（396 例）
-cargo clippy --all-features   # 零新增告警
-cargo fmt --check
+# 安装项目依赖并构建
+cargo build
+
+# full 档依赖同工作区兄弟仓 vecboost（path 依赖 ../vecboost）
+cargo build --features full
 ```
 
-- **覆盖率门禁 ≥90%**（本仓真源约定；当前 90.49%）。度量：`cargo llvm-cov --features full`。
+注意：`full` 档要求 `../vecboost` 存在（path 依赖）；发布顺序 vecboost 先于 alchemize 发到 crates.io。
+
+### 特性标志
+
+| feature | 引入 | 说明 |
+| --- | --- | --- |
+| `mineru` | MinerU 云端 PDF 引擎 | 需 `ALCHEMIZE_MINERU_URL` 配置端点才注册 |
+| `anydoc` | office 全格式后端（firecrawl/anydoc, MIT） | priority 15，压过原生 office 解析 |
+| `asr` | vecboost 转录门面（Qwen3-ASR ONNX + silero VAD） | 需模型 bundle + `ORT_DYLIB_PATH` |
+| `full` | 以上全部 | |
+
+### 构建与测试
+
+```bash
+cargo build                 # 构建项目
+cargo test                  # 运行全部测试（default 档，317 例）
+cargo test --features full  # full 档（396 例）
+```
+
+质量门禁（本仓未配置 git 钩子/CI，门禁靠贡献者本地执行）：
+
+```bash
+cargo fmt --check           # 格式化零 diff
+cargo clippy --all-features # 零新增告警（基线 24 条既有告警，不新增即可）
+```
+
+## 🔄 开发工作流（TDD）
+
+### 详细步骤
+
+```bash
+# 同步 upstream 的 main 分支
+git fetch upstream && git checkout main && git merge upstream/main
+
+# 创建特性分支
+git checkout -b feat/my-engine
+# 或缺陷修复分支
+git checkout -b fix/my-bugfix
+
+# 1. Red：先写暴露缺陷/钉住新行为的失败测试
+# 2. Green：写最少代码让测试通过
+# 3. Refactor：不改行为地改进结构
+# 4. 提交前质量门禁
+cargo fmt
+cargo clippy --all-features
+cargo test --features full
+
+# 完成后合并回 main（仓库主分支直行偏好，单人仓可直接推 main）
+git checkout main
+git merge feat/my-engine
+# 解决冲突后重新运行质量检查，推送合并结果
+git push upstream main
+git branch -d feat/my-engine
+```
+
+### 测试要求
+
 - 新增行为必须带钉住该行为的测试；修缺陷先写暴露缺陷的测试再修。
+- **覆盖率门禁 ≥90%**：`cargo llvm-cov --features full` 度量，当前 90.49%。
 - 金样输出变更（`tests/golden.rs`）必须在提交说明中写明变更理由。
+- 测试两档都要过：`cargo test`（default 317）与 `cargo test --features full`（full 396）。
 
-## 代码规范
+## 📐 代码规范
 
-- **DDD 三层**：领域类型与纯规则进 `domain/`（零 IO）；端口与注册表进 `application/`；具体引擎进 `infrastructure/`。新引擎实现 `Converter` trait 后在 `infrastructure/engines.rs` 装配。
+### Rust 最佳实践
+
+- **DDD 三层**：领域类型与纯规则进 `domain/`（无网络/进程 IO；文件读写仅 `Input::to_bytes` 读盘与 `DirSink` 落盘两处例外）；端口与注册表进 `application/`；具体引擎进 `infrastructure/`。新引擎实现 `Converter` trait 后在 `infrastructure/engines.rs` 装配。
 - **降级显性化**：引擎不可用返回 `Availability::Unavailable{reason}`，全链失败返回 `AllBackendsFailed{ext, attempts}`；禁止吞错、禁止用默认值掩盖失败、禁止把降级结果标成高质量。
-- **密钥脱敏**：任何含敏感字段的配置类型必须在 `Debug`/`Display`/serde 三通路脱敏并配单测（参照 `MineruConfig::api_token`）。
-- ** rustdoc**：公开项必须有 `//!`/`///` 文档注释；示例代码保持可编译。
+- **availability 语义**：能降级产出的引擎恒返回 `Available`（把「能否产出」与「产出质量」分开），否则注册表会把它当不可用跳过。
 
-## 版权头规范
+### 命名约定
 
-所有 `.rs` 文件（src/ 与 tests/）必须带两行版权头，位于文件第 1-2 行（`//!` 模块文档之前），第 3 行空行：
+- 引擎 `name()` 用小写连字符（`latex-source`、`anydoc`、`mineru`），与 `--engine` 和 `metadata.converter` 取值一致。
+- 环境变量统一 `ALCHEMIZE_` 前缀（测试专用变量除外）。
+
+### 代码质量要求
+
+- **密钥脱敏**：任何含敏感字段的配置类型必须在 `Debug`/`Display`/serde 三通路脱敏并配单测（参照 `MineruConfig::api_token`——注意 derived Debug 不脱敏，需手工 impl）。
+- 每次提交完整可工作（主分支直行偏好）：格式化零 diff、零新增 clippy 告警、双档测试全绿。
+
+### 文档规范
+
+- 公开项必须有 rustdoc（`//!`/`///`）。
+- **版权头**：所有 `.rs` 文件（src/ 与 tests/）必须带两行版权头，位于第 1-2 行（`//!` 之前），第 3 行空行：
 
 ```rust
 // Copyright (c) 2026 Kirky.X🌠
@@ -58,33 +137,38 @@ cargo fmt --check
 
 ```
 
-- 许可证表达式与 `Cargo.toml` 的 `license` 一致（当前 Apache-2.0）。
-- 自其他仓库迁移的文件保留原版权年份区间（如实反映出处，如 `2025-2026`）。
-- 新文件提交前补头；SPDX 头是 license 扫描工具识别文件级许可的依据。
+- 许可证表达式与 `Cargo.toml` 的 `license` 一致（当前 Apache-2.0）；自其他仓库迁移的文件保留原版权年份区间（如实反映出处，如 `2025-2026`）。
+- 文档版式沿用 confers 骨架（emoji 标题 + 📋 目录 + 相关文档收尾），新增文档按此模板。
 
-## 提交约定
+## 📤 提交与 PR 流程
+
+### 提交规范
 
 Conventional Commits（与现有历史一致）：
 
 ```
 feat(infra): T014 MinerU client family migrated (9 files, 41 tests)
 test(real): real-world file parsing suite (11 fixtures)
-docs: T024 README rewrite — format matrix, fallback chains
+docs: add 7-doc suite (architecture/API/user/FAQ/changelog/contributing/security)
 ```
 
-- 类型：`feat` / `fix` / `test` / `docs` / `refactor` / `chore`。
+- 类型：`feat` / `fix` / `refactor` / `test` / `docs` / `chore` / `perf` / `ci`。
 - 一次提交一个聚焦变更；specmark 任务完成即提交（消息可带任务号）。
+- 分批提交约定：deps → config → src → tests → docs → chore，每批前跑对应测试。
 
-## 变更流程
+### PR 提交标准
 
-本仓库采用 specmark 规格驱动流程：
+- 提交信息符合 Conventional Commits。
+- CI（若启用）全绿；本地门禁（fmt/clippy/双档测试）全绿。
+- spec 修改（`specmark/specs/`）与行为变更同批提交。
 
-1. `/specmark propose <name>` 生成 proposal/design/tasks（长程变更含能力域 delta specs）。
-2. `/specmark apply` 按 tasks 顺序实施，逐项勾选，禁止跳过。
-3. `/specmark converge` 对账交付物与规格；`/specmark archive` 归档。
-4. 规格文件在 `specmark/`（归档时随仓库保留，作为后续变更的事实源）。
+### 评审标准
 
-## 报告问题
+- 是否有钉住行为的测试；降级路径是否显性化（attempts/quality/metadata.converter）。
+- 是否破坏能力域规格（`specmark/specs/`）——破坏即 block。
 
-- 缺陷：开 GitHub Issue，附最小复现文件（注意脱敏）、命令、期望与实际输出。
-- 安全问题：**不要**开公开 Issue，按[安全文档](SECURITY.md)的私密渠道报告。
+## 🤗 行为准则
+
+参与本项目即同意保持专业与尊重：对事不对人，反馈聚焦代码与文档本身；骚扰、贬损性言论不可接受。详细条款沿用 Contributor Covenant 精神（本仓未内置单独文件）。
+
+### 💝 感谢您为 Alchemize 做出贡献！

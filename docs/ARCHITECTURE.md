@@ -1,27 +1,37 @@
 # 🏗️ Alchemize 架构文档
 
-Alchemize 是一个把任意文档炼成 Markdown 的 Rust 工具（CLI `alch` + 同名库），采用单 crate DDD 三层架构：`domain` 承载类型与规则（无网络/进程 IO），`application` 承载端口与优先级 fallback 注册表，`infrastructure` 承载各格式转换器与远端后端。本文档基于 `src/` 实际代码结构，介绍设计原则、模块划分、fallback 链机制与数据流。
+Alchemize 是一个把任意文档炼成 Markdown 的 Rust 工具（CLI `alch` + 同名库），采用单 crate DDD 三层架构：`domain` 承载类型与规则（无网络/进程 IO），`application` 承载端口与优先级 fallback 注册表，`infrastructure` 承载各格式转换器与远端后端。本文档基于 `src/` 实际代码结构，介绍设计原则、模块划分、数据流以及安全与性能设计。
 
 ## 📋 目录
 
-- [设计原则](#设计原则)
-- [系统架构](#系统架构)
-- [模块划分](#模块划分)
-- [核心抽象：端口与注册表](#核心抽象端口与注册表)
-- [fallback 链与质量分层](#fallback-链与质量分层)
-- [数据流](#数据流)
-- [关键设计决策](#关键设计决策)
-- [测试与质量](#测试与质量)
+- [概述](#-概述)
+- [设计原则](#-设计原则)
+- [系统架构](#️-系统架构)
+- [模块划分](#-模块划分)
+- [数据流](#-数据流)
+- [安全设计](#-安全设计)
+- [性能设计](#-性能设计)
+- [相关文档](#-相关文档)
 
-## 设计原则
+## 🎯 概述
+
+Alchemize 的目标是「一处输入，任意格式，产出 Markdown」。它内置一张按优先级组织的转换器注册表：同一扩展名的多个引擎按 `priority()` 降序形成 fallback 链，前序失败自动落到次优，`Unavailable` 的引擎跳过并记录原因；每个产出都如实标注质量层级（`api` / `local_full` / `local_fallback`）与实际引擎名。
+
+三个入口共享同一套核心：
+
+- **CLI `alch`**：`convert`（单文件转换）/ `doctor`（逐引擎可用性诊断）/ `formats`（支持扩展名清单）。
+- **库 API**：`AlchemizeBuilder` 流式配置 → `Alchemize` 门面（`convert` / `convert_pref`）。
+- **扩展点**：实现 `Converter` / `VisionProvider` / `TranscribeProvider` 端口即可注入自定义引擎。
+
+## 📐 设计原则
 
 1. **domain 无网络/进程 IO**：`src/domain/` 不发网络请求、不起子进程；文件读写仅有两处边界内例外——`Input::to_bytes` 读盘、`DirSink` 落盘（资产写出）。其余领域逻辑可脱离环境测试。
-2. **端口-适配器分离**：`application/ports.rs` 定义 `Converter`/`VisionProvider`/`TranscribeProvider`/`ExternalTool` 四个 trait，基础设施层实现它们；注册表只依赖 trait，不依赖具体引擎。
-3. **降级显性化**：引擎不可用（`Availability::Unavailable`）直接跳过并记录原因，不静默重试；全链失败返回 `AllBackendsFailed { ext, attempts }` 携带逐引擎失败明细（`src/application/registry.rs:103-146`）。
-4. **本地优先**：云端引擎（MinerU）优先级低于本地链，仅在本地链失败后尝试（`src/infrastructure/remote/mineru/wrapper.rs:284-290`）；`--no-remote` 可整体排除云端引擎。
+2. **端口-适配器分离**：`application/ports.rs` 定义 `Converter` / `VisionProvider` / `TranscribeProvider` / `ExternalTool` 四个 trait，基础设施层实现它们；注册表只依赖 trait，不依赖具体引擎。
+3. **降级显性化**：引擎不可用（`Availability::Unavailable`）直接跳过并记录原因，不静默重试；全链失败返回 `AllBackendsFailed { ext, attempts }` 携带逐引擎失败明细。
+4. **本地优先**：云端引擎（MinerU）优先级低于本地链，仅在本地链失败后尝试；`--no-remote` 可整体排除云端引擎。
 5. **结果可观测**：成功结果在 `metadata.converter` 记录实际引擎名，`quality` 字段如实标注来源层级，禁止低优结果冒充高质量。
 
-## 系统架构
+## 🏛️ 系统架构
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -59,72 +69,42 @@ Alchemize 是一个把任意文档炼成 Markdown 的 Rust 工具（CLI `alch` +
 └─────────────────────────────────────────────────────────┘
 ```
 
-## 模块划分
+## 🧩 模块划分
 
-### domain（领域层，零 IO）
+### 公开核心模块（无特性门控）
 
-| 文件 | 职责 |
+| 模块 | 职责 |
 | --- | --- |
-| `input.rs` | `Input`（`Path` / `Bytes{data, filename, mimetype, extension}` 两种载体）、`InputFormat` 枚举、`detect_format()`（扩展名映射 + WEBP/WAVE/AVI 魔数嗅探） |
-| `result.rs` | `ConvertResult`（markdown + metadata + content_type + quality + title + assets）、`ConversionQuality`（`Api`/`LocalFull`/`LocalFallback`，序列化为 `api`/`local_full`/`local_fallback`）、`ContentType`、`VideoProcessingMode` |
-| `asset.rs` | `Asset{filename, bytes, role}` 与 `AssetSink`（`DirSink` 写 `images/` 目录、`InlineSink` 转 base64 data URL）——**边界内例外**：DirSink 落盘是 domain 层唯一的写盘点 |
-| `error.rs` | `AlchemizeError` 15 个变体（格式/后端/IO/PDF/ZIP/XML/视频/音频/视觉/MinerU/安全/体积等）与 `SecurityViolationType` |
-| `latex_validate.rs` | LaTeX 数学定界符纯规则校验（无 IO） |
-| `error.rs` | `AlchemizeError` 15 个变体（格式/后端/IO/PDF/ZIP/XML/视频/音频/视觉/MinerU/安全/体积等）与 `SecurityViolationType` |
-| `latex_validate.rs` | LaTeX 数学定界符纯规则校验（无 IO） |
+| `domain/input.rs` | `Input`（`Path` / `Bytes{data, filename, mimetype, extension}` 两种载体）、`InputFormat` 枚举、`detect_format()`（魔数嗅探优先、扩展名映射兜底） |
+| `domain/result.rs` | `ConvertResult`（markdown + metadata + content_type + quality + title + assets）、`ConversionQuality`、`ContentType`、`VideoProcessingMode` |
+| `domain/asset.rs` | `Asset{filename, bytes, role}` 与 `AssetSink`（`DirSink` 写 `images/`、`InlineSink` 转 base64 data URL）——DirSink 落盘是 domain 层唯一写盘点 |
+| `domain/error.rs` | `AlchemizeError` 15 个变体与 `SecurityViolationType` |
+| `domain/latex_validate.rs` | LaTeX 数学定界符纯规则校验（无 IO） |
+| `application/ports.rs` | 四个端口 trait + `Availability` + `Transcript`（VAD 段级转录，明确不含说话人归属）+ `which_program()` PATH 探测 |
+| `application/registry.rs` | 优先级降序注册、fallback 链尝试、attempts 记录、`metadata.converter` 注入 |
+| `application/builder.rs` | `AlchemizeBuilder` → `Alchemize` 门面（convert / convert_pref / availability / engines / asset_sink_for）；zip 门面特判 |
+| `infrastructure/document/` | text（纯文本 + ~45 扩展名代码围栏）、csv（分隔符自探测）、html、epub、docx/pptx/xlsx（原生 XML）、latex-source（pandoc 探测 + 围栏兜底）、pdf（pdf-extract + TOC 剔除/结构启发）、anydoc_render（自研 GFM 渲染器）、shared（detect_encoding：UTF-8 → CJK 优先探测 → lossy 兜底） |
+| `infrastructure/media/` | image / audio / video（ffmpeg 抽轨）/ subtitle（srt/vtt/ass/ssa 原生解析）/ timeline / dedup（视频帧去重） |
+| `infrastructure/remote/mineru/` | 云端 PDF 后端（见[特性门控模块](#特性门控模块)） |
+| `infrastructure/tools/` | pandoc 外部二进制探测（构建时缺席、运行时探测） |
 
-### application（应用层）
+### 特性门控模块
 
-| 文件 | 职责 |
-| --- | --- |
-| `ports.rs` | 四个端口 trait + `Availability` + `Transcript`（VAD 段级转录，明确不含说话人归属）+ `which_program()` PATH 探测 |
-| `registry.rs` | `ConverterRegistry`：注册时按 `priority()` 降序插入；转换时过滤 `can_convert` 与 no-remote，按序尝试，Unavailable 跳过并记入 attempts，成功注入 `metadata.converter` |
-| `builder.rs` | `AlchemizeBuilder` 流式配置（MinerU/视觉/转录/视频模式/资产模式/云端排除）→ `Alchemize` 门面（convert / convert_pref / availability / engines / asset_sink_for）；zip 在门面层处理 |
-
-### infrastructure（基础设施层）
-
-| 子模块 | 职责 |
-| --- | --- |
-| `document/` | 各文档格式转换器：`text`（纯文本 + ~45 扩展名代码围栏）、`csv`、`html`、`epub`、`docx`/`pptx`/`xlsx`（原生 XML 解析）、`latex_source`（pandoc 探测 + 围栏兜底）、`pdf`（pdf-extract 本地文本 + TOC 剔除/结构启发）、`anydoc`（feature `anydoc`，office 全格式含旧版二进制格式）、`zip`（递归容器） |
-| `media/` | `image`（VisionProvider 或元数据降级）、`audio`/`video`（ffmpeg 抽轨 → 转录链）、`subtitle`（srt/vtt/ass/ssa 原生解析）、`timeline`、`dedup`（视频帧去重）、`asr/`（vecboost 本地 ONNX 转录 + Whisper 兼容 API） |
-| `remote/mineru/` | 云端 PDF 后端：`client`/`factory`（按文件大小选 agent/precision 客户端）、`backoff`（轮询退避，limiteron delay_for_attempt）、`http_limit`（响应体积上限）、`validated_url`（SSRF 校验）、`wrapper`（Converter 适配） |
-| `tools/` | `pandoc` 外部二进制探测（构建时缺席、运行时探测） |
-
-## 核心抽象：端口与注册表
-
-`Converter` trait（`application/ports.rs`）的五个决策点：
-
-| 方法 | 默认值 | 作用 |
+| feature | 模块 | 说明 |
 | --- | --- | --- |
-| `supported_extensions()` | 必须实现 | 小写无点扩展名表 |
-| `can_convert(&Input)` | 扩展名匹配 | 是否进入候选链 |
-| `priority()` | 10 | 数值大者先试 |
-| `name()` | `"unknown"` | `--engine` 选择名与 `metadata.converter` 记录名 |
-| `availability()` | `Available` | 运行时自述（缺 ffmpeg/模型/端点时返回 Unavailable + 原因） |
-| `is_remote()` | `false` | `--no-remote` 时从候选链剔除 |
+| `anydoc` | `infrastructure/document/anydoc.rs` | office 全格式后端（firecrawl/anydoc, MIT），含旧版二进制 Office（doc/ppt/…）；priority 15 压过原生解析；图片按文档序经自研 `anydoc_render` 渲染 |
+| `mineru` | `infrastructure/remote/mineru/` | 云端 PDF：`client`/`factory`（按文件大小选 agent/precision 客户端）、`backoff`（limiteron 轮询退避）、`http_limit`（响应体积分级上限）、`validated_url`（SSRF 校验）、`wrapper`（Converter 适配，priority 5 链尾） |
+| `asr` | `infrastructure/media/asr/` | `vecboost.rs`（自研 transcribe 门面：Qwen3-ASR ONNX 三件套 + silero VAD，path 依赖兄弟仓）与 `whisper_api.rs`（Whisper 兼容云端后端，仅显式注入激活） |
 
-## fallback 链与质量分层
+feature 关闭的引擎根本不出现在 `engines.rs` 装配列表中；`mineru` 还需配置端点（`ALCHEMIZE_MINERU_URL` 或库 API `with_mineru`）才注册。
 
-注册表对同一扩展名的多引擎按 `priority()` **降序**尝试（`registry.rs`）：
+### crate 组织
 
-**PDF 示例**（feature `anydoc` 开、MinerU 已配置时）：
+alchemize 为**单 crate**（`[package]` + `[lib]` + `[[bin]] alch`），无 workspace 子成员、无子 crate。与兄弟仓的关系是 path 依赖：`vecboost`（feature `asr` 下）——发布顺序约束为 vecboost 先于 alchemize 发到 crates.io。
 
-| 顺序 | 引擎 | priority | quality |
-| --- | --- | --- | --- |
-| 1 | `anydoc` | 15 | `local_full` |
-| 2 | `pdf`（pdf-extract + TOC 剔除/结构启发） | 10 | `local_fallback` |
-| 3 | `mineru`（云端，仅在本地链失败后尝试） | 5 | `api` |
+## 🌊 数据流
 
-**office 格式示例**（docx）：`anydoc`(15) → `docx` 原生 XML 解析(10)。
-
-规则：
-
-- 前序引擎返回 `Err` 自动尝试次优；`Unavailable` 引擎直接跳过（原因记入 attempts，不消耗转换尝试）。
-- `--engine NAME` 把名称匹配（精确或前缀，大小写不敏感）的引擎提到队首；名称未命中静默回落 priority 路由，不报错。
-- `quality` 由产出引擎如实标注（`Api`/`LocalFull`/`LocalFallback`），与尝试顺序解耦——MinerU 排链尾但产出仍是 `api` 级。
-- `zip` 是门面层特例：与主注册表共享引擎集做递归转换，但自身不注册进注册表，嵌套 zip 直接报不支持（防无界自递归，`builder.rs:70-78`）。
-
-## 数据流
+### 转换主流程
 
 ```
 输入文件
@@ -143,17 +123,47 @@ markdown → stdout 或 -o 文件（stderr 摘要行：converted X → Y [qualit
 
 失败终态两条：无候选 → `UnsupportedFormat`（退出码 2）；全链失败 → `AllBackendsFailed{ext, attempts}`（退出码 3，stderr 列明细）。
 
-## 关键设计决策
+### 降级链数据流
 
-1. **zip 出注册表**：zip 转换需要递归调用其他引擎，若自身也是注册表成员会造成无界自递归；放在门面层并共享最终注册表，嵌套 zip 显式报不支持。
-2. **MinerU 云端置尾**：云端调用有成本与延迟，本地链（anydoc/pdf-extract）先行；MinerU 产出 `api` 级质量，仅在本地全失败时成为兜底高保真路径（`wrapper.rs:284-290` 注释明确此意图）。
-3. **availability 自述制**：`Converter::availability()` 默认 `Available`——媒体引擎的依赖缺失（视觉/转录/ffmpeg）不在注册期探测，而是转换时降级或报错（如 vecboost provider 对模型缺失自述 `Unavailable`，audio 引擎转译为 `AudioUnavailable`）。doctor 聚合的是注册期可用性；注册表不做全局健康缓存（每次转换即时探测）。
-4. **转录不虚构说话人**：`Transcript` 只含 VAD 段与文本，`DISCLAIMER` 常量随输出携带——VAD 无说话人身份，归属信息宁缺毋假。
-5. **密钥防泄漏**：`MineruConfig::api_token` 在 `Debug`/`Display`/serde 序列化三处全部脱敏（`skip_serializing` + `<redacted>`，builder.rs 单测钉住）。
+以 PDF 为例（feature `anydoc` 开、MinerU 已配置时）：
 
-## 测试与质量
+| 顺序 | 引擎 | priority | quality |
+| --- | --- | --- | --- |
+| 1 | `anydoc` | 15 | `local_full` |
+| 2 | `pdf`（pdf-extract + TOC 剔除/结构启发） | 10 | `local_fallback` |
+| 3 | `mineru`（云端，仅在本地链失败后尝试） | 5 | `api` |
 
-- 单 crate 双档测试：default（不含可选后端）与 `--features full`；full 档 396 例、0 失败。
-- 集成测试四套：`tests/cli.rs`（CLI e2e）、`tests/golden.rs`（金样输出）、`tests/real_files.rs` + `tests/fixtures/real/`（真实文件套件 11 fixtures）、`tests/coverage_boost.rs`。
-- 覆盖率门禁 ≥90%（当前 90.49%）。
-- 规格驱动：`specmark/changes/migrate-mnemis-parser/specs/` 保存五大能力域的可验证规格（cli-output / document-conversion / domain-ports / fallback-chain / media-conversion）。
+前序引擎返回 `Err` 自动尝试次优；`Unavailable` 引擎直接跳过（原因记入 attempts）；`--engine NAME` 把名称匹配（精确或前缀，大小写不敏感）的引擎提到队首，未命中静默回落。`quality` 由产出引擎如实标注，与尝试顺序解耦。
+
+### zip 递归容器数据流
+
+zip 在门面层特判处理：`ZipConverter` 与主注册表共享同一引擎集（`Arc<ConverterRegistry>` clone），压缩包内普通文件按扩展名走各自引擎；zip 自身**不注册进注册表**，嵌套 zip 直接报不支持——无界自递归在结构上不可能发生。
+
+## 🔒 安全设计
+
+四道防线（完整模型见[安全文档](SECURITY.md)）：
+
+1. **输入不可信**：文档输入按不可信构造处理，ZIP 容器（docx/pptx/xlsx/epub/zip）经声明式依赖解析，解析失败返回结构化错误而非 panic。
+2. **SSRF 防护**：MinerU 文件下载 URL 必须通过 `ValidatedFileUrl` 校验（HTTPS-only、拒环回/私网/CGNAT/链路本地、IPv4 映射 IPv6 同分类、域名白名单、签名要求）。
+3. **响应限量**：远端响应按用途分级上限（64KB/8KB/50MB/50MB，预分配 8MB），超限返回 `ResponseTooLarge`。
+4. **凭据脱敏**：`MineruConfig::api_token` 在 `Debug`/`Display`/serde 三通路全部脱敏（手工 `Debug` impl + 单测钉住）；凭据只经环境变量传递。
+
+## ⚡ 性能设计
+
+设计级取舍（本仓暂无 criterion 基准数据，不提供性能数字）：
+
+- **单线程 runtime**：CLI 用 current-thread tokio runtime（`main.rs`），转换以单文件为粒度，无跨任务共享状态竞争。
+- **async-trait 端口**：远端与转录路径全异步，轮询退避经 limiteron `delay_for_attempt`，不忙等。
+- **无全局健康缓存**：availability 每次转换即时探测（单次转换内一致），换取无过期窗错误路由。
+- **内存有界**：远端响应经分级限量读取器（预分配上限 8MB）；zip 拒绝嵌套递归防无界深度。
+- **降级而非失败**：本地链先行省去云端往返；依赖缺失（视觉/转录）降级为元数据 markdown，不阻塞整链。
+
+## 📚 相关文档
+
+- [📘 API 参考](API_REFERENCE.md) — 全部公开 API、CLI 接口与环境变量
+- [📖 用户指南](USER_GUIDE.md) — 从安装到进阶的完整使用教程
+- [❓ FAQ](FAQ.md) — 常见问题解答
+- [🔒 安全文档](SECURITY.md) — 信任边界、SSRF 防护、漏洞报告
+- [🤝 贡献指南](CONTRIBUTING.md) — 开发环境、测试与提交约定
+- [📋 更新日志](CHANGELOG.md) — 版本变更记录
+- 能力域规格真源：`specmark/specs/`（fallback-chain / document-conversion / media-conversion / cli-output / domain-ports / docs-suite / license-headers）

@@ -4,23 +4,27 @@
 
 ## 📋 目录
 
-- [库 API](#库-api)
-  - [Alchemize 门面](#alchemize-门面)
-  - [AlchemizeBuilder](#alchemizebuilder)
-  - [MineruConfig](#mineruconfig)
-  - [Input 与格式检测](#input-与格式检测)
-  - [ConvertResult 与质量分层](#convertresult-与质量分层)
-  - [资产与 AssetSink](#资产与-assetsink)
-  - [ConverterRegistry](#converterregistry)
-  - [端口 trait](#端口-trait)
-  - [错误类型 AlchemizeError](#错误类型-alchemizeerror)
-- [CLI `alch`](#cli-alch)
-- [环境变量](#环境变量)
-- [特性开关](#特性开关)
+- [概述](#-概述)
+- [核心 API](#-核心-api)
+- [配置/扩展 API](#-配置扩展-api)
+- [错误类型](#-错误类型)
+- [特性门控 API](#-特性门控-api)
+- [使用示例](#-使用示例)
+- [最佳实践](#-最佳实践)
+- [相关文档](#-相关文档)
 
-## 库 API
+## 🎯 概述
 
-`alchemize` crate 根再导出（`src/lib.rs`）：
+### API 设计原则
+
+- **门面优先**：`AlchemizeBuilder` → `Alchemize` 是唯一推荐入口；`ConverterRegistry` 公开但面向自定义装配场景。
+- **显式降级**：依赖缺失不是 `Err` 而是 `Unavailable{reason}` 自述或元数据降级产出；全链失败才返回携带逐引擎 attempts 的错误。
+- **可观测结果**：`ConvertResult` 携带 `metadata.converter`（实际引擎名）与 `quality`（来源层级），调用方无需猜测产出来自哪条链。
+- **trait 驱动扩展**：自定义引擎/视觉/转录能力全部经 `application::ports` 的 trait 注入，无全局注册表、无反射。
+
+### 📦 特性说明
+
+根再导出（`src/lib.rs`）：
 
 ```rust
 pub use application::builder::{Alchemize, AlchemizeBuilder, MineruConfig};
@@ -30,9 +34,31 @@ pub use domain::input::{Input, InputFormat, detect_format};
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ```
 
-### Alchemize 门面
+| feature | 门控 API | 默认 |
+| --- | --- | --- |
+| `mineru` | MinerU 引擎注册 + `MineruConfig` 装配 | 关 |
+| `anydoc` | office 全格式引擎（priority 15） | 关 |
+| `asr` | vecboost 转录门面 + Whisper 兼容后端 | 关 |
+| `full` | 以上全部 | 关 |
 
-构建产物 `Alchemize`（`application/builder.rs`）——转换入口与诊断聚合：
+## 🧱 核心 API
+
+### 转换门面与构建器
+
+`AlchemizeBuilder::new()` → 流式配置 → `build()` 得到 `Alchemize`：
+
+| Builder 方法 | 默认 | 说明 |
+| --- | --- | --- |
+| `with_mineru(MineruConfig)` | 无 | 配置后且 feature `mineru` 开启时注册 `mineru` 引擎（priority 5，链尾） |
+| `with_vision_provider(Arc<dyn VisionProvider>)` | 无 | 图片描述/OCR；不注入则图片转元数据 markdown，无内置兜底 |
+| `with_transcribe_provider(Arc<dyn TranscribeProvider>)` | 无 | 音频引擎转录；feature `asr` 下默认用 vecboost 门面 |
+| `with_video_mode(VideoProcessingMode)` | `AudioOnly` | `Gpu` / `AudioOnly`（抽轨转音频链）/ `Disabled` |
+| `with_asset_mode(AssetMode)` | `Dir` | 资产落盘模式 |
+| `with_no_remote()` | false | `is_remote()==true` 的引擎不进入候选链 |
+| `with_max_file_size(usize)` | 104857600 | ⚠️ 当前引擎装配（`engines.rs`）未消费该值——限制未生效；MinerU precision 客户端自身有 200 MB 上限。预留接口，勿依赖 |
+| `build()` | — | 组装默认引擎集并返回 `Alchemize` |
+
+`Alchemize` 方法：
 
 | 方法 | 签名 | 说明 |
 | --- | --- | --- |
@@ -44,35 +70,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 | `is_no_remote` | `fn is_no_remote(&self) -> bool` | 构建时是否排除了云端引擎 |
 | `asset_sink_for` | `fn asset_sink_for(&self, output_root: &Path) -> Box<dyn AssetSink>` | 按资产模式构造 sink（Dir → `<root>/images/`） |
 
-zip 特例：扩展名为 `zip` 的输入由门面层 `ZipConverter` 处理（共享主注册表递归转换）；`zip` 特性关闭时报 `UnsupportedFormat("zip")`。嵌套 zip 不支持。
-
-### AlchemizeBuilder
-
-```rust
-let alch = AlchemizeBuilder::new()
-    .with_asset_mode(AssetMode::Dir)          // 资产模式（默认 Dir）
-    .with_no_remote()                          // 排除云端引擎
-    .with_mineru(cfg)                          // MineruConfig（注册 MinerU 引擎）
-    .with_vision_provider(Arc::new(my_vlm))    // 图片描述/OCR（None 则元数据降级）
-    .with_transcribe_provider(Arc::new(my_asr))// 音视频转录（None 则元数据降级）
-    .with_video_mode(VideoProcessingMode::AudioOnly) // Gpu | AudioOnly（默认） | Disabled
-    .with_max_file_size(100 * 1024 * 1024)     // 见下方注意
-    .build();
-```
-
-| 方法 | 默认 | 说明 |
-| --- | --- | --- |
-| `new()` | — | 100 MB 上限字段、无 MinerU、无视觉/转录提供方、`AudioOnly`、`Dir`、允许云端 |
-| `with_mineru(MineruConfig)` | 无 | 配置后且 feature `mineru` 开启时注册 `mineru` 引擎（priority 5，链尾） |
-| `with_vision_provider(Arc<dyn VisionProvider>)` | 无 | 图片引擎描述/OCR；不注入则图片转元数据 markdown，无内置兜底 |
-| `with_transcribe_provider(Arc<dyn TranscribeProvider>)` | 无 | 音频引擎转录；feature `asr` 下默认用 vecboost 门面 |
-| `with_video_mode(VideoProcessingMode)` | `AudioOnly` | `Gpu` / `AudioOnly`（抽轨转音频链）/ `Disabled` |
-| `with_asset_mode(AssetMode)` | `Dir` | 资产落盘模式 |
-| `with_no_remote()` | false | `is_remote()==true` 的引擎不进入候选链 |
-| `with_max_file_size(usize)` | 104857600 | ⚠️ 当前引擎装配（`engines.rs`）未消费该值——限制未生效；MinerU precision 客户端自身有 200 MB 上限。预留接口，勿依赖 |
-| `build()` | — | 组装默认引擎集并返回 `Alchemize` |
-
-### MineruConfig
+`MineruConfig`（feature `mineru`）：
 
 ```rust
 pub struct MineruConfig {
@@ -84,9 +82,22 @@ pub struct MineruConfig {
 }
 ```
 
-`api_token` 在 `Debug`、`Display`、serde 序列化三条通路全部脱敏（单测 `mineru_config_display_redacts_token` 钉住）。
+`api_token` 在 `Debug`（手工 impl）、`Display`、serde 序列化三条通路全部脱敏（单测 `mineru_config_display_redacts_token` 钉住）。
 
-### Input 与格式检测
+### 注册表
+
+`ConverterRegistry`（面向自定义装配，门面内部亦使用）：
+
+| 方法 | 说明 |
+| --- | --- |
+| `new()` / `new_no_remote()` | 空注册表（后者排除云端引擎） |
+| `register(Box<dyn Converter>)` | 按 priority 降序插入 |
+| `convert(&Input)` / `convert_pref(&Input, Option<&str>)` | 候选链尝试，语义同门面 |
+| `len()` / `is_empty()` | 成员数 |
+| `availability()` | doctor 数据源 |
+| `converters()` | `&dyn Converter` 迭代器 |
+
+### 输入与格式检测
 
 ```rust
 pub enum Input {
@@ -95,9 +106,9 @@ pub enum Input {
 }
 ```
 
-`Bytes` 载体中 `mimetype`/`extension` 显式覆盖优先于文件名推断。`detect_format(&Input) -> Option<InputFormat>`：先扩展名映射（`pdf`/`pptx`/`docx`/`xlsx`/`xls`/`odt|ods|odp`/`html|htm`/`epub`/`csv|tsv`/`zip`/`txt|text|log|md`/`ipynb`/图片/音频/视频族），另对 WEBP/WAVE/AVI 魔数嗅探兜底；无法识别返回 `None`。`InputFormat` 为 22 成员枚举（含 `Unknown`）。
+`Bytes` 载体中 `mimetype`/`extension` 显式覆盖优先于文件名推断。`detect_format(&Input) -> Option<InputFormat>`：**魔数嗅探优先**（仅 `Input::Bytes` 载体；覆盖 `%PDF`、ZIP 族的 ODF/docx/pptx/xlsx/epub 细分、GIF/PNG/JPEG、RIFF（WEBP/WAV/AVI）、Ogg/FLAC 等，实现见 `domain/input.rs` 的 `detect_magic_bytes`），嗅探不出再按扩展名映射兜底；`Input::Path` 无字节可嗅探，直接走扩展名。无法识别返回 `None`。`InputFormat` 为 22 成员枚举（含 `Unknown`）。
 
-### ConvertResult 与质量分层
+### 结果与资产
 
 ```rust
 pub struct ConvertResult {
@@ -110,36 +121,81 @@ pub struct ConvertResult {
 }
 ```
 
-`ConversionQuality`：`Api`（远端高保真，如 MinerU）｜ `LocalFull`（默认，本地全功能，如 anydoc）｜ `LocalFallback`（本地降级，如 pdf-extract 文本链）。serde 序列化为 `api`/`local_full`/`local_fallback`。质量由产出引擎如实标注，与尝试顺序无关。
+`ConversionQuality`：`Api`（远端高保真）｜ `LocalFull`（默认，本地全功能）｜ `LocalFallback`（本地降级）。serde 序列化为 `api`/`local_full`/`local_fallback`，质量由产出引擎如实标注、与尝试顺序解耦。
 
-### 资产与 AssetSink
+`Asset { filename: String, bytes: Vec<u8>, role: AssetRole }`；`AssetSink` 两个实现：`DirSink`（写 `<输出同目录>/images/`，重名加序号前缀）与 `InlineSink`（base64 data URL 内联）。
 
-`Asset { filename: String, bytes: Vec<u8>, role: AssetRole }`。`AssetSink` 两个实现：`DirSink`（写 `<输出同目录>/images/`，重名加序号前缀）与 `InlineSink`（base64 data URL 内联）。CLI 由 `--assets dir|inline` 选择。
+## 🔌 配置/扩展 API
 
-### ConverterRegistry
+`application::ports` 是实现自定义引擎的扩展点。
 
-也可绕过门面直接用注册表（`application::registry::ConverterRegistry`）：
+### Converter Trait
 
-| 方法 | 说明 |
-| --- | --- |
-| `new()` / `new_no_remote()` | 空注册表（后者排除云端引擎） |
-| `register(Box<dyn Converter>)` | 按 priority 降序插入 |
-| `convert(&Input)` / `convert_pref(&Input, Option<&str>)` | 候选链尝试，语义同门面 |
-| `len()` / `is_empty()` | 成员数 |
-| `availability()` | doctor 数据源 |
-| `converters()` | `&dyn Converter` 迭代器 |
+```rust
+#[async_trait]
+pub trait Converter: Send + Sync {
+    async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError>;
+    fn supported_extensions(&self) -> &[&str];
+    fn can_convert(&self, input: &Input) -> bool { /* 默认：扩展名匹配 */ }
+    fn priority(&self) -> u8 { 10 }
+    fn name(&self) -> &'static str { "unknown" }
+    fn availability(&self) -> Availability { Availability::Available }
+    fn is_remote(&self) -> bool { false }
+}
+```
 
-### 端口 trait
+| 方法 | 默认值 | 作用 |
+| --- | --- | --- |
+| `supported_extensions()` | 必须实现 | 小写无点扩展名表 |
+| `can_convert(&Input)` | 扩展名匹配 | 是否进入候选链 |
+| `priority()` | 10 | 数值大者先试 |
+| `name()` | `"unknown"` | `--engine` 选择名与 `metadata.converter` 记录名 |
+| `availability()` | `Available` | 运行时自述（缺依赖时 `Unavailable{reason}`，doctor 与 attempts 展示原因） |
+| `is_remote()` | `false` | `--no-remote` 时从候选链剔除 |
 
-`application::ports`（实现自定义引擎的扩展点）：
+注意 availability 语义：能降级产出的引擎应恒返回 `Available`（如 latex-source 无 pandoc 出围栏兜底），把「能否产出」与「产出质量」分开——否则注册表会把它当不可用跳过。
 
-- **`Converter`**（核心）：`convert(&self, Input) -> Result<ConvertResult, AlchemizeError>`、`supported_extensions() -> &[&str]`、`can_convert(&Input) -> bool`（默认扩展名匹配）、`priority() -> u8`（默认 10）、`name() -> &'static str`（默认 `"unknown"`）、`availability() -> Availability`（默认 `Available`）、`is_remote() -> bool`（默认 false）。
-- **`VisionProvider`**：`describe(&[u8], DetailLevel) -> anyhow::Result<String>`、`ocr(&[u8]) -> anyhow::Result<String>`、`name()`。
-- **`TranscribeProvider`**：`transcribe(&[u8] /*16kHz mono WAV*/) -> Result<Transcript, AlchemizeError>`、`availability()`、`name()`。`Transcript { language, duration, segments: Vec<TranscriptSegment{start_sec, end_sec, text}> }`，`full_text()` 拼接，`DISCLAIMER` 常量声明 VAD 非说话人识别。
-- **`ExternalTool`**：`program()` + `probe()`（PATH 探测，无 shell 调用）；`which_program()` 公开辅助函数。
-- **`Availability`**：`Available` ｜ `Unavailable { reason: String }`（doctor 与 attempts 展示原因）。
+### VisionProvider Trait
 
-### 错误类型 AlchemizeError
+```rust
+#[async_trait]
+pub trait VisionProvider: Send + Sync {
+    async fn describe(&self, image_data: &[u8], detail: DetailLevel) -> anyhow::Result<String>;
+    async fn ocr(&self, image_data: &[u8]) -> anyhow::Result<String>;
+    fn name(&self) -> &'static str;
+}
+```
+
+图片引擎的描述与 OCR 来源；不注入时图片转换降级为元数据 markdown（含尺寸/哈希），alchemize 不内置任何视觉后端。
+
+### TranscribeProvider Trait
+
+```rust
+#[async_trait]
+pub trait TranscribeProvider: Send + Sync {
+    async fn transcribe(&self, audio_wav16k: &[u8]) -> Result<Transcript, AlchemizeError>;
+    fn availability(&self) -> Availability;
+    fn name(&self) -> &'static str;
+}
+```
+
+输入为 16kHz 单声道 WAV 字节。`Transcript { language, duration, segments: Vec<TranscriptSegment{start_sec, end_sec, text}> }`；`full_text()` 拼接段文本；`DISCLAIMER` 常量声明「分段由 VAD 产生，非说话人识别」。
+
+### ExternalTool Trait
+
+```rust
+pub trait ExternalTool: Send + Sync {
+    fn program(&self) -> &str;
+    fn probe(&self) -> Availability { /* PATH 探测，无 shell 调用 */ }
+}
+pub fn which_program(program: &str) -> bool;
+```
+
+外部二进制（pandoc/ffmpeg）统一走 PATH 探测：构建时缺席、运行时发现。
+
+## 🚨 错误类型
+
+### `AlchemizeError`
 
 `domain::error::AlchemizeError`（thiserror）主要变体：
 
@@ -152,51 +208,148 @@ pub struct ConvertResult {
 | `Pdf(String)` / `Zip(String)` / `Xml(String)` | 本地解析失败 |
 | `VideoUnavailable` / `AudioUnavailable` / `VisionUnavailable` | 依赖缺失（ffmpeg/转录/视觉） |
 | `MineruUnavailable` / `MineruConversion` | 云端服务不可达/转换失败 |
-| `SecurityViolation { kind, message }` | SSRF 校验拒绝（scheme/环回/私网/链路本地/域名白名单/签名缺失） |
+| `SecurityViolation { kind, message }` | SSRF 校验拒绝 |
 | `ResponseTooLarge { actual, limit }` | HTTP 响应体超限 |
 | `Other(String)` | 其他转换器错误 |
 
-## CLI `alch`
+### `SecurityViolationType`
 
+URL 校验拒绝的六类原因：`InvalidScheme`（非 HTTPS）、`LoopbackAddress`、`PrivateAddress`（RFC1918）、`LinkLocalAddress`、`HostnameNotAllowed`（白名单外）、`MissingSignature`（预签名缺失）。
+
+### 相关类型定义
+
+`Availability::Available` ｜ `Availability::Unavailable { reason: String }`（equality 可比较，doctor 与 attempts 展示 reason）；`VideoProcessingMode::{Gpu, AudioOnly, Disabled}`（默认 `AudioOnly`）；`AssetMode::{Dir, Inline}`（默认 `Dir`）。
+
+## 🚪 特性门控 API
+
+### MinerU（`mineru` 特性）
+
+- 注册条件：`with_mineru(MineruConfig)` 且 feature 编译开启；CLI 侧由 `ALCHEMIZE_MINERU_URL` 触发。
+- 装配产物：`mineru` 引擎（仅 `pdf` 扩展名），priority 5 链尾，产出 `quality=api`。
+- 内部契约：agent/precision 双客户端按文件大小选择（factory）；轮询退避经 limiteron；响应体积分级限量；下载 URL 过 `ValidatedFileUrl` SSRF 校验。
+- 环境变量：`ALCHEMIZE_MINERU_URL`（端点）、`MINERU_API_TOKEN`（precision bearer token）。
+
+### anydoc（`anydoc` 特性）
+
+- 装配产物：`anydoc` 引擎，priority 15（压过原生 office 解析），覆盖 doc/docm/pps/pot/xlsm/xlsb/odp/rtf/pdf 等全格式，含旧版二进制 Office。
+- 产出 `quality=local_full`；图片字节按文档序导出，经自研 `anydoc_render`（消费公开的 `anydoc::model`）渲染为 GFM 引用。
+
+### ASR（`asr` 特性）
+
+- 装配产物：转录提供方接入 audio/video 引擎。默认 provider 为 vecboost 门面（Qwen3-ASR ONNX 三件套 + silero VAD，本地推理）；Whisper 兼容云端后端仅在显式注入配置时激活。
+- 模型探测：`ALCHEMIZE_TRANSCRIBE_MODELS` → 缺省 `~/.cache/alchemize/models/transcribe/`（布局 `qwen3-conv_frontend.onnx`、`qwen3-encoder.int8.onnx`、`qwen3-decoder.int8.onnx`、`silero_vad.onnx`、`tokenizer/`）；`ORT_DYLIB_PATH` 指向 onnxruntime 动态库。缺失时 provider 自述 `Unavailable` 并附获取指引，不自动联网。
+- 测试专用：`ALCHEMIZE_ASR_TEST_WAV`（集成测试输入路径）。
+
+## 💡 使用示例
+
+### 基础转换
+
+```rust
+use alchemize::{AlchemizeBuilder, Input};
+
+#[tokio::main]
+async fn main() -> Result<(), alchemize::AlchemizeError> {
+    let alch = AlchemizeBuilder::new().build();
+    let result = alch.convert(&Input::Path("paper.pdf".into())).await?;
+    println!("engine: {}", result.metadata["converter"]);
+    println!("quality: {}", result.quality);
+    println!("{}", result.markdown);
+    Ok(())
+}
 ```
-alch convert <INPUT> [-o, --output <PATH>] [--engine <NAME>] [--assets <dir|inline>]
-            [--no-remote] [--format <EXT>]
-alch doctor
-alch formats
+
+### 引擎偏好
+
+```rust
+// 把 anydoc 提到队首；名称未命中静默回落默认链
+let result = alch.convert_pref(&input, Some("anydoc")).await?;
 ```
 
-| 子命令/参数 | 说明 |
-| --- | --- |
-| `convert <INPUT>` | 输入文件路径（必须是存在的文件） |
-| `-o, --output <PATH>` | 输出文件；缺省写 stdout。dir 模式下资产写在输出同目录 `images/`，父目录自动创建 |
-| `--engine <NAME>` | 偏好引擎名（见引擎名表）；未命中静默回落 |
-| `--assets <dir\|inline>` | 资产模式，默认 `dir`；非法值报 `unknown asset mode '<v>' (dir\|inline)` |
-| `--no-remote` | 排除云端引擎（MinerU） |
-| `--format <EXT>` | 覆盖格式检测（无点扩展名，如 `pdf`），内部转 `Input::Bytes` 载体 |
-| `doctor` | 每引擎一行：`<name> AVAILABLE <exts>` 或 `<name> UNAVAILABLE <reason>` |
-| `formats` | 全部支持扩展名排序去重后空格分隔输出 |
+### 资产模式
 
-**退出码**：`0` 成功（含降级产出）；`1` 其他错误（如输入不存在、写文件失败）；`2` 不支持格式；`3` 全链失败（stderr 逐行列出 `- <engine>: <reason>`）。
+```rust
+use alchemize::application::builder::AssetMode;
 
-**引擎名**（`metadata.converter` 与 `--engine` 取值）：`text`、`csv`、`html`、`epub`、`docx`、`pptx`、`xlsx`、`ipynb`、`pdf`、`latex-source`、`image`、`audio`、`video`、`subtitle`、`anydoc`（feature）、`mineru`（feature + 配置）、`zip`（facade）。
+let alch = AlchemizeBuilder::new()
+    .with_asset_mode(AssetMode::Inline) // base64 data URL 内联
+    .build();
+// Dir 模式（默认）经 asset_sink_for 写 <输出>/images/
+```
 
-## 环境变量
+### 自定义视觉提供方
 
-| 变量 | 作用域 | 说明 |
-| --- | --- | --- |
-| `ALCHEMIZE_MINERU_URL` | CLI/库 | 设置后注册 MinerU 引擎（本地/网关服务基址），未设置时链内无 MinerU |
-| `MINERU_API_TOKEN` | precision 客户端 | 云端 Precision API bearer token（`MineruPrecisionClient::from_env`） |
-| `ALCHEMIZE_TRANSCRIBE_MODELS` | ASR | 转录模型 bundle 目录；未设置时探测 `~/.cache/alchemize/models/transcribe/` |
-| `ORT_DYLIB_PATH` | ASR | onnxruntime 动态库路径（非空才启用本地 ONNX 推理） |
-| `ALCHEMIZE_ASR_TEST_WAV` | 仅测试 | ASR 集成测试的输入 wav 路径 |
+```rust
+use std::sync::Arc;
+use alchemize::application::ports::VisionProvider;
 
-## 特性开关
+struct MyVlm;
+#[async_trait::async_trait]
+impl VisionProvider for MyVlm {
+    async fn describe(&self, image: &[u8], _detail: alchemize::domain::result::DetailLevel) -> anyhow::Result<String> {
+        Ok("a photo".into())
+    }
+    async fn ocr(&self, image: &[u8]) -> anyhow::Result<String> {
+        Ok("text".into())
+    }
+    fn name(&self) -> &'static str { "my-vlm" }
+}
 
-| feature | 引入 | 默认 |
-| --- | --- | --- |
-| `mineru` | MinerU 云端 PDF 引擎（reqwest/limiteron/futures） | 关 |
-| `anydoc` | office 全格式后端（含旧版二进制 Office；priority 15 压过原生解析） | 关 |
-| `asr` | vecboost 转录门面（Qwen3-ASR ONNX + silero VAD） | 关 |
-| `full` | 以上全部 | 关 |
+let alch = AlchemizeBuilder::new()
+    .with_vision_provider(Arc::new(MyVlm))
+    .build();
+```
 
-默认特性零外部服务依赖；引擎装配见 `src/infrastructure/engines.rs`（feature 关闭的引擎根本不出现在列表中）。
+### 自定义转录提供方
+
+```rust
+use alchemize::application::ports::{TranscribeProvider, Transcript, TranscriptSegment};
+
+struct MyAsr;
+#[async_trait::async_trait]
+impl TranscribeProvider for MyAsr {
+    async fn transcribe(&self, wav16k: &[u8]) -> Result<Transcript, alchemize::AlchemizeError> {
+        Ok(Transcript {
+            language: Some("zh".into()),
+            duration: Some(1.5),
+            segments: vec![TranscriptSegment { start_sec: 0.0, end_sec: 1.5, text: "你好".into() }],
+        })
+    }
+    fn availability(&self) -> alchemize::application::ports::Availability {
+        alchemize::application::ports::Availability::Available
+    }
+    fn name(&self) -> &'static str { "my-asr" }
+}
+```
+
+## 🌟 最佳实践
+
+### 错误处理
+
+- 匹配三类终态分别处理：`UnsupportedFormat`（提示用户看 `formats`）、`AllBackendsFailed{attempts}`（把 attempts 逐行呈现给用户）、其余（按消息上报）。
+- 不吞 `Err`、不用默认值顶替失败产出；降级产出（`quality=local_fallback`）是 `Ok`，由调用方按 quality 决定是否可接受。
+
+### 引擎选择
+
+- 优先信任默认链（本地优先、云端兜底已是既定策略）；确需强制时用 `convert_pref`/`--engine`（前缀匹配即可），并接受未命中静默回落。
+- 自定义引擎的 `priority()`：接入现有链用 <15 的值；`availability()` 区分「能否产出」与「产出质量」，能降级的引擎恒 `Available`。
+
+### 安全注意事项
+
+- 凭据只经环境变量（`MINERU_API_TOKEN`）注入，不写入任何配置文件或日志。
+- 打印/序列化 `MineruConfig` 安全（三通路脱敏），但自定义类型含敏感字段时应效仿手工 `Debug` + 单测钉住的做法。
+- 不可信环境开启 `with_no_remote()`，进程零网络出口。
+
+### 常见问题排查
+
+- `metadata` 为 `Null`：直接经 `Converter` 实现产出（未过注册表）才会出现；门面路径必注入 `converter`。
+- 引擎没出现在 `availability()`：feature 未编译或（MinerU）未配置端点——根本未注册。
+- zip 输入报 `UnsupportedFormat("zip")`：编译时未开 zip 递归支持（门面在 `zip` 特性缺省时返回该错误）。
+
+## 📚 相关文档
+
+- [🏗️ 架构文档](ARCHITECTURE.md) — 设计原则、模块划分与数据流
+- [📖 用户指南](USER_GUIDE.md) — 从安装到进阶的完整使用教程
+- [❓ FAQ](FAQ.md) — 常见问题解答
+- [🔒 安全文档](SECURITY.md) — 信任边界、SSRF 防护、漏洞报告
+- [🤝 贡献指南](CONTRIBUTING.md) — 开发环境、测试与提交约定
+- [📋 更新日志](CHANGELOG.md) — 版本变更记录
