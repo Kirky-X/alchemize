@@ -33,7 +33,7 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 
 ## Architecture
 
-Single-crate DDD three layers: `domain` (types and rules, zero IO) → `application` (converter registry with a priority fallback chain + ports) → `infrastructure` (per-format converters + MinerU/ASR backends).
+Single-crate DDD three layers: `domain` (types and rules, no network/process IO) → `application` (converter registry with a priority fallback chain + ports) → `infrastructure` (per-format converters + MinerU/ASR backends).
 
 The registry tries engines for an extension in descending priority order. PDF example: anydoc (`local_full`, priority 15) → pdf-extract local text + TOC pruning/structure heuristics (`local_fallback`, priority 10) → MinerU cloud (`api`, priority 5, registered only when configured, tried after the local chain fails). The quality tier and the engine that actually produced the result are recorded in `metadata` and the stderr summary line.
 

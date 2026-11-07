@@ -1,6 +1,6 @@
 # 🏗️ Alchemize 架构文档
 
-Alchemize 是一个把任意文档炼成 Markdown 的 Rust 工具（CLI `alch` + 同名库），采用单 crate DDD 三层架构：`domain` 承载类型与规则（零 IO），`application` 承载端口与优先级 fallback 注册表，`infrastructure` 承载各格式转换器与远端后端。本文档基于 `src/` 实际代码结构，介绍设计原则、模块划分、fallback 链机制与数据流。
+Alchemize 是一个把任意文档炼成 Markdown 的 Rust 工具（CLI `alch` + 同名库），采用单 crate DDD 三层架构：`domain` 承载类型与规则（无网络/进程 IO），`application` 承载端口与优先级 fallback 注册表，`infrastructure` 承载各格式转换器与远端后端。本文档基于 `src/` 实际代码结构，介绍设计原则、模块划分、fallback 链机制与数据流。
 
 ## 📋 目录
 
@@ -15,7 +15,7 @@ Alchemize 是一个把任意文档炼成 Markdown 的 Rust 工具（CLI `alch` +
 
 ## 设计原则
 
-1. **domain 零 IO**：`src/domain/` 只定义类型与纯规则（输入、结果、资产、错误、LaTeX 校验），不做文件读写、不发网络请求——保证领域逻辑可脱离环境测试。
+1. **domain 无网络/进程 IO**：`src/domain/` 不发网络请求、不起子进程；文件读写仅有两处边界内例外——`Input::to_bytes` 读盘、`DirSink` 落盘（资产写出）。其余领域逻辑可脱离环境测试。
 2. **端口-适配器分离**：`application/ports.rs` 定义 `Converter`/`VisionProvider`/`TranscribeProvider`/`ExternalTool` 四个 trait，基础设施层实现它们；注册表只依赖 trait，不依赖具体引擎。
 3. **降级显性化**：引擎不可用（`Availability::Unavailable`）直接跳过并记录原因，不静默重试；全链失败返回 `AllBackendsFailed { ext, attempts }` 携带逐引擎失败明细（`src/application/registry.rs:103-146`）。
 4. **本地优先**：云端引擎（MinerU）优先级低于本地链，仅在本地链失败后尝试（`src/infrastructure/remote/mineru/wrapper.rs:284-290`）；`--no-remote` 可整体排除云端引擎。
@@ -38,10 +38,12 @@ Alchemize 是一个把任意文档炼成 Markdown 的 Rust 工具（CLI `alch` +
                            │ Converter trait（ports.rs）
 ┌──────────────────────────▼──────────────────────────────┐
 │  infrastructure/                                         │
+│  ├─ engines.rs 引擎装配（feature→引擎列表）                │
 │  ├─ document/  text csv html epub docx pptx xlsx ipynb   │
 │  │             latex_source pdf anydoc anydoc_render zip │
+│  │             shared（detect_encoding 等共享原语）        │
 │  ├─ media/     image audio video subtitle timeline dedup │
-│  │             asr/{vecboost, whisper_api}               │
+│  │             subtitle_converter asr/{vecboost, whisper}│
 │  ├─ remote/    mineru/{client, factory, agent,           │
 │  │             precision, backoff, http_limit,           │
 │  │             validated_url, types, wrapper}            │
@@ -65,7 +67,9 @@ Alchemize 是一个把任意文档炼成 Markdown 的 Rust 工具（CLI `alch` +
 | --- | --- |
 | `input.rs` | `Input`（`Path` / `Bytes{data, filename, mimetype, extension}` 两种载体）、`InputFormat` 枚举、`detect_format()`（扩展名映射 + WEBP/WAVE/AVI 魔数嗅探） |
 | `result.rs` | `ConvertResult`（markdown + metadata + content_type + quality + title + assets）、`ConversionQuality`（`Api`/`LocalFull`/`LocalFallback`，序列化为 `api`/`local_full`/`local_fallback`）、`ContentType`、`VideoProcessingMode` |
-| `asset.rs` | `Asset{filename, bytes, role}` 与 `AssetSink`（`DirSink` 写 `images/` 目录、`InlineSink` 转 base64 data URL） |
+| `asset.rs` | `Asset{filename, bytes, role}` 与 `AssetSink`（`DirSink` 写 `images/` 目录、`InlineSink` 转 base64 data URL）——**边界内例外**：DirSink 落盘是 domain 层唯一的写盘点 |
+| `error.rs` | `AlchemizeError` 15 个变体（格式/后端/IO/PDF/ZIP/XML/视频/音频/视觉/MinerU/安全/体积等）与 `SecurityViolationType` |
+| `latex_validate.rs` | LaTeX 数学定界符纯规则校验（无 IO） |
 | `error.rs` | `AlchemizeError` 15 个变体（格式/后端/IO/PDF/ZIP/XML/视频/音频/视觉/MinerU/安全/体积等）与 `SecurityViolationType` |
 | `latex_validate.rs` | LaTeX 数学定界符纯规则校验（无 IO） |
 

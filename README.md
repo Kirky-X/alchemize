@@ -45,7 +45,7 @@ alch formats
 
 ## 架构
 
-单 crate DDD 三层：`domain`（类型与规则，零 IO）→ `application`（Converter 注册表 priority fallback 链 + 端口）→ `infrastructure`（各格式转换器 + MinerU/ASR 后端）。
+单 crate DDD 三层：`domain`（类型与规则，无网络/进程 IO）→ `application`（Converter 注册表 priority fallback 链 + 端口）→ `infrastructure`（各格式转换器 + MinerU/ASR 后端）。
 
 fallback 链（PDF 例）：anydoc（feature `anydoc`，`local_full`，priority 15）→ pdf-extract 本地文本 + TOC 剔除/结构启发（`local_fallback`，priority 10）→ MinerU 云端（feature `mineru` 且配置端点，`api`，priority 5）——本地优先，云端仅在本地链失败后兜底。转换结果的质量分层与实际引擎记录在 `metadata` 与 stderr 摘要行。
 
