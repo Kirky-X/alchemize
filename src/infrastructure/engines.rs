@@ -34,6 +34,15 @@ pub fn default_converters(
     engines.push(Box::new(crate::infrastructure::document::DocxConverter::new()));
     // PDF local fallback tier.
     engines.push(Box::new(crate::infrastructure::document::PdfConverter::new()));
+    // MinerU remote tier (config-gated; falls through to local on failure).
+    #[cfg(feature = "mineru")]
+    if let Some(cfg) = mineru {
+        if let Ok(conv) = crate::infrastructure::remote::mineru::MinerUConverter::new(
+            crate::infrastructure::remote::mineru::MinerUHttpConfig::from_config(cfg),
+        ) {
+            engines.push(Box::new(conv));
+        }
+    }
     engines.push(Box::new(crate::infrastructure::document::PptxConverter::new()));
     // Tables (csv/tsv).
     engines.push(Box::new(CsvConverter::new()));

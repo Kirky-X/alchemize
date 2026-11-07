@@ -101,6 +101,7 @@ dependencies = [
  "encoding_rs",
  "futures",
  "htmd",
+ "http",
  "img_hash",
  "limiteron",
  "pdf-extract",

@@ -36,7 +36,7 @@ path = "src/main.rs"
 [features]
 default = []
 # MinerU 云端 PDF 高保真（HTTP 客户端）
-mineru = ["dep:reqwest", "dep:limiteron", "dep:futures"]
+mineru = ["dep:reqwest", "dep:limiteron", "dep:futures", "reqwest/multipart", "reqwest/stream"]
 # anydoc office 全格式后端（firecrawl/anydoc crate, MIT）
 anydoc = ["dep:anydoc"]
 # ASR：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
@@ -79,6 +79,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 vecboost = { path = "../vecboost", version = "0.3.0-rc.3", default-features = false, features = ["transcribe"], optional = true }
 
 [dev-dependencies]
+http = { version = "1.5", default-features = false, features = ["std"] }
 proptest = { version = "1.0", default-features = false, features = ["std"] }
 tempfile = { version = "3", default-features = false, features = ["getrandom"] }
 tokio-test = { version = "0.4", default-features = false }
