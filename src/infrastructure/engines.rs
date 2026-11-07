@@ -32,6 +32,10 @@ pub fn default_converters(
     // Hypertext / e-book.
     engines.push(Box::new(crate::infrastructure::document::HtmlConverter::new()));
     engines.push(Box::new(crate::infrastructure::document::EpubConverter::new()));
+    // Spreadsheets (xlsx/xls/ods).
+    engines.push(Box::new(crate::infrastructure::document::XlsxConverter::new()));
+    // Notebooks.
+    engines.push(Box::new(crate::infrastructure::document::IpynbConverter::new()));
 
     // ZipConverter needs a registry for nested conversion: built without it
     // here (nested support wired when the registry is fully assembled — the
