@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Golden fixture tests: each format converts to its expected markdown.
 
 use alchemize::application::builder::{Alchemize, AlchemizeBuilder};

@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! CLI end-to-end tests: exercise the `alch` binary (formats/doctor/convert,
 //! exit codes, asset writing).
 

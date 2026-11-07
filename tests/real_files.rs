@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Real-file parsing tests.
 //!
 //! Every fixture under `tests/fixtures/real/` is a genuine file harvested
