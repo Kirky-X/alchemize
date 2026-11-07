@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Plain text and code/config file converter with encoding detection.
 
 use async_trait::async_trait;

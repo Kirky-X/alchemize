@@ -1,4 +1,6 @@
-// Copyright © 2026 Kirky.X. All rights reserved.
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! Unified MinerU client trait .
 
 use async_trait::async_trait;

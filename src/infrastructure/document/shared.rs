@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Shared helpers for document converters.
 
 /// Extract the local tag name from an XML tag (strip namespace prefix).

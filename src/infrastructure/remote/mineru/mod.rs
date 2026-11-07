@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! MinerU API integration (feature `mineru`).
 //!
 //! - [`MineruClient`] trait — unified abstraction for both APIs

@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Simplified GFM renderer for the public `anydoc::model` document model.
 //!
 //! anydoc 0.2 keeps its renderer private (`mod render`), so asset-reference

@@ -1,4 +1,6 @@
-// Copyright © 2026 Kirky.X. All rights reserved.
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! Shared types and constants for MinerU clients.
 
 /// Default timeout for polling (5 minutes).

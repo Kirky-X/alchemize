@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Alchemize builder — fluent API for constructing a configured converter.
 
 use std::sync::Arc;

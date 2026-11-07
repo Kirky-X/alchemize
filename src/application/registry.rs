@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Converter registry — priority-sorted routing with fallback chain.
 
 use tracing::{debug, warn};

@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! `alch` — transmute documents into Markdown from the command line.
 
 use std::io::Write as _;

@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! LaTeX source (.tex/.latex) to Markdown converter via pandoc, with
 //! math-delimiter normalization and div-noise stripping (both ported from
 //! the liuxiang pipeline).

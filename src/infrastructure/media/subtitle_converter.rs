@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Subtitle file converter (srt/vtt/ass/ssa) — native aspasia-backed
 //! parsing (ASS parses directly; no ffmpeg detour needed).
 

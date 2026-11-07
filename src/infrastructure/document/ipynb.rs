@@ -1,4 +1,6 @@
-// Copyright © 2026 Kirky.X. All rights reserved.
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! Jupyter Notebook (IPYNB) to Markdown converter.
 //!
 //! Extracts code cells and markdown cells from Jupyter notebooks,

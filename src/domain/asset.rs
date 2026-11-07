@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Asset pipeline — binary assets extracted in document order.
 
 use sha2::{Digest, Sha256};

@@ -1,4 +1,6 @@
-// Copyright © 2026 Kirky.X. All rights reserved.
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! Video to Markdown converter with degradation strategy.
 //!
 //! Processing depends on `VideoProcessingMode`:

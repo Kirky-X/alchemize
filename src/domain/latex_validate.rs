@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Post-conversion LaTeX sanity rules for markdown output.
 //!
 //! Three pure checks (no IO): math delimiter pairing, environment closure,

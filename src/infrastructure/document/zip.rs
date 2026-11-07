@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! ZIP archive converter with recursive extraction.
 
 use std::io::Cursor;

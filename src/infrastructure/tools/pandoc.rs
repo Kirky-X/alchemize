@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Pandoc external tool — runtime probe + LaTeX→GFM conversion.
 
 use crate::application::ports::{Availability, ExternalTool};

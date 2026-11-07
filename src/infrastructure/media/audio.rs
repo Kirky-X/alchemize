@@ -1,4 +1,6 @@
-// Copyright © 2026 Kirky.X. All rights reserved.
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! Audio to Markdown converter.
 //!
 //! Requires an ASR (Automatic Speech Recognition) provider for transcription.

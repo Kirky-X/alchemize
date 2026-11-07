@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! AnydocConverter — feature-gated wrapper around the `anydoc` crate
 //! (firecrawl/anydoc, MIT).
 //!

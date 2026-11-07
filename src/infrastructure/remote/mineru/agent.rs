@@ -1,4 +1,6 @@
-// Copyright © 2026 Kirky.X. All rights reserved.
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! MinerU Agent Lightweight API client .
 //!
 //! Used for files ≤10MB and ≤20 pages.

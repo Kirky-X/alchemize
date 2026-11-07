@@ -1,4 +1,6 @@
-// Copyright © 2026 Kirky.X. All rights reserved.
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! Subtitle parser for embedded video subtitles.
 //!
 //! Supports SRT, VTT, SSA/ASS formats using the aspasia crate.

@@ -1,4 +1,6 @@
-// Copyright © 2026 Kirky.X. All rights reserved.
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! SSRF-safe URL wrapper for MinerU file URLs .
 
 use std::net::{Ipv4Addr, Ipv6Addr};

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! Media format converters: image, audio, video, subtitle, timeline, dedup.
 
 pub mod asr;

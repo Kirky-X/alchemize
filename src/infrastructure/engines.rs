@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! Engine wiring — assemble the default converter set for the builder.
 //!
 //! Converters are registered here as infrastructure tasks land; engines whose

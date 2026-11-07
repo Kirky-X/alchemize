@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! PDF to Markdown converter using pdf-extract, with paper-flavoured
 //! post-processing (TOC removal, artifact cleanup, structure heuristics).
 

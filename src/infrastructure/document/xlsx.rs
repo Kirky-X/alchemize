@@ -1,4 +1,6 @@
-// Copyright © 2026 Kirky.X. All rights reserved.
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! XLSX/XLS/ODS to Markdown converter using calamine.
 //!
 //! Converts spreadsheet files to markdown tables. Each sheet becomes a

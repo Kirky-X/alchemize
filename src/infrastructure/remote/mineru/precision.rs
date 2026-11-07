@@ -1,4 +1,6 @@
-// Copyright © 2026 Kirky.X. All rights reserved.
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
 //! MinerU Precision Extract API client .
 //!
 //! Used for larger files (>10MB or >20 pages).

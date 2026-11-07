@@ -1,4 +1,6 @@
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
+
 //! EPUB to Markdown converter using rbook + htmd.
 
 use std::io::Cursor;
