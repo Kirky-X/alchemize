@@ -225,7 +225,9 @@ impl HtmlMoliConverter {
 
     /// dom_smoothie 主内容提取：产出纯文本（非空），失败返回 Err。
     /// （移植自 crawlrs dom_smoothie_extractor 的调用形态。）
-    fn extract_main_content(&self, html: &str) -> Result<String, String> {
+    /// dom_smoothie 主内容提取：产出（清理后正文 HTML，纯文本）。两者任一非空
+    /// 即提取成功——HTML 分支可保段落/图片/链接结构，纯文本仅作其降级。
+    fn extract_main_content(&self, html: &str) -> Result<(String, String), String> {
         let trimmed = html.trim();
         if trimmed.is_empty() {
             return Err("empty html".into());
@@ -236,11 +238,30 @@ impl HtmlMoliConverter {
         let article: dom_smoothie::Article = readability
             .parse()
             .map_err(|e| format!("dom-smoothie parse: {e}"))?;
+        let content_html = article.content.trim().to_string();
         let text = article.text_content.trim().to_string();
-        if text.is_empty() {
-            return Err("dom-smoothie: empty text content".into());
+        if content_html.is_empty() && text.is_empty() {
+            return Err("dom-smoothie: empty content".into());
         }
-        Ok(text)
+        Ok((content_html, text))
+    }
+
+    /// StructuredHtml 分支：清理后正文 HTML → moli 状态机转换（保留段落/
+    /// 图片/链接结构）。同步段独立作用域（ego_tree 非 Send，不跨 await）。
+    fn convert_structured_html(&self, content_html: &str) -> Option<String> {
+        let doc = scraper::Html::parse_document(content_html.trim());
+        let root = doc.tree.root();
+        let dom = ScraperDom::new(&doc);
+        let converter = moli_html2md::Converter::new(moli_html2md::Options {
+            max_depth: usize::MAX,
+            ..Default::default()
+        });
+        let markdown = converter.convert(&dom, root.id());
+        if markdown.trim().is_empty() {
+            None
+        } else {
+            Some(markdown.trim().to_string() + "\n")
+        }
     }
 }
 
@@ -271,21 +292,31 @@ impl crate::application::ports::Converter for HtmlMoliConverter {
             _ => html,
         };
 
-        // 主内容提取（显式开启）：产出纯文本 → 行首转义直出；失败/空诚实
-        // 回退全页转换（与 crawlrs MainContentSource 三分支同构）。
+        // 主内容提取（显式开启）：crawlrs MainContentSource 三分支同构——
+        // ① StructuredHtml：清理后正文 HTML → moli 转换（段落/图片/链接保留）；
+        // ② PlainText 降级：text_content 行首转义直出（无结构）；
+        // ③ 全页回退：提取失败/双产皆空时走完整转换链。
         if self.extract_main {
             match self.extract_main_content(&html) {
-                Ok(text) => {
-                    let markdown = escape_leading_markdown_chars(&text);
-                    return Ok(ConvertResult::with_metadata(
-                        markdown,
-                        ContentType::Document,
-                        serde_json::json!({
-                            "source_format": "html",
-                            "main_content_extracted": true,
-                        }),
-                    )
-                    .with_quality(ConversionQuality::LocalFallback));
+                Ok((content_html, text)) => {
+                    let markdown = self.convert_structured_html(&content_html).or_else(|| {
+                        (!text.is_empty()).then(|| escape_leading_markdown_chars(&text))
+                    });
+                    if let Some(markdown) = markdown {
+                        return Ok(ConvertResult::with_metadata(
+                            markdown,
+                            ContentType::Document,
+                            serde_json::json!({
+                                "source_format": "html",
+                                "main_content_extracted": true,
+                            }),
+                        )
+                        .with_quality(ConversionQuality::LocalFallback));
+                    }
+                    // 双产皆空：诚实回退全页（不静默吞）。
+                    tracing::warn!(
+                        "html-moli: extraction produced empty output, falling back to full page"
+                    );
                 }
                 Err(reason) => {
                     tracing::warn!(reason = %reason, "html-moli: main-content extraction failed, falling back to full page");

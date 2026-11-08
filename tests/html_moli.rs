@@ -75,12 +75,14 @@ async fn full_page_conversion_goes_through_primary_path() {
     );
 }
 
-/// 主内容提取：导航/页脚噪声被剔除；纯文本分支行首转义生效。
+/// 主内容提取（StructuredHtml 分支）：导航/页脚噪声被剔除，正文以
+/// 结构化 markdown 产出（段落分块、图片链接保留）。
 #[tokio::test]
-async fn extract_main_drops_chrome_and_escapes_leading() {
+async fn extract_main_drops_chrome_and_keeps_structure() {
     let html = r##"<html><body>
         <nav><a href="/home">Home</a> <a href="/about">About</a></nav>
-        <article><h1>Doc Title</h1><p>1. first point</p><p>body words here</p></article>
+        <article><h1>Doc Title</h1><img src="/pics/hero.png" alt="hero">
+        <p>first point</p><p>body words here</p></article>
         <footer>copyright noise</footer>
     </body></html>"##;
 
@@ -106,8 +108,18 @@ async fn extract_main_drops_chrome_and_escapes_leading() {
         "extracted body must keep article text: {:?}",
         extracted.markdown
     );
-    // 注意：dom_smoothie 的 text_content 会把相邻块粘连（"标题1. point"），
-    // 行首转义仅对真正的行首标记生效——转义函数的确定性单测在引擎文件内。
+    // 结构化产出：段落分块（多行）而非粘连字符串
+    assert!(
+        extracted.markdown.lines().count() >= 3,
+        "structured extraction must preserve paragraph breaks: {:?}",
+        extracted.markdown
+    );
+    // 图片链接保留（正文内的 img 不再丢失）
+    assert!(
+        extracted.markdown.contains("(/pics/hero.png)"),
+        "article image must survive extraction: {:?}",
+        extracted.markdown
+    );
 }
 
 /// 提取失败诚实回退全页：dom_smoothie 无法产出正文时走 moli→htmd 链。
