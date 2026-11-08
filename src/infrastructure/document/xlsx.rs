@@ -108,7 +108,7 @@ impl Converter for XlsxConverter {
     }
 
     fn supported_extensions(&self) -> &[&str] {
-        &["xlsx", "xls", "ods"]
+        &["xlsx", "xls", "xlsb", "ods"]
     }
 }
 
@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn supported_extensions() {
         let converter = XlsxConverter::new();
-        assert_eq!(converter.supported_extensions(), &["xlsx", "xls", "ods"]);
+        assert_eq!(converter.supported_extensions(), &["xlsx", "xls", "xlsb", "ods"]);
     }
 
     #[test]
@@ -256,6 +256,25 @@ mod tests {
     #[test]
     fn default_creates_instance() {
         let converter = XlsxConverter;
-        assert_eq!(converter.supported_extensions(), &["xlsx", "xls", "ods"]);
+        assert_eq!(converter.supported_extensions(), &["xlsx", "xls", "xlsb", "ods"]);
+    }
+
+    #[test]
+    fn xlsb_extension_routed() {
+        // Routing-level guarantee: the extension joins the engine table even
+        // before a real binary fixture is available (calamine Xlsb path).
+        let converter = XlsxConverter::new();
+        assert!(converter.supported_extensions().contains(&"xlsb"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a real .xlsb binary fixture"]
+    async fn real_xlsb_opens_via_calamine() {
+        let path = std::env::var("ALCHEMIZE_XLSB_FIXTURE").expect("set ALCHEMIZE_XLSB_FIXTURE");
+        let result = XlsxConverter::new()
+            .convert(Input::Path(path.into()))
+            .await
+            .unwrap();
+        assert!(!result.markdown.is_empty());
     }
 }
