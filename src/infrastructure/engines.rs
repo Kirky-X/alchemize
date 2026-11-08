@@ -41,6 +41,16 @@ pub fn default_converters(
     engines.push(Box::new(
         crate::infrastructure::document::DocxDeepConverter::new(),
     ));
+    // Self-hosted deep office parsers (priority 18): ODT/ODP/PPTX.
+    engines.push(Box::new(
+        crate::infrastructure::document::OdtConverter::new(),
+    ));
+    engines.push(Box::new(
+        crate::infrastructure::document::OdpConverter::new(),
+    ));
+    engines.push(Box::new(
+        crate::infrastructure::document::PptxDeepConverter::new(),
+    ));
     // Office XML (fallback tier below anydoc).
     engines.push(Box::new(
         crate::infrastructure::document::DocxConverter::new(),
@@ -106,6 +116,42 @@ pub fn default_converters(
     engines.push(Box::new(
         crate::infrastructure::document::IpynbConverter::new(),
     ));
+
+    // Recursive archive containers (tar/tgz/gz/xz/zst/7z) — feature gated.
+    #[cfg(feature = "containers")]
+    {
+        let arc = std::sync::Arc::new(crate::application::registry::ConverterRegistry::new());
+        engines.push(Box::new(
+            crate::infrastructure::containers::TarConverter::with_arc(arc.clone()),
+        ));
+        engines.push(Box::new(
+            crate::infrastructure::containers::TarGzConverter::with_arc(arc.clone()),
+        ));
+        engines.push(Box::new(
+            crate::infrastructure::containers::GzConverter::with_arc(arc.clone()),
+        ));
+        engines.push(Box::new(
+            crate::infrastructure::containers::XzConverter::with_arc(arc.clone()),
+        ));
+        engines.push(Box::new(
+            crate::infrastructure::containers::ZstConverter::with_arc(arc.clone()),
+        ));
+        engines.push(Box::new(
+            crate::infrastructure::containers::SevenZConverter::with_arc(arc.clone()),
+        ));
+    }
+
+    // Structured data engines (parquet/sqlite/bib) — feature gated.
+    #[cfg(feature = "data")]
+    {
+        engines.push(Box::new(
+            crate::infrastructure::data::ParquetConverter::new(),
+        ));
+        engines.push(Box::new(
+            crate::infrastructure::data::SqliteConverter::new(),
+        ));
+        engines.push(Box::new(crate::infrastructure::data::BibConverter::new()));
+    }
 
     // html-moli：crawlrs 吸收的 moli→htmd 转换链（feature moli 门控，
     // priority 15 压过 html/htmd 的 10；base_url/extract_main 显式选项）。

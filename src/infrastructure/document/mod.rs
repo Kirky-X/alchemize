@@ -27,7 +27,9 @@ pub use anydoc::AnydocConverter;
 pub use csv::CsvConverter;
 pub use docx::DocxConverter;
 pub use epub::EpubConverter;
-pub use office::DocxDeepConverter;
+pub use office::{
+    DocxDeepConverter, OdpConverter, OdtConverter, PptxDeepConverter,
+};
 pub use html::HtmlConverter;
 pub use ipynb::IpynbConverter;
 pub use latex_source::LatexSourceConverter;
