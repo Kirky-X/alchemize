@@ -87,6 +87,16 @@ alch doctor && alch formats         # 先看引擎与格式
 
 没有独立的「校验」功能；质量判读靠产出标注：stderr 摘要行与 `metadata.converter`/`quality` 字段。降级（`local_fallback`）属预期行为而非错误；zip 嵌套、不支持格式等边界属显式报错。
 
+### ❓ `--extract-main` 什么时候该开？
+
+| 场景 | 建议 |
+| --- | --- |
+| 网页存档 → RAG 语料 / 只要正文 | 开（导航/页脚/Edit 噪声剔除；真实实测 wiki 1MB 页 -71%、"Edit section" 56→0，正文锚点零丢失） |
+| 手写文档 / 结构即内容 | 不开（readability 启发式可能裁掉需要的结构） |
+| 法律/合同全量存档 | 不开或先对比（提取路径是纯文本形态，排版结构变平） |
+
+安全网：提取失败或无正文可提时**自动回退全页转换**，开着不会丢内容。两条路径可由质量标签区分——提取路径 `local_fallback`、全页路径 `local_full`（stderr 摘要与 `quality` 字段）。实测明细见[用户指南 · 主内容提取](USER_GUIDE.md#-主内容提取与链接绝对化feature-moli)。
+
 ### ❓ Alchemize 安全吗？
 
 安全模型四道防线：不可信输入的结构化错误处理（不 panic）、MinerU 下载 URL 的 SSRF 校验（HTTPS-only/私网拒绝/域名白名单/签名）、远端响应分级限量、凭据三通路脱敏。默认构建零网络出口。完整说明见[安全文档](SECURITY.md)。
