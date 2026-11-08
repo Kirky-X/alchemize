@@ -59,8 +59,9 @@ impl Converter for AnydocConverter {
                 let doc = anydoc::to_document(&bytes, None)?;
                 let mut doc = doc;
                 let assets = rewrite_asset_references(&mut doc);
+                let bridged = bridge_to_selfhost(doc);
                 let markdown =
-                    crate::infrastructure::document::anydoc_render::render_markdown(&doc);
+                    crate::infrastructure::document::gfm_render::render_markdown(&bridged);
                 Ok::<_, anydoc::ConvertError>((markdown, assets))
             }))
         })
@@ -274,6 +275,149 @@ fn rewrite_asset_references(doc: &mut anydoc::model::Document) -> Vec<crate::dom
     doc.blocks = blocks;
 
     collected
+}
+
+/// Bridge the anydoc model to the self-hosted document model.
+///
+/// Transitional (deleted with the anydoc retirement): maps every variant
+/// one-to-one; asset references are already rewritten to External by then.
+fn bridge_to_selfhost(doc: anydoc::model::Document) -> crate::domain::document::Document {
+    use crate::domain::document as dm;
+
+    fn map_blocks(blocks: Vec<anydoc::model::Block>) -> Vec<dm::Block> {
+        blocks
+            .into_iter()
+            .map(|b| match b {
+                anydoc::model::Block::Heading { level, content, .. } => dm::Block::Heading {
+                    level,
+                    content: map_inlines(content),
+                },
+                anydoc::model::Block::Paragraph(i) => dm::Block::Paragraph(map_inlines(i)),
+                anydoc::model::Block::List(l) => dm::Block::List(dm::List {
+                    marker: match l.marker {
+                        anydoc::model::MarkerKind::Bullet => dm::MarkerKind::Bullet,
+                        anydoc::model::MarkerKind::Decimal => dm::MarkerKind::Decimal,
+                        anydoc::model::MarkerKind::LowerAlpha => dm::MarkerKind::LowerAlpha,
+                        anydoc::model::MarkerKind::UpperAlpha => dm::MarkerKind::UpperAlpha,
+                        anydoc::model::MarkerKind::LowerRoman => dm::MarkerKind::LowerRoman,
+                        anydoc::model::MarkerKind::UpperRoman => dm::MarkerKind::UpperRoman,
+                    },
+                    start: l.start,
+                    items: l
+                        .items
+                        .into_iter()
+                        .map(|it| dm::ListItem {
+                            blocks: map_blocks(it.blocks),
+                        })
+                        .collect(),
+                }),
+                anydoc::model::Block::Table(t) => dm::Block::Table(map_table(t)),
+                anydoc::model::Block::BlockQuote(nested) => {
+                    dm::Block::BlockQuote(map_blocks(nested))
+                }
+                anydoc::model::Block::CodeBlock { lang, text } => {
+                    dm::Block::CodeBlock { lang, text }
+                }
+                anydoc::model::Block::Rule => dm::Block::Rule,
+                anydoc::model::Block::Math(tex) => dm::Block::Math(tex),
+            })
+            .collect()
+    }
+
+    fn map_table(t: anydoc::model::Table) -> dm::Table {
+        dm::Table {
+            grid: t
+                .grid
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|slot| match slot {
+                            anydoc::model::CellSlot::Origin(c) => dm::CellSlot::Origin(dm::Cell {
+                                blocks: map_blocks(c.blocks),
+                                col_span: c.col_span,
+                                row_span: c.row_span,
+                            }),
+                            anydoc::model::CellSlot::Covered { origin_row, origin_col } => {
+                                dm::CellSlot::Covered { origin_row, origin_col }
+                            }
+                        })
+                        .collect()
+                })
+                .collect(),
+            header_rows: t.header_rows,
+            kind: match t.kind {
+                anydoc::model::TableKind::Data => dm::TableKind::Data,
+                anydoc::model::TableKind::Layout => dm::TableKind::Layout,
+            },
+        }
+    }
+
+    fn map_inlines(inlines: Vec<anydoc::model::Inline>) -> Vec<dm::Inline> {
+        inlines
+            .into_iter()
+            .map(|i| match i {
+                anydoc::model::Inline::Text { text, style } => dm::Inline::Text {
+                    text,
+                    style: dm::Style {
+                        bold: style.bold,
+                        italic: style.italic,
+                        code: style.code,
+                        strike: style.strike,
+                    },
+                },
+                anydoc::model::Inline::Link { content, target } => dm::Inline::Link {
+                    content: map_inlines(content),
+                    target: match target {
+                        anydoc::model::LinkTarget::External(u) => dm::LinkTarget::External(u),
+                        anydoc::model::LinkTarget::Relative(u) => dm::LinkTarget::Relative(u),
+                        anydoc::model::LinkTarget::Anchor(id) => {
+                            dm::LinkTarget::Anchor(format!("{id:?}"))
+                        }
+                    },
+                },
+                anydoc::model::Inline::Image { alt, source } => dm::Inline::Image {
+                    alt,
+                    source: match source {
+                        anydoc::model::ImageSource::External(u) => dm::ImageSource::External(u),
+                        anydoc::model::ImageSource::Asset(id) => {
+                            dm::ImageSource::Asset(id.0)
+                        }
+                        anydoc::model::ImageSource::Unavailable => dm::ImageSource::Unavailable,
+                    },
+                },
+                anydoc::model::Inline::Math(tex) => dm::Inline::Math(tex),
+                anydoc::model::Inline::Checkbox(c) => dm::Inline::Checkbox(c),
+                anydoc::model::Inline::Anchor(id) => dm::Inline::Anchor(format!("{id:?}")),
+                anydoc::model::Inline::NoteRef(id) => dm::Inline::NoteRef(id),
+                anydoc::model::Inline::LineBreak => dm::Inline::LineBreak,
+            })
+            .collect()
+    }
+
+    dm::Document {
+        blocks: map_blocks(doc.blocks),
+        notes: doc
+            .notes
+            .into_iter()
+            .map(|n| dm::Note {
+                id: n.id,
+                kind: match n.kind {
+                    anydoc::model::NoteKind::Footnote => dm::NoteKind::Footnote,
+                    anydoc::model::NoteKind::Endnote => dm::NoteKind::Endnote,
+                },
+                blocks: map_blocks(n.blocks),
+            })
+            .collect(),
+        assets: doc
+            .assets
+            .into_iter()
+            .map(|a| dm::Asset {
+                media_type: a.media_type,
+                origin_part: a.origin_part,
+                bytes: a.bytes,
+            })
+            .collect(),
+    }
 }
 
 /// Best-effort path string for error context.

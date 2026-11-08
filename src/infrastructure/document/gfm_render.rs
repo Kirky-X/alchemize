@@ -1,17 +1,13 @@
-// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! Simplified GFM renderer for the public `anydoc::model` document model.
-//!
-//! anydoc 0.2 keeps its renderer private (`mod render`), so asset-reference
-//! rewriting cannot hook `to_markdown_bytes`. This renderer consumes the
-//! public model after `rewrite_asset_references` and emits GitHub-Flavored
-//! Markdown with images rendered as `![alt](images/...)` in place.
+//! GFM renderer for the self-hosted document model
+//! ([`crate::domain::document`]) — the single rendering layer for every
+//! self-hosted parser. Emits GitHub-Flavored Markdown with images rendered
+//! as `![alt](images/...)` once asset references are rewritten.
 
-#![cfg(feature = "anydoc")]
-
-use anydoc::model::{
-    Block, CellSlot, Document, ImageSource, Inline, List, MarkerKind, NoteKind, TableKind,
+use crate::domain::document::{
+    Block, CellSlot, Document, ImageSource, Inline, LinkTarget, List, MarkerKind, NoteKind,
+    TableKind,
 };
 
 /// Render a document (already asset-rewritten) to GFM markdown.
@@ -38,7 +34,7 @@ pub fn render_markdown(doc: &Document) -> String {
 fn render_blocks(blocks: &[Block], out: &mut String) {
     for block in blocks {
         match block {
-            Block::Heading { level, content, .. } => {
+            Block::Heading { level, content } => {
                 let depth = (*level).clamp(1, 6);
                 out.push('\n');
                 out.push_str(&"#".repeat(depth as usize));
@@ -111,7 +107,7 @@ fn render_list(list: &List, depth: usize, out: &mut String) {
     out.push('\n');
 }
 
-fn render_table(table: &anydoc::model::Table, out: &mut String) {
+fn render_table(table: &crate::domain::document::Table, out: &mut String) {
     let cols = table.grid.iter().map(|r| r.len()).max().unwrap_or(0);
     if cols == 0 {
         return;
@@ -167,9 +163,8 @@ fn render_inlines(inlines: &[Inline]) -> String {
             Inline::Link { content, target } => {
                 let label = render_inlines(content);
                 let url = match target {
-                    anydoc::model::LinkTarget::External(u)
-                    | anydoc::model::LinkTarget::Relative(u) => u.clone(),
-                    anydoc::model::LinkTarget::Anchor(id) => format!("#anchor-{id:?}"),
+                    LinkTarget::External(u) | LinkTarget::Relative(u) => u.clone(),
+                    LinkTarget::Anchor(id) => format!("#{id}"),
                 };
                 out.push_str(&format!("[{label}]({url})"));
             }

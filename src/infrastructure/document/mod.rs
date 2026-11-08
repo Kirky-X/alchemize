@@ -4,7 +4,7 @@
 //! Document format converters.
 
 pub mod anydoc;
-pub mod anydoc_render;
+pub mod gfm_render;
 pub mod csv;
 pub mod docx;
 pub mod epub;

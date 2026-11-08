@@ -6,6 +6,6 @@ pub mod table;
 
 pub use model::{
     Asset, Block, Document, ImageSource, Inline, LinkTarget, List, ListItem, MarkerKind, Note,
-    NoteKind,
+    NoteKind, Style,
 };
 pub use table::{Cell, CellSlot, Table, TableKind};
