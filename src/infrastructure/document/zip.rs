@@ -91,7 +91,7 @@ impl Converter for ZipConverter {
     }
 
     fn supported_extensions(&self) -> &[&str] {
-        &["zip"]
+        &["zip", "cbz"]
     }
 }
 
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn supported_extensions() {
         let converter = ZipConverter::new(ConverterRegistry::new());
-        assert_eq!(converter.supported_extensions(), &["zip"]);
+        assert_eq!(converter.supported_extensions(), &["zip", "cbz"]);
     }
 
     #[tokio::test]

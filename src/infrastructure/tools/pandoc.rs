@@ -20,18 +20,20 @@ impl PandocTool {
         <Self as ExternalTool>::probe(&Self)
     }
 
-    /// Convert LaTeX source to GitHub-Flavored Markdown via pandoc stdin.
+    /// Convert any pandoc-readable text format to GitHub-Flavored Markdown.
     ///
-    /// `extract_media_dir` optionally receives pandoc's `--extract-media`
-    /// output (media files land under `<dir>/media/…`).
-    pub async fn latex_to_gfm(
-        latex: &str,
+    /// `from` is the pandoc input format name (`latex`, `org`, `rst`,
+    /// `asciidoc`, `opml`, `mediawiki`, …). `extract_media_dir` optionally
+    /// receives pandoc's `--extract-media` output.
+    pub async fn to_gfm(
+        from: &str,
+        source: &str,
         extract_media_dir: Option<&std::path::Path>,
     ) -> Result<String, std::io::Error> {
         use tokio::io::AsyncWriteExt as _;
 
         let mut cmd = tokio::process::Command::new("pandoc");
-        cmd.args(["-f", "latex", "-t", "gfm", "--wrap=none"])
+        cmd.args(["-f", from, "-t", "gfm", "--wrap=none"])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -44,7 +46,7 @@ impl PandocTool {
             .stdin
             .as_mut()
             .expect("piped stdin")
-            .write_all(latex.as_bytes())
+            .write_all(source.as_bytes())
             .await?;
         // Drop stdin ownership so pandoc sees EOF.
         drop(child.stdin.take());
@@ -58,6 +60,16 @@ impl PandocTool {
             )));
         }
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+}
+
+impl PandocTool {
+    /// Convert LaTeX source to GitHub-Flavored Markdown via pandoc stdin.
+    pub async fn latex_to_gfm(
+        latex: &str,
+        extract_media_dir: Option<&std::path::Path>,
+    ) -> Result<String, std::io::Error> {
+        Self::to_gfm("latex", latex, extract_media_dir).await
     }
 }
 

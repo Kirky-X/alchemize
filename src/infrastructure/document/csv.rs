@@ -43,10 +43,21 @@ impl CsvConverter {
         if ext == "tsv" {
             return b'\t';
         }
+        if ext == "psv" {
+            return b'|';
+        }
         let header = decoded.lines().next().unwrap_or("");
         let tabs = header.matches('\t').count();
         let commas = header.matches(',').count();
-        if tabs > commas { b'\t' } else { b',' }
+        let pipes = header.matches('|').count();
+        // Pipe-separated files are frequently mislabelled `.csv`.
+        if pipes > commas && pipes > tabs {
+            b'|'
+        } else if tabs > commas {
+            b'\t'
+        } else {
+            b','
+        }
     }
 }
 
@@ -137,7 +148,7 @@ impl Converter for CsvConverter {
     }
 
     fn supported_extensions(&self) -> &[&str] {
-        &["csv", "tsv"]
+        &["csv", "tsv", "psv"]
     }
 }
 
@@ -147,7 +158,10 @@ mod tests {
 
     #[test]
     fn supported_extensions() {
-        assert_eq!(CsvConverter::new().supported_extensions(), &["csv", "tsv"]);
+        assert_eq!(
+            CsvConverter::new().supported_extensions(),
+            &["csv", "tsv", "psv"]
+        );
     }
 
     #[tokio::test]

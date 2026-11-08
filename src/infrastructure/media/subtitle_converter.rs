@@ -67,7 +67,7 @@ impl Converter for SubtitleConverter {
     }
 
     fn supported_extensions(&self) -> &[&str] {
-        &["srt", "vtt", "ass", "ssa"]
+        &["srt", "vtt", "ass", "ssa", "lrc"]
     }
 }
 
@@ -79,7 +79,7 @@ mod tests {
     fn supported_extensions() {
         assert_eq!(
             SubtitleConverter::new().supported_extensions(),
-            &["srt", "vtt", "ass", "ssa"]
+            &["srt", "vtt", "ass", "ssa", "lrc"]
         );
     }
 

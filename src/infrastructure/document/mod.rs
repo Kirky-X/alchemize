@@ -6,6 +6,7 @@
 pub mod gfm_render;
 pub mod csv;
 pub mod docx;
+pub mod eml;
 pub mod epub;
 pub mod office;
 pub mod html;
@@ -13,6 +14,7 @@ pub mod html;
 pub mod html_moli;
 pub mod ipynb;
 pub mod latex_source;
+pub mod pandoc_generic;
 pub mod pdf;
 pub mod pdfium;
 pub mod pptx;
@@ -23,6 +25,8 @@ pub mod zip;
 
 pub use csv::CsvConverter;
 pub use docx::DocxConverter;
+#[cfg(feature = "eml")]
+pub use eml::EmlConverter;
 pub use epub::EpubConverter;
 pub use office::{
     DocxDeepConverter, OdpConverter, OdtConverter, PptxDeepConverter,
@@ -32,6 +36,7 @@ pub use office::{LegacyOfficeConverter, LegacyPptConverter};
 pub use html::HtmlConverter;
 pub use ipynb::IpynbConverter;
 pub use latex_source::LatexSourceConverter;
+pub use pandoc_generic::PandocGenericConverter;
 pub use pdf::PdfConverter;
 #[cfg(feature = "pdfium")]
 pub use pdfium::PdfiumConverter;

@@ -17,6 +17,8 @@ pub enum SubtitleFormat {
     Vtt,
     /// SubStation Alpha (.ssa) / Advanced SubStation Alpha (.ass).
     Ass,
+    /// LRC lyrics (.lrc).
+    Lrc,
 }
 
 impl SubtitleFormat {
@@ -25,6 +27,7 @@ impl SubtitleFormat {
         match ext.to_lowercase().as_str() {
             "srt" => Some(SubtitleFormat::Srt),
             "vtt" => Some(SubtitleFormat::Vtt),
+            "lrc" => Some(SubtitleFormat::Lrc),
             "ass" | "ssa" => Some(SubtitleFormat::Ass),
             _ => None,
         }
@@ -36,6 +39,7 @@ impl SubtitleFormat {
             SubtitleFormat::Srt => "srt",
             SubtitleFormat::Vtt => "vtt",
             SubtitleFormat::Ass => "ass",
+            SubtitleFormat::Lrc => "lrc",
         }
     }
 }
@@ -77,6 +81,7 @@ impl SubtitleParser {
             SubtitleFormat::Srt => self.parse_srt(content),
             SubtitleFormat::Vtt => self.parse_vtt(content),
             SubtitleFormat::Ass => self.parse_ass(content),
+            SubtitleFormat::Lrc => parse_lrc(content),
         }
     }
 
@@ -203,9 +208,130 @@ fn format_time_simple(ms: u64) -> String {
 
 // Tests
 
+/// Parse LRC lyrics: `[mm:ss.xx] line` (multiple tags per line are legal).
+///
+/// Metadata tags (`[ar:…]`, `[ti:…]`, `[offset:…]`) are ignored; the offset
+/// shifts every timestamp when present. End times are the next cue's start.
+pub fn parse_lrc(content: &str) -> Vec<TimelineEvent> {
+    use crate::infrastructure::media::timeline::TimelineEventType;
+
+    // Optional global offset in milliseconds (LRC convention: + speeds up).
+    let mut offset_ms: i64 = 0;
+    let mut cues: Vec<(u64, String)> = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with("[offset:")
+            && let Some(v) = line
+                .trim_start_matches("[offset:")
+                .trim_end_matches(']')
+                .trim()
+                .parse::<i64>()
+                .ok()
+        {
+            offset_ms = v;
+            continue;
+        }
+        // Collect every leading [mm:ss.xx] tag; the remainder is the text.
+        let mut rest = line;
+        let mut stamps: Vec<u64> = Vec::new();
+        while let Some(stripped) = rest.strip_prefix('[') {
+            let Some(close) = stripped.find(']') else { break };
+            let tag = &stripped[..close];
+            if let Some(ms) = parse_lrc_timestamp(tag) {
+                stamps.push(ms);
+            }
+            rest = &stripped[close + 1..];
+        }
+        if stamps.is_empty() {
+            continue; // metadata tag or plain text without timing
+        }
+        let text = rest.trim().to_string();
+        for ms in stamps {
+            let shifted = (ms as i64 + offset_ms).max(0) as u64;
+            cues.push((shifted, text.clone()));
+        }
+    }
+    cues.sort_by_key(|(ms, _)| *ms);
+    let mut events = Vec::with_capacity(cues.len());
+    for i in 0..cues.len() {
+        let (start, text) = cues[i].clone();
+        let end = cues
+            .get(i + 1)
+            .map(|(next, _)| *next)
+            .unwrap_or(start + 2000);
+        events.push(TimelineEvent {
+            timestamp_ms: start,
+            end_ms: end,
+            event_type: TimelineEventType::Subtitle,
+            content: text,
+            confidence: None,
+        });
+    }
+    events
+}
+
+/// Parse one LRC timestamp `mm:ss.xx` / `mm:ss:xx` into milliseconds.
+fn parse_lrc_timestamp(tag: &str) -> Option<u64> {
+    let (mm, rest) = tag.split_once(':')?;
+    let minutes: u64 = mm.trim().parse().ok()?;
+    // Hundredths may use '.' or ':' as the separator.
+    let (ss, frac) = match rest.split_once(['.', ':']) {
+        Some((ss, frac)) => (ss, Some(frac)),
+        None => (rest, None),
+    };
+    let seconds: u64 = ss.trim().parse().ok()?;
+    if seconds >= 60 {
+        return None;
+    }
+    let hundredths: u64 = frac
+        .map(|f| {
+            let f = f.trim();
+            let scaled = if f.len() == 1 {
+                f.parse::<u64>().ok().map(|v| v * 10)
+            } else {
+                f.get(..2).and_then(|v| v.parse().ok())
+            };
+            scaled
+        })
+        .flatten()
+        .unwrap_or(0);
+    Some(minutes * 60_000 + seconds * 1000 + hundredths * 10)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lrc_cues_parse_with_offsets_and_ordering() {
+        let lrc = "[ti:Demo]
+[offset:+500]
+[00:12.50]second in file, first in time? no
+[00:03.00]first line
+[00:03.00][00:20.10]repeated tag two timestamps
+";
+        let events = parse_lrc(lrc);
+        // 4 cues: 3.5s, 13.0s, 3.5s(repeat tag), 20.6s
+        assert_eq!(events.len(), 4, "{events:?}");
+        assert_eq!(events[0].timestamp_ms, 3_500);
+        assert_eq!(events[0].content, "first line");
+        assert_eq!(events[1].timestamp_ms, 3_500);
+        assert_eq!(events[2].timestamp_ms, 13_000);
+        assert_eq!(events[3].timestamp_ms, 20_600);
+        assert_eq!(events[2].end_ms, 20_600);
+    }
+
+    #[test]
+    fn lrc_timestamp_variants() {
+        assert_eq!(parse_lrc_timestamp("01:02.34"), Some(62_340));
+        assert_eq!(parse_lrc_timestamp("00:05"), Some(5_000));
+        assert_eq!(parse_lrc_timestamp("00:05:50"), Some(5_500));
+        assert_eq!(parse_lrc_timestamp("99:99"), None, "seconds must be < 60");
+        assert_eq!(parse_lrc_timestamp("ar:Someone"), None);
+    }
 
     #[test]
     fn format_from_extension() {

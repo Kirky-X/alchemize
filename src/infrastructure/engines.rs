@@ -57,6 +57,10 @@ pub fn default_converters(
     engines.push(Box::new(
         crate::infrastructure::document::LatexSourceConverter::new(),
     ));
+    // Generic pandoc formats (org/rst/asciidoc/opml/mediawiki).
+    engines.push(Box::new(
+        crate::infrastructure::document::PandocGenericConverter::new(),
+    ));
     // Media family.
     let image_converter = match vision.clone() {
         Some(vision) => crate::infrastructure::media::ImageConverter::with_vision(vision),
@@ -145,6 +149,10 @@ pub fn default_converters(
             crate::infrastructure::containers::SevenZConverter::with_arc(arc.clone()),
         ));
     }
+
+    // E-mail (eml) — feature gated.
+    #[cfg(feature = "eml")]
+    engines.push(Box::new(crate::infrastructure::document::EmlConverter::new()));
 
     // Structured data engines (parquet/sqlite/bib) — feature gated.
     #[cfg(feature = "data")]

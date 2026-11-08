@@ -17,7 +17,7 @@ use super::shared::detect_encoding;
 fn lang_tag(ext: &str) -> Option<&'static str> {
     match ext {
         // Plain text family: passthrough, no fence
-        "txt" | "text" | "log" | "md" | "markdown" | "rst" | "org" => None,
+        "txt" | "text" | "log" | "md" | "markdown" | "rmd" | "qmd" | "rst" | "org" => None,
         // Code / config family: fenced with a language tag
         "py" | "pyi" => Some("python"),
         "rs" => Some("rust"),
@@ -38,7 +38,10 @@ fn lang_tag(ext: &str) -> Option<&'static str> {
         "sql" => Some("sql"),
         "sh" | "bash" | "zsh" => Some("bash"),
         "fish" => Some("fish"),
-        "json" => Some("json"),
+        "json" | "jsonl" | "ndjson" => Some("json"),
+        "env" => Some("dotenv"),
+        "properties" => Some("properties"),
+        "mmd" => Some("mermaid"),
         "yaml" | "yml" => Some("yaml"),
         "toml" => Some("toml"),
         "xml" => Some("xml"),
@@ -81,8 +84,8 @@ impl Default for TextConverter {
 pub const CODE_EXTENSIONS: &[&str] = &[
     "py", "pyi", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "go", "java", "kt", "kts", "swift",
     "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "lua", "r", "sql", "sh", "bash", "zsh",
-    "fish", "json", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf", "proto", "graphql", "gql",
-    "css", "scss",
+    "fish", "json", "jsonl", "ndjson", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf", "proto",
+    "graphql", "gql", "css", "scss", "env", "properties", "mmd",
 ];
 
 #[async_trait]
@@ -104,7 +107,7 @@ impl Converter for TextConverter {
         let word_count = text.split_whitespace().count();
         let markdown = if text.trim().is_empty() {
             "*Text file is empty.*\n".to_string()
-        } else if ext == "md" || ext == "markdown" {
+        } else if ext == "md" || ext == "markdown" || ext == "rmd" || ext == "qmd" {
             // Markdown is the target format: passthrough unchanged.
             text
         } else if is_code_family(&ext) {
@@ -135,7 +138,7 @@ impl Converter for TextConverter {
 
 /// Supported extensions (text family + code family), built once.
 static SUPPORTED: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
-    let mut v = vec!["txt", "text", "log", "md", "markdown", "rst", "org"];
+    let mut v = vec!["txt", "text", "log", "md", "markdown", "rmd", "qmd", "rst", "org"];
     v.extend_from_slice(CODE_EXTENSIONS);
     v.sort_unstable();
     v

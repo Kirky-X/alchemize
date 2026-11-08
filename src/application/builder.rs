@@ -122,12 +122,17 @@ impl Alchemize {
         input: &Input,
         prefer: Option<&str>,
     ) -> Result<ConvertResult, AlchemizeError> {
-        if input.extension().as_deref() == Some("zip") {
+        if matches!(
+            input.extension().as_deref(),
+            Some("zip") | Some("cbz")
+        ) {
             if let Some(ref zip) = self.zip {
                 use crate::application::ports::Converter as _;
                 return zip.convert(input.clone()).await;
             }
-            return Err(AlchemizeError::UnsupportedFormat("zip".to_string()));
+            return Err(AlchemizeError::UnsupportedFormat(
+                input.extension().unwrap_or_default(),
+            ));
         }
         self.registry.convert_pref(input, prefer).await
     }
