@@ -1,5 +1,7 @@
 [workspace]
 resolver = "3"
+# third_party vendor 自成一体，不并入本工作区（避免多工作区根冲突）
+exclude = ["third_party/moli-html2md"]
 
 [workspace.package]
 version = "0.1.0"
@@ -51,7 +53,9 @@ anydoc = ["dep:anydoc"]
 asr = ["dep:vecboost", "dep:reqwest", "reqwest/multipart"]
 # MCP 工具面：sdforge rmcp stdio 服务（alch-mcp）；CLI 封装（cli feature）恒在
 mcp = ["sdforge/mcp"]
-full = ["mineru", "anydoc", "asr"]
+# html-moli 引擎：crawlrs 吸收的 moli→htmd 转换链 + 主内容提取（third_party vendor）
+moli = ["dep:moli-html2md", "dep:scraper", "dep:dom_smoothie", "dep:ego_tree", "dep:regex", "dep:url"]
+full = ["mineru", "anydoc", "asr", "moli"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
@@ -83,6 +87,15 @@ sdforge = { version = "0.5.0-rc.10", features = ["cli"] }
 
 # 可选后端
 anydoc = { version = "0.2", default-features = false, optional = true }
+# html-moli 引擎（third_party vendor，feature moli；发布前需先发该分叉，同 vecboost 模式）
+moli-html2md = { path = "third_party/moli-html2md", default-features = false, optional = true }
+scraper = { version = "0.29", default-features = false, features = ["errors", "main"], optional = true }
+# ego-tree 版本须与 scraper 0.29 内部依赖一致（NodeId 类型同一性，crawlrs 同款约束）
+ego_tree = { package = "ego-tree", version = "0.11", default-features = false, optional = true }
+dom_smoothie = { version = "0.19", default-features = false, optional = true }
+# html-moli 链接绝对化预处理（crawlrs 移植函数所需）
+regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"], optional = true }
+url = { version = "2", default-features = false, features = ["std"], optional = true }
 futures = { version = "0.3", default-features = false, features = ["std"], optional = true }
 # 轮询退避原语：MinerU 三客户端共享 poll_delay 走 limiteron delay_for_attempt
 limiteron = { version = "0.3.0-rc.10", default-features = false, features = ["retry"], optional = true }

@@ -24,6 +24,7 @@ pub fn default_converters(
     transcribe: Option<Arc<dyn TranscribeProvider>>,
     video_mode: VideoProcessingMode,
     _max_file_size: usize,
+    moli: &Option<crate::application::builder::MoliEngineConfig>,
 ) -> Vec<Box<dyn Converter>> {
     let mut engines: Vec<Box<dyn Converter>> = Vec::new();
 
@@ -100,10 +101,24 @@ pub fn default_converters(
         crate::infrastructure::document::IpynbConverter::new(),
     ));
 
+    // html-moli：crawlrs 吸收的 moli→htmd 转换链（feature moli 门控，
+    // priority 15 压过 html/htmd 的 10；base_url/extract_main 显式选项）。
+    #[cfg(feature = "moli")]
+    if let Some(cfg) = moli {
+        engines.push(Box::new(
+            crate::infrastructure::document::html_moli::HtmlMoliConverter::new(
+                cfg.base_url.clone(),
+                cfg.extract_main,
+            ),
+        ));
+    }
+
     // ZipConverter needs a registry for nested conversion: built without it
     // here (nested support wired when the registry is fully assembled — the
     // CLI layer constructs zip with a clone of the final registry).
     let _ = mineru; // wired by the MinerU migration task
     let _ = _max_file_size;
+    #[cfg(not(feature = "moli"))]
+    let _ = moli;
     engines
 }

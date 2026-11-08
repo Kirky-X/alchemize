@@ -19,11 +19,33 @@ use alchemize::application::ports::Availability;
 use alchemize::domain::error::AlchemizeError;
 use alchemize::domain::input::Input;
 
-/// 平移自原 main.rs：按环境变量与参数组装门面（零行为变化）。
-fn build_alch(no_remote: bool, asset_mode: AssetMode) -> Alchemize {
+/// 平移自原 main.rs：按环境变量与参数组装门面；base_url/extract_main 仅在
+/// moli feature 构建下生效（未编译时诚实告警，不静默吞选项）。
+fn build_alch(
+    no_remote: bool,
+    asset_mode: AssetMode,
+    base_url: Option<String>,
+    extract_main: bool,
+) -> Alchemize {
     let mut builder = AlchemizeBuilder::new().with_asset_mode(asset_mode);
     if no_remote {
         builder = builder.with_no_remote();
+    }
+    if base_url.is_some() || extract_main {
+        #[cfg(feature = "moli")]
+        {
+            builder = builder.with_moli(alchemize::MoliEngineConfig {
+                base_url,
+                extract_main,
+            });
+        }
+        #[cfg(not(feature = "moli"))]
+        {
+            let _ = (&base_url, &extract_main);
+            eprintln!(
+                "warning: --base-url/--extract-main require a build with --features moli; options ignored"
+            );
+        }
     }
     // MinerU endpoints come from env when present; otherwise local-only chain.
     if let Ok(base) = std::env::var("ALCHEMIZE_MINERU_URL") {
@@ -74,6 +96,8 @@ fn map_error(err: AlchemizeError) -> ApiError {
     cli = true,
     tool_name = "convert"
 )]
+// 参数面 = CLI/MCP 端点契约，不可收敛为结构体参数（宏按参数生成旗标与 schema）
+#[allow(clippy::too_many_arguments)]
 async fn convert(
     #[param(kind = "path")] input: String,
     // 注意三点：① 宏对 Option<T> 的默认推断是 Query（CLI 侧跳过），必须
@@ -87,6 +111,8 @@ async fn convert(
     #[param(kind = "body")] assets: Option<String>,
     #[param(kind = "body")] no_remote: Option<bool>,
     #[param(kind = "body")] input_format: Option<String>,
+    #[param(kind = "body")] base_url: Option<String>,
+    #[param(kind = "body")] extract_main: Option<bool>,
 ) -> Result<serde_json::Value, ApiError> {
     let input_path = PathBuf::from(&input);
     if !input_path.is_file() {
@@ -107,7 +133,12 @@ async fn convert(
             });
         }
     };
-    let alch = build_alch(no_remote.unwrap_or(false), asset_mode);
+    let alch = build_alch(
+        no_remote.unwrap_or(false),
+        asset_mode,
+        base_url,
+        extract_main.unwrap_or(false),
+    );
     let converted_input = match input_format {
         Some(fmt) => {
             let data = std::fs::read(&input_path).map_err(|e| {
@@ -180,7 +211,7 @@ async fn convert(
     tool_name = "doctor"
 )]
 async fn doctor() -> Result<String, ApiError> {
-    let alch = build_alch(false, AssetMode::Dir);
+    let alch = build_alch(false, AssetMode::Dir, None, false);
     let mut lines: Vec<String> = Vec::new();
     for (name, exts, availability) in alch.availability() {
         match availability {
@@ -204,7 +235,7 @@ async fn doctor() -> Result<String, ApiError> {
     tool_name = "formats"
 )]
 async fn formats() -> Result<String, ApiError> {
-    let alch = build_alch(false, AssetMode::Dir);
+    let alch = build_alch(false, AssetMode::Dir, None, false);
     let mut exts: Vec<String> = alch
         .availability()
         .into_iter()

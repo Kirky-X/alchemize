@@ -10,6 +10,7 @@ alchemize 所有显著变更记录于此文件。
 ### 新增
 
 - **MCP 工具面**（feature `mcp`）：`alch-mcp` 二进制经 sdforge（rmcp，stdio）把 convert/doctor/formats 暴露为 MCP 工具。
+- **html-moli 引擎**（feature `moli`）：吸收 crawlrs 的 moli-html2md→htmd 转换链（third_party vendor，MIT OR Apache-2.0）——空输出防呆、迭代式 DOM 防栈击穿、诚实降级；可选主内容提取（dom_smoothie，`--extract-main`）与链接绝对化（`--base-url`）；含 `<math` 的页面自动路由 htmd 保真。convert 端点新增 `--base-url`/`--extract-main`。
 - 文档套件（七篇专题文档）与全部源文件版权头（Apache-2.0 SPDX）。
 - 文档骨架与 confers 对齐：七篇逐篇映射 confers 章节序列（概述→设计原则→系统架构→模块划分→数据流→安全设计→性能设计→相关文档等，逐篇见「📋 目录」）。
 - 文档导航节：README.md「📚 文档」表格与 README_EN.md「Docs」表格。

@@ -33,6 +33,8 @@ mod forge_app;
 ///   之前，如 `alch --format json formats`）
 /// - `--no-remote` → `--no_remote true`（裸旗标语义归一；sdforge long 名
 ///   取参数标识符的下划线形式且 bool 恒为取值式）
+/// - `--base-url` → `--base_url`、`--extract-main` → `--extract_main true`
+///   （同下划线归一；仅 convert 语境，moli feature 未编译时端点侧诚实告警）
 /// - `--` 之后原样透传（位置参数字面量，不重写）
 fn normalize_argv(raw: Vec<String>) -> Vec<String> {
     use std::collections::VecDeque;
@@ -69,6 +71,17 @@ fn normalize_argv(raw: Vec<String>) -> Vec<String> {
                 ));
             }
             "--format" if in_convert => out.push("--input_format".into()),
+            "--base-url" if in_convert => out.push("--base_url".into()),
+            s if in_convert && s.starts_with("--base-url=") => {
+                out.push(format!(
+                    "--base_url={}",
+                    s.trim_start_matches("--base-url=")
+                ));
+            }
+            "--extract-main" if in_convert => {
+                out.push("--extract_main".into());
+                out.push("true".into());
+            }
             s if in_convert && s.starts_with("--format=") => {
                 out.push(format!(
                     "--input_format={}",

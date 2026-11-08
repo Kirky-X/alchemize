@@ -157,6 +157,7 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | `anydoc` | office full-format backend (firecrawl/anydoc, MIT) | priority 15 above native parsers; image bytes exported in document order |
 | `asr` | vecboost transcription facade + Whisper-compatible API | Qwen3-ASR ONNX + silero VAD, path dependency on sibling crate vecboost |
 | `mcp` | MCP tool surface (`alch-mcp` stdio server) | convert/doctor/formats exposed as MCP tools; CLI wrapping (sdforge) always on |
+| `moli` | html-moli engine (moli→htmd chain absorbed from crawlrs) | main-content extraction (`--extract-main`) and link absolutization (`--base-url`); pages with LaTeX math auto-route to htmd for fidelity |
 | `full` | all of the above | |
 
 Default is `default = ["cli"]` (CLI wrapping always on) — engines behind disabled features are not compiled at all.

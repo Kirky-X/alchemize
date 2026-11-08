@@ -240,6 +240,14 @@ URL 校验拒绝的六类原因：`InvalidScheme`（非 HTTPS）、`LoopbackAddr
 - 模型探测：`ALCHEMIZE_TRANSCRIBE_MODELS` → 缺省 `~/.cache/alchemize/models/transcribe/`（布局 `qwen3-conv_frontend.onnx`、`qwen3-encoder.int8.onnx`、`qwen3-decoder.int8.onnx`、`silero_vad.onnx`、`tokenizer/`）；`ORT_DYLIB_PATH` 指向 onnxruntime 动态库。缺失时 provider 自述 `Unavailable` 并附获取指引，不自动联网。
 - 测试专用：`ALCHEMIZE_ASR_TEST_WAV`（集成测试输入路径）。
 
+### Moli（`moli` 特性）
+
+- 装配产物：`html-moli` 引擎（exts html/htm，priority 15 压过 html/htmd）——吸收自 crawlrs 的 moli-html2md→htmd 转换链（`third_party/moli-html2md`，MIT OR Apache-2.0）。
+- 链语义：moli 主路径 →（主输出空且有可见文本）htmd 兜底（复用既有 html 引擎，含 math 保真）→ 双失败 `Err(Other)` 诚实上报；纯脚本/空壳页的空输出是正确抑制。
+- math 路由：含 `<math` 的输入整体直通既有 html 引擎（moli 会展平 LaTeX 数学；检测条件与 html.rs preprocess_math 触发条件一致）。
+- 可选语义：`base_url`（转换前链接绝对化，`#`/`mailto:`/`data:` 等前缀保留）与 `extract_main`（dom_smoothie 主内容提取，降级纯文本分支行首转义；失败/空诚实回退全页）。默认均关——保真优先。
+- 选项面：builder `with_moli(MoliEngineConfig{base_url, extract_main})`；CLI/MCP convert 参数 `--base-url` / `--extract-main`。
+
 ### MCP（`mcp` 特性）
 
 - 装配产物：`alch-mcp` 二进制——`sdforge::mcp::serve_stdio(build())` 承载 convert / doctor / formats 三个 MCP 工具（`#[forge(tool_name)]` 注册，参数 schema 由端点签名生成），stdio 传输——传输面无网络出口（convert 工具本身的网络能力随 mineru 特性）。

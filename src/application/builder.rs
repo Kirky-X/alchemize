@@ -80,6 +80,15 @@ impl std::fmt::Display for MineruConfig {
     }
 }
 
+/// html-moli 引擎配置（feature `moli`）：链接绝对化基准与主内容提取开关。
+#[derive(Debug, Clone, Default)]
+pub struct MoliEngineConfig {
+    /// 相对链接绝对化基准（None = 不改写链接）
+    pub base_url: Option<String>,
+    /// 主内容提取（dom_smoothie；false = 全页转换）
+    pub extract_main: bool,
+}
+
 /// Where extracted assets are written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AssetMode {
@@ -171,6 +180,7 @@ pub struct AlchemizeBuilder {
     video_mode: VideoProcessingMode,
     asset_mode: AssetMode,
     no_remote: bool,
+    moli: Option<MoliEngineConfig>,
 }
 
 /// Maximum file size default: 100 MB.
@@ -193,7 +203,15 @@ impl AlchemizeBuilder {
             video_mode: VideoProcessingMode::default(),
             asset_mode: AssetMode::default(),
             no_remote: false,
+            moli: None,
         }
+    }
+
+    /// Set the html-moli engine configuration (engine registered when the
+    /// `moli` feature is compiled in).
+    pub fn with_moli(mut self, config: MoliEngineConfig) -> Self {
+        self.moli = Some(config);
+        self
     }
 
     /// Set the MinerU endpoint configuration (enables MinerU engines when
@@ -244,12 +262,19 @@ impl AlchemizeBuilder {
     }
 
     /// Build the converter with all configured engines registered.
-    pub fn build(self) -> Alchemize {
+    pub fn build(mut self) -> Alchemize {
         let mut registry = if self.no_remote {
             ConverterRegistry::new_no_remote()
         } else {
             ConverterRegistry::new()
         };
+
+        // html-moli：feature moli 编译即注册（默认配置）；with_moli 仅定制
+        // base_url/extract_main——与 anydoc「编译即可用」的注册语义一致。
+        #[cfg(feature = "moli")]
+        if self.moli.is_none() {
+            self.moli = Some(MoliEngineConfig::default());
+        }
 
         for converter in crate::infrastructure::engines::default_converters(
             &self.mineru,
@@ -257,6 +282,7 @@ impl AlchemizeBuilder {
             self.transcribe_provider.clone(),
             self.video_mode,
             self.max_file_size,
+            &self.moli,
         ) {
             registry.register(converter);
         }

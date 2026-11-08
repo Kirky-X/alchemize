@@ -157,6 +157,7 @@ alch formats
 | `anydoc` | office 全格式后端（firecrawl/anydoc, MIT） | priority 15 压过原生解析；图片按文档序导出 |
 | `asr` | vecboost 转录门面 + Whisper 兼容 API | Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
 | `mcp` | MCP 工具面（`alch-mcp` stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；CLI 封装（sdforge）恒在 |
+| `moli` | html-moli 引擎（crawlrs 吸收的 moli→htmd 转换链） | 主内容提取（`--extract-main`）与链接绝对化（`--base-url`）；含 LaTeX 数学的页面自动路由 htmd 保真 |
 | `full` | 以上全部 | |
 
 默认 `default = ["cli"]`（CLI 封装恒在）——feature 关闭的引擎根本不参与编译。

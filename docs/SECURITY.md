@@ -49,6 +49,7 @@ cargo update -d          # 更新漏洞通告数据库
 - 全部源文件带 `SPDX-License-Identifier: Apache-2.0` 两行头（59/59），license 扫描工具可机器识别文件级权属。
 - specmark 规格目录不入库（gitignore），主 specs 作为本地规格真源。
 - CLI/MCP 封装框架 sdforge（MIT，crates.io 版本钉 0.5.0-rc.10）与 rmcp（`mcp` feature 独占）经 `cargo audit` 一并纳管。
+- html-moli 引擎（feature `moli`）依赖 third_party/moli-html2md（MIT OR Apache-2.0，vendor 自 lexmount/moli@2db52b4，随包携带上游双许可文本）、scraper 0.29、dom_smoothie 0.19；`--base-url` 仅在显式提供时改写链接。
 
 ## 🐛 漏洞报告流程
 

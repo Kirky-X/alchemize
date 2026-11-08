@@ -9,6 +9,8 @@ pub mod csv;
 pub mod docx;
 pub mod epub;
 pub mod html;
+#[cfg(feature = "moli")]
+pub mod html_moli;
 pub mod ipynb;
 pub mod latex_source;
 pub mod pdf;
