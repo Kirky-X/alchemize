@@ -126,6 +126,50 @@ fn has_visible_text(html: &str) -> bool {
     false
 }
 
+/// 读屏器隐藏文本的约定类名片段（小写匹配）。这些元素对人类不可见、仅供
+/// 辅助技术（如 BBC 的 `VisuallyHidden-styles__…` 哈希类），主内容提取前
+/// 整体删除。用「包含」而非「精确等值」：styled-components/CSS Modules 会
+/// 把约定词包进哈希类名；这些短语本身无歧义，误伤面可忽略。
+fn is_screen_reader_class(token: &str) -> bool {
+    let t = token.to_ascii_lowercase();
+    [
+        "visually-hidden",
+        "visuallyhidden",
+        "sr-only",
+        "screen-reader",
+    ]
+    .iter()
+    .any(|c| t.contains(c))
+}
+
+/// 删除读屏器隐藏子树（约定类名命中即删，DOM 级 detach）。
+///
+/// 仅用于主内容提取路径——全页转换保真优先，不动任何内容。
+/// 无命中时原样返回输入串（不重序列化，零改写）。
+fn strip_screen_reader_only(html: &str) -> String {
+    let mut doc = scraper::Html::parse_document(html);
+    let mut doomed = Vec::new();
+    for node in doc.tree.nodes() {
+        if let Node::Element(el) = node.value() {
+            if let Some(class) = el.attr("class") {
+                if class.split_ascii_whitespace().any(is_screen_reader_class) {
+                    doomed.push(node.id());
+                }
+            }
+        }
+    }
+    if doomed.is_empty() {
+        return html.to_string();
+    }
+    // 先收集后删除：detach 已断链的 id 再 get_mut 仍是孤儿节点，幂等安全。
+    for id in doomed {
+        if let Some(mut n) = doc.tree.get_mut(id) {
+            n.detach();
+        }
+    }
+    doc.html()
+}
+
 /// 把 HTML 中相对的 href/src 重写为基于 `base_url` 的绝对 URL
 /// （移植自 crawlrs markdown_post_processor.rs）。
 ///
@@ -296,7 +340,10 @@ impl crate::application::ports::Converter for HtmlMoliConverter {
         // ① StructuredHtml：清理后正文 HTML → moli 转换（段落/图片/链接保留）；
         // ② PlainText 降级：text_content 行首转义直出（无结构）；
         // ③ 全页回退：提取失败/双产皆空时走完整转换链。
+        // 提取前先删读屏器隐藏子树（对人类不可见的 "Site search" 类文本）；
+        // 全页转换保真优先，不做此过滤。
         if self.extract_main {
+            let html = strip_screen_reader_only(&html);
             match self.extract_main_content(&html) {
                 Ok((content_html, text)) => {
                     let markdown = self.convert_structured_html(&content_html).or_else(|| {
@@ -483,5 +530,78 @@ mod tests {
             result.markdown
         );
         assert_eq!(result.quality, ConversionQuality::LocalFull);
+    }
+
+    /// 读屏器隐藏文本过滤（主内容提取前置）：BBC 真页形态——styled-components
+    /// 哈希类名 `VisuallyHidden-styles__…`，约定词被包进哈希，必须包含匹配。
+    #[test]
+    fn strip_screen_reader_hashed_class() {
+        let html = r#"<html><body>
+            <div class="DrawerBackgroundStyled-sc-1abc">
+              <label for="s"><span class="VisuallyHidden-styles__VisuallyHiddenStyled-sc-69248fc2-0 fWJrIe">Site search</span></label>
+              <input id="s" type="text">
+            </div>
+            <article><p>real words</p></article>
+        </body></html>"#;
+        let out = strip_screen_reader_only(html);
+        assert!(
+            !out.contains("Site search"),
+            "screen-reader span must be removed: {out}"
+        );
+        assert!(
+            out.contains("real words"),
+            "visible content must survive: {out}"
+        );
+    }
+
+    /// 常规约定类名（Tailwind `sr-only` 等）整子树删除；多 token class 里
+    /// 只有约定 token 命中时也删。
+    #[test]
+    fn strip_screen_reader_plain_class() {
+        let html = r#"<html><body>
+            <p class="sr-only">skip to content</p>
+            <p class="mt-2 visually-hidden">hidden hint</p>
+            <p class="mt-2">visible text</p>
+        </body></html>"#;
+        let out = strip_screen_reader_only(html);
+        assert!(!out.contains("skip to content"), "{out}");
+        assert!(!out.contains("hidden hint"), "{out}");
+        assert!(out.contains("visible text"), "{out}");
+    }
+
+    /// 无命中：输入原样返回（零改写、不重序列化）；`hidden`/`Search` 等
+    /// 非约定词不误伤。
+    #[test]
+    fn strip_screen_reader_no_match_is_identity() {
+        let html = r#"<html><body>
+            <p class="hidden">keep me</p>
+            <p class="SearchBox">Search box label</p>
+            <p>plain</p>
+        </body></html>"#;
+        assert_eq!(strip_screen_reader_only(html), html);
+    }
+
+    /// 提取路径端到端：--extract-main 时读屏文本不再进入产出（全页路径
+    /// 不受影响，由既有 full-page 用例覆盖）。
+    #[tokio::test]
+    async fn extract_main_drops_screen_reader_text() {
+        let html = r#"<html><body>
+            <nav><span class="sr-only">Site search</span><a href="/">Home</a></nav>
+            <article><h1>Title</h1><p>body words</p></article>
+        </body></html>"#;
+        let extracted = HtmlMoliConverter::new(None, true)
+            .convert(page_input(html))
+            .await
+            .unwrap();
+        assert!(
+            !extracted.markdown.contains("Site search"),
+            "screen-reader text must not reach extraction output: {:?}",
+            extracted.markdown
+        );
+        assert!(
+            extracted.markdown.contains("body words"),
+            "{:?}",
+            extracted.markdown
+        );
     }
 }
