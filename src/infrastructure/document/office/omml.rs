@@ -149,6 +149,14 @@ pub fn convert_document_omml(xml: &[u8]) -> (Vec<String>, OmmlWarnings) {
     (out, warnings)
 }
 
+/// Convert one `m:oMath` island whose Start event was just consumed.
+///
+/// Returns the LaTeX body and whether any fragment needed `\text{}`
+/// fallback. Consumes events through `</m:oMath>`.
+pub fn convert_island_pub(reader: &mut Reader<&[u8]>) -> (String, bool) {
+    convert_island(reader)
+}
+
 /// Convert one `m:oMath` island (reader positioned after the Start event).
 ///
 /// Consumes events through the closing `</m:oMath>` and returns the LaTeX

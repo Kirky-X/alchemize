@@ -35,6 +35,10 @@ path = "src/lib.rs"
 name = "alch"
 path = "src/main.rs"
 
+[[bench]]
+name = "bench_real"
+harness = false
+
 [[bin]]
 name = "alch-mcp"
 path = "src/bin/alch_mcp.rs"
@@ -119,7 +123,7 @@ zstd = { version = "0.13", default-features = false, optional = true }
 sevenz-rust2 = { version = "0.25", default-features = false, optional = true }
 
 # 结构化数据（feature data）
-parquet = { version = "60", default-features = false, features = ["arrow"], optional = true }
+parquet = { version = "60", default-features = false, features = ["arrow", "snap", "lz4", "zstd", "flate2-rust_backend", "brotli"], optional = true }
 rusqlite = { version = "0.37", default-features = false, features = ["bundled"], optional = true }
 biblatex = { version = "0.12", default-features = false, optional = true }
 

@@ -67,6 +67,8 @@ pub fn default_converters(
         None => crate::infrastructure::media::ImageConverter::new(),
     };
     engines.push(Box::new(image_converter));
+    // HEIC/HEIF: OS decoder (sips) or metadata-only fallback.
+    engines.push(Box::new(crate::infrastructure::media::HeicConverter::new()));
 
     let audio_converter = match transcribe.clone() {
         Some(provider) => crate::infrastructure::media::AudioConverter::with_transcriber(provider),

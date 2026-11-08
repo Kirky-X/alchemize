@@ -141,7 +141,7 @@ fn range_to_markdown_table(
             let cell = range.get((0, c));
             if let Some(Data::String(s)) = cell {
                 if !s.trim().is_empty() {
-                    return s.clone();
+                    return escape_cell(s);
                 }
             }
             column_letter(c)
@@ -163,7 +163,7 @@ fn range_to_markdown_table(
             .map(|c| {
                 let cell = range.get((r, c));
                 let code = formats.get(&(r as u32, c as u32));
-                format_cell_value_with_format(cell, code.map(String::as_str))
+                escape_cell(&format_cell_value_with_format(cell, code.map(String::as_str)))
             })
             .collect();
 
@@ -174,6 +174,14 @@ fn range_to_markdown_table(
     }
 
     lines.join("\n")
+}
+
+/// Escape a cell for a GFM table: pipes and line breaks would otherwise
+/// split the row into extra columns.
+fn escape_cell(text: &str) -> String {
+    text.replace('|', "\\|")
+        .replace("\r\n", " ")
+        .replace(['\r', '\n'], " ")
 }
 
 /// Format a cell, applying the Excel number format when one applies.

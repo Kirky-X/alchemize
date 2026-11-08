@@ -6,6 +6,7 @@
 pub mod asr;
 pub mod audio;
 pub mod dedup;
+pub mod heic;
 pub mod image;
 pub mod subtitle;
 pub mod subtitle_converter;
@@ -14,6 +15,7 @@ pub mod video;
 
 pub use audio::AudioConverter;
 pub use dedup::{FrameDeduplicator, compute_entropy, pixel_diff_ratio};
+pub use heic::HeicConverter;
 pub use image::ImageConverter;
 pub use subtitle::{SubtitleFormat, SubtitleParser, subtitles_to_simple_markdown};
 pub use subtitle_converter::SubtitleConverter;

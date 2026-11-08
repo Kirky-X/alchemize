@@ -279,16 +279,17 @@ pub fn parse_body(xml: &[u8], ctx: &mut BodyCtx) -> Result<Vec<Block>, Alchemize
                         }
                     }
                     "oMath" => {
-                        // OMML is converted by the dedicated converter in a
-                        // later pass; consume to End and record a placeholder
-                        // count so nothing silently disappears.
-                        let text = collect_text_until_end(&mut reader, b"oMath");
-                        if !text.trim().is_empty() {
+                        // Table-driven OMML → LaTeX; unknown fragments fall
+                        // back to \text{} and bump the counter (no silent loss).
+                        let (latex, used_fallback) =
+                            crate::infrastructure::document::office::omml::convert_island_pub(
+                                &mut reader,
+                            );
+                        if used_fallback {
                             ctx.warnings.omml_fallback += 1;
-                            para_inlines.push(Inline::Text {
-                                text,
-                                style: crate::domain::document::Style::PLAIN,
-                            });
+                        }
+                        if !latex.trim().is_empty() {
+                            para_inlines.push(Inline::Math(latex));
                         }
                     }
                     _ => {}
