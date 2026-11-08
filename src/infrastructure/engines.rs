@@ -30,14 +30,8 @@ pub fn default_converters(
 
     // Text family (plain text + code/config fence).
     engines.push(Box::new(TextConverter::new()));
-    // Office full-format backend (priority 15, above native parsers).
-    #[cfg(feature = "anydoc")]
-    engines.push(Box::new(
-        crate::infrastructure::document::AnydocConverter::new(),
-    ));
     // Self-hosted deep DOCX parser (priority 18): style cascade, footnotes,
-    // merged cells, drawing assets. Above the native docx (10) so the deep
-    // parser is preferred; above anydoc (15) too — self-hosted wins ties.
+    // merged cells, drawing assets. Above the native docx (10).
     engines.push(Box::new(
         crate::infrastructure::document::DocxDeepConverter::new(),
     ));
@@ -51,7 +45,7 @@ pub fn default_converters(
     engines.push(Box::new(
         crate::infrastructure::document::PptxDeepConverter::new(),
     ));
-    // Office XML (fallback tier below anydoc).
+    // Office XML (fallback tier below the deep parsers).
     engines.push(Box::new(
         crate::infrastructure::document::DocxConverter::new(),
     ));
@@ -116,6 +110,17 @@ pub fn default_converters(
     engines.push(Box::new(
         crate::infrastructure::document::IpynbConverter::new(),
     ));
+
+    // Legacy Office (doc/ppt/rtf) through LibreOffice — feature gated at 15.
+    #[cfg(feature = "libreoffice")]
+    {
+        engines.push(Box::new(
+            crate::infrastructure::document::LegacyOfficeConverter::new(),
+        ));
+        engines.push(Box::new(
+            crate::infrastructure::document::LegacyPptConverter::new(),
+        ));
+    }
 
     // Recursive archive containers (tar/tgz/gz/xz/zst/7z) — feature gated.
     #[cfg(feature = "containers")]

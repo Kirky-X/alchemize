@@ -47,8 +47,6 @@ default = ["cli"]
 cli = []
 # MinerU 云端 PDF 高保真（HTTP 客户端）
 mineru = ["dep:reqwest", "dep:limiteron", "dep:futures", "reqwest/multipart", "reqwest/stream"]
-# anydoc office 全格式后端（firecrawl/anydoc crate, MIT）
-anydoc = ["dep:anydoc"]
 # ASR：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
 asr = ["dep:vecboost", "dep:reqwest", "reqwest/multipart"]
 # pdfium 本地高保真 PDF 引擎（动态库运行时加载）
@@ -56,16 +54,16 @@ pdfium = ["dep:pdfium-render"]
 # LibreOffice headless 旧格式引擎（外部 soffice 二进制）
 libreoffice = []
 # 归档容器族（tar/tgz/gz/xz/zst/7z）
-containers = ["dep:tar", "dep:flate2", "dep:xz2", "dep:zstd", "dep:sevenz-rust"]
+containers = ["dep:tar", "dep:flate2", "dep:xz2", "dep:zstd", "dep:sevenz-rust2"]
 # 结构化数据引擎（parquet/sqlite/bib）
 data = ["dep:parquet", "dep:rusqlite", "dep:biblatex"]
 # 邮件（eml）
-eml = ["dep:mail"]
+eml = ["dep:mail-parser"]
 # MCP 工具面：sdforge rmcp stdio 服务（alch-mcp）；CLI 封装（cli feature）恒在
 mcp = ["sdforge/mcp"]
 # html-moli 引擎：crawlrs 吸收的 moli→htmd 转换链 + 主内容提取（third_party vendor）
 moli = ["dep:moli-html2md", "dep:scraper", "dep:dom_smoothie", "dep:ego_tree", "dep:regex", "dep:url"]
-full = ["mineru", "anydoc", "asr", "moli", "containers", "data", "eml"]
+full = ["mineru", "asr", "moli", "containers", "data", "eml", "libreoffice"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
@@ -79,7 +77,6 @@ csv = { version = "1.4", default-features = false }
 encoding_rs = { version = "0.8", default-features = false }
 htmd = { version = "0.5", default-features = false }
 aspasia = { version = "0.2", default-features = false }
-img_hash = { version = "3.2", default-features = false }
 pdf-extract = { version = "0.12", default-features = false }
 quick-xml = { version = "0.42", default-features = false, features = ["serialize"] }
 rbook = { version = "0.7", default-features = false, features = ["threadsafe"] }
@@ -96,7 +93,6 @@ zip = { version = "9.3", default-features = false, features = ["deflate"] }
 sdforge = { version = "0.5.0-rc.10", features = ["cli"] }
 
 # 可选后端
-anydoc = { version = "0.2", default-features = false, optional = true }
 # html-moli 引擎（third_party vendor，feature moli；发布前需先发该分叉，同 vecboost 模式）
 moli-html2md = { path = "third_party/moli-html2md", default-features = false, optional = true }
 scraper = { version = "0.29", default-features = false, features = ["errors", "main"], optional = true }
@@ -120,15 +116,16 @@ tar = { version = "0.4", default-features = false, optional = true }
 flate2 = { version = "1", default-features = false, optional = true }
 xz2 = { version = "0.1", default-features = false, optional = true }
 zstd = { version = "0.13", default-features = false, optional = true }
-sevenz-rust = { version = "0.6", default-features = false, optional = true }
+sevenz-rust2 = { version = "0.25", default-features = false, optional = true }
 
 # 结构化数据（feature data）
 parquet = { version = "60", default-features = false, features = ["arrow"], optional = true }
 rusqlite = { version = "0.37", default-features = false, features = ["bundled"], optional = true }
 biblatex = { version = "0.12", default-features = false, optional = true }
 
-# 邮件（feature eml）
-mail = { version = "0.7", default-features = false, optional = true }
+# 邮件（feature eml）：mail-parser 是活跃维护的 MIME 解析器（mail crate 的
+# mail-internals 带 RUSTSEC-2023-0054 UAF 且无修复版本）
+mail-parser = { version = "1.0", default-features = false, optional = true }
 
 [dev-dependencies]
 http = { version = "1.5", default-features = false, features = ["std"] }
@@ -146,5 +143,5 @@ all = { level = "warn", priority = -1 }
 workspace = true
 
 [profile.release]
-# anydoc catch_unwind 防御要求 panic = "unwind"（默认即 unwind，显式声明防止下游改 abort）
+# 外部解析器防御式 catch_unwind 要求 panic = "unwind"（默认即 unwind，显式声明防止下游改 abort）
 panic = "unwind"

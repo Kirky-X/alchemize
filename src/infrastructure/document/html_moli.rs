@@ -425,7 +425,7 @@ impl crate::application::ports::Converter for HtmlMoliConverter {
         &["html", "htm"]
     }
 
-    /// priority 15：压过既有 html/htmd 引擎（10），与 anydoc 同级——
+    /// priority 15：压过既有 html/htmd 引擎（10）——
     /// feature moli 构建下 moli 链是 html 的首选路径。
     fn priority(&self) -> u8 {
         15

@@ -270,7 +270,7 @@ impl AlchemizeBuilder {
         };
 
         // html-moli：feature moli 编译即注册（默认配置）；with_moli 仅定制
-        // base_url/extract_main——与 anydoc「编译即可用」的注册语义一致。
+        // base_url/extract_main——「编译即可用」的注册语义。
         #[cfg(feature = "moli")]
         if self.moli.is_none() {
             self.moli = Some(MoliEngineConfig::default());

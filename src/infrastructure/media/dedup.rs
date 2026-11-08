@@ -6,9 +6,6 @@
 //! Uses perceptual hashing (pHash), entropy filtering, and pixel difference ratio
 //! to identify meaningful frames that should be sent to VisionProvider for analysis.
 
-use img_hash::{HashAlg, HasherConfig, ImageHash};
-// Use image crate re-exported by img_hash
-use img_hash::image::{DynamicImage, ImageBuffer, Rgb};
 
 /// Default Hamming distance threshold for perceptual hash comparison.
 /// Frames with distance below this threshold are considered duplicates.
@@ -29,8 +26,7 @@ const DEFAULT_DIFF_RATIO_THRESHOLD: f64 = 0.05;
 /// 2. Entropy filtering - skip low-information frames (black/blur/transition)
 /// 3. Pixel difference ratio - skip frames with minimal changes
 pub struct FrameDeduplicator {
-    hasher: img_hash::Hasher,
-    last_hash: Option<ImageHash<Box<[u8]>>>,
+    last_hash: Option<u64>,
     last_accepted_frame: Option<Vec<u8>>,
     hash_threshold: u32,
     entropy_threshold: f64,
@@ -40,13 +36,7 @@ pub struct FrameDeduplicator {
 impl FrameDeduplicator {
     /// Create a new deduplicator with default thresholds.
     pub fn new() -> Self {
-        let hasher = HasherConfig::new()
-            .hash_alg(HashAlg::Mean) // pHash-like algorithm
-            .hash_size(8, 8) // 8x8 hash for speed
-            .to_hasher();
-
         Self {
-            hasher,
             last_hash: None,
             last_accepted_frame: None,
             hash_threshold: DEFAULT_HASH_THRESHOLD,
@@ -81,7 +71,7 @@ impl FrameDeduplicator {
         // Layer 1: Perceptual hash deduplication
         let hash = self.compute_hash(frame, width, height);
         if let Some(ref last_hash) = self.last_hash {
-            let distance = hash.dist(last_hash);
+            let distance = (hash ^ last_hash).count_ones();
             if distance < self.hash_threshold {
                 return false; // Too similar to previous frame
             }
@@ -107,16 +97,14 @@ impl FrameDeduplicator {
         true
     }
 
-    /// Compute perceptual hash for a frame.
-    fn compute_hash(&self, frame: &[u8], width: u32, height: u32) -> ImageHash<Box<[u8]>> {
-        // img_hash expects image::DynamicImage with owned pixel buffer
-        let img_buffer: ImageBuffer<Rgb<u8>, Vec<u8>> =
-            match ImageBuffer::from_raw(width, height, frame.to_vec()) {
-                Some(buf) => buf,
-                None => ImageBuffer::new(width, height),
-            };
-        let dynamic_image = DynamicImage::ImageRgb8(img_buffer);
-        self.hasher.hash_image(&dynamic_image)
+    /// Compute an average perceptual hash (aHash, 64 bit) for a frame.
+    ///
+    /// Self-hosted replacement for `img_hash::HashAlg::Mean` (which pulled
+    /// rustdct/rustfft/transpose — RUSTSEC-2023-0080). The algorithm is the
+    /// same: grayscale, downscale to 8×8 by box averaging, then set one bit
+    /// per cell above the mean.
+    fn compute_hash(&self, frame: &[u8], width: u32, height: u32) -> u64 {
+        average_hash(frame, width, height)
     }
 
     /// Reset state for a new video segment.
@@ -217,6 +205,51 @@ pub fn pixel_diff_ratio(current: &[u8], previous: &[u8], width: u32, height: u32
 
 // Tests
 
+
+/// Average perceptual hash: 8×8 grayscale cells, one bit per cell above the
+/// mean. Returns a 64-bit hash; Hamming distance compares two hashes.
+fn average_hash(frame: &[u8], width: u32, height: u32) -> u64 {
+    if width == 0 || height == 0 || frame.is_empty() {
+        return 0;
+    }
+    // Luma per source pixel (RGB or RGBA), box-averaged into 8×8 cells.
+    let channels = if frame.len() == (width as usize) * (height as usize) * 4 {
+        4
+    } else {
+        3
+    };
+    let mut cells = [0f64; 64];
+    for cell_y in 0..8u32 {
+        for cell_x in 0..8u32 {
+            let x0 = cell_x * width / 8;
+            let x1 = ((cell_x + 1) * width / 8).max(x0 + 1).min(width);
+            let y0 = cell_y * height / 8;
+            let y1 = ((cell_y + 1) * height / 8).max(y0 + 1).min(height);
+            let mut sum = 0f64;
+            let mut count = 0u32;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let i = ((y as usize) * (width as usize) + x as usize) * channels;
+                    if i + 2 < frame.len() {
+                        let (r, g, b) = (frame[i] as f64, frame[i + 1] as f64, frame[i + 2] as f64);
+                        sum += 0.299 * r + 0.587 * g + 0.114 * b;
+                        count += 1;
+                    }
+                }
+            }
+            cells[(cell_y * 8 + cell_x) as usize] = if count == 0 { 0.0 } else { sum / count as f64 };
+        }
+    }
+    let mean = cells.iter().sum::<f64>() / 64.0;
+    let mut hash = 0u64;
+    for (bit, value) in cells.iter().enumerate() {
+        if *value > mean {
+            hash |= 1 << bit;
+        }
+    }
+    hash
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,11 +304,7 @@ mod tests {
     #[test]
     fn reset_clears_state() {
         let mut dedup = FrameDeduplicator::new();
-        dedup.last_hash = Some(
-            HasherConfig::new()
-                .to_hasher()
-                .hash_image(&DynamicImage::new_rgb8(8, 8)),
-        );
+        dedup.last_hash = Some(average_hash(&vec![0u8; 8 * 8 * 3], 8, 8));
         dedup.last_accepted_frame = Some(vec![1, 2, 3]);
         dedup.reset();
         assert!(dedup.last_hash.is_none());

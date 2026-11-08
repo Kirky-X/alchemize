@@ -139,7 +139,7 @@ fn render_table(table: &crate::domain::document::Table, out: &mut String) {
     out.push_str("| ");
     out.push_str(&header.join(" | "));
     out.push_str(" |\n|");
-    for c in 0..cols {
+    for _ in 0..cols {
         out.push_str("---|");
     }
     out.push_str("\n");

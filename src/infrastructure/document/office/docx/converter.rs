@@ -432,7 +432,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn real_docx_recall_vs_anydoc_output() {
+    async fn real_docx_recall_smoke() {
         // Character-recall smoke: deep parse of the real 923KB wordlist must
         // recover the bulk of extractable characters.
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

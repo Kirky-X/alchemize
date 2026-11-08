@@ -661,7 +661,7 @@ fn sha8_hex(bytes: &[u8]) -> String {
 }
 
 /// Rewrite `ImageSource::Asset(idx)` into sha8-named `images/…` references
-/// (the DOCX/anydoc convention) and collect named assets in first-reference
+/// (the DOCX convention) and collect named assets in first-reference
 /// order. Identical bytes reuse the first reference.
 fn rewrite_image_refs(
     blocks: &mut Vec<Block>,

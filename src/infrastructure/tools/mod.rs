@@ -4,3 +4,6 @@
 //! External tool ports (runtime-probed binaries).
 
 pub mod pandoc;
+
+#[cfg(feature = "libreoffice")]
+pub mod libreoffice;

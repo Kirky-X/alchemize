@@ -2,7 +2,7 @@
 
 //! 7z archive converter with recursive extraction (T027).
 //!
-//! Payloads are decoded fully in memory via `sevenz_rust::SevenZReader`
+//! Payloads are decoded fully in memory via `sevenz_rust2::SevenZReader`
 //! (`for_each_entries`), bounded by the shared per-entry safety limit.
 
 use std::io::{Cursor, Read};
@@ -94,11 +94,7 @@ impl Converter for SevenZConverter {
 /// would stop enumeration early, so we always return `true` and rely on the
 /// per-entry size guard to reject oversized payloads.
 fn extract_sevenz(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
-    let mut reader = sevenz_rust::SevenZReader::new(
-        Cursor::new(bytes),
-        bytes.len() as u64,
-        sevenz_rust::Password::empty(),
-    )
+    let mut reader = sevenz_rust2::ArchiveReader::new(Cursor::new(bytes), sevenz_rust2::Password::empty())
     .map_err(|e| AlchemizeError::other(format!("failed to open 7z archive: {e}")))?;
 
     let mut out: Vec<ContainerEntry> = Vec::new();
@@ -109,17 +105,18 @@ fn extract_sevenz(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
                 return Ok(true);
             }
             if entry.size > limit {
-                return Err(sevenz_rust::Error::other(format!(
+                return Err(sevenz_rust2::Error::Other(format!(
                     "entry '{}' is {} bytes, exceeds the {limit}-byte per-entry limit",
                     entry.name, entry.size
-                )));
+                )
+                .into()));
             }
             let mut buf = Vec::new();
             data.take(limit + 1)
                 .read_to_end(&mut buf)
-                .map_err(|e| sevenz_rust::Error::other(format!("failed to read entry '{}': {e}", entry.name)))?;
+                .map_err(|e| sevenz_rust2::Error::Other(format!("failed to read entry '{}': {e}", entry.name).into()))?;
             check_entry_size(&entry.name, buf.len() as u64)
-                .map_err(|e| sevenz_rust::Error::other(e.to_string()))?;
+                .map_err(|e| sevenz_rust2::Error::Other(e.to_string().into()))?;
             out.push(ContainerEntry {
                 name: entry.name.clone(),
                 bytes: buf,

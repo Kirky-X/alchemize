@@ -14,7 +14,7 @@ use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 /// Converts PDF files to markdown by extracting text per page.
 ///
 /// Local extraction is the fallback tier (quality `LocalFallback`): text
-/// only, no images or formulas. Higher tiers (MinerU / anydoc) sit above
+/// only, no images or formulas. Higher tiers (MinerU / pdfium) sit above
 /// this converter in the registry.
 pub struct PdfConverter;
 

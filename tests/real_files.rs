@@ -87,19 +87,16 @@ async fn real_xlsx_extracts_tables() {
         rows > 20,
         "expected a populated lexicon table, got {rows} table lines"
     );
-    // Engine-sensitive metadata: the native calamine engine reports
-    // total_rows; anydoc (higher priority when the feature is on) reports
-    // its own key set. Assert on the markdown itself either way.
+    // Engine-sensitive metadata: the calamine engine reports total_rows.
     if meta["converter"] == "xlsx" {
         let total_rows = meta["total_rows"].as_u64().unwrap_or(0);
         assert!(total_rows > 10, "expected >10 data rows, got {total_rows}");
-    } else {
-        let body_lines = md.lines().filter(|l| !l.trim().is_empty()).count();
-        assert!(
-            body_lines > 20,
-            "anydoc path emitted only {body_lines} non-empty lines"
-        );
     }
+    let body_lines = md.lines().filter(|l| !l.trim().is_empty()).count();
+    assert!(
+        body_lines > 20,
+        "xlsx path emitted only {body_lines} non-empty lines"
+    );
 }
 
 // -- PNG (real Dock icon bitmap) ---------------------------------------------
@@ -139,24 +136,48 @@ async fn real_html_extracts_license_body_without_css() {
     }
 }
 
-// -- RTF (real macOS License.rtf; anydoc feature required) --------------------
+/// Whether a `soffice` binary is on PATH (legacy RTF needs it).
+fn soffice_available() -> bool {
+    std::env::var("PATH")
+        .map(|p| {
+            std::env::split_paths(&p).any(|d| {
+                let c = d.join("soffice");
+                c.is_file()
+            })
+        })
+        .unwrap_or(false)
+}
 
-#[cfg(feature = "anydoc")]
+// -- RTF (real macOS License.rtf; legacy-office needs soffice) ----------------
+
+#[cfg(feature = "libreoffice")]
 #[tokio::test]
-async fn real_rtf_via_anydoc() {
-    let (md, meta) = convert("real.rtf").await;
-    assert!(md.chars().count() > 500, "rtf body too short");
-    assert_eq!(meta["converter"], "anydoc", "rtf must route to anydoc");
-    let lower = md.to_lowercase();
+async fn real_rtf_via_legacy_office() {
+    let path = real("real.rtf");
+    let alch = AlchemizeBuilder::new().build();
+    let result = alch.convert(&Input::Path(path)).await;
+    if !soffice_available() {
+        // No LibreOffice: the engine reports Unavailable and the chain has no
+        // other rtf handler — the failure must be explicit.
+        assert!(
+            matches!(result, Err(alchemize::AlchemizeError::UnsupportedFormat(_))),
+            "without soffice rtf must be UnsupportedFormat"
+        );
+        return;
+    }
+    let result = result.unwrap();
+    assert!(result.markdown.chars().count() > 500, "rtf body too short");
+    assert_eq!(result.metadata["engine"], "libreoffice");
+    let lower = result.markdown.to_lowercase();
     assert!(
         lower.contains("licen") || lower.contains("apple"),
         "rtf vocabulary missing"
     );
 }
 
-#[cfg(not(feature = "anydoc"))]
+#[cfg(not(feature = "libreoffice"))]
 #[tokio::test]
-async fn real_rtf_without_anydoc_reports_unsupported() {
+async fn real_rtf_without_engine_reports_unsupported() {
     let path = real("real.rtf");
     let alch = AlchemizeBuilder::new().build();
     let result = alch.convert(&Input::Path(path)).await;
