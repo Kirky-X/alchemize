@@ -51,6 +51,10 @@ mineru = ["dep:reqwest", "dep:limiteron", "dep:futures", "reqwest/multipart", "r
 anydoc = ["dep:anydoc"]
 # ASR：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
 asr = ["dep:vecboost", "dep:reqwest", "reqwest/multipart"]
+# pdfium 本地高保真 PDF 引擎（动态库运行时加载）
+pdfium = ["dep:pdfium-render"]
+# LibreOffice headless 旧格式引擎（外部 soffice 二进制）
+libreoffice = []
 # MCP 工具面：sdforge rmcp stdio 服务（alch-mcp）；CLI 封装（cli feature）恒在
 mcp = ["sdforge/mcp"]
 # html-moli 引擎：crawlrs 吸收的 moli→htmd 转换链 + 主内容提取（third_party vendor）
@@ -97,6 +101,8 @@ dom_smoothie = { version = "0.19", default-features = false, optional = true }
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"], optional = true }
 url = { version = "2", default-features = false, features = ["std"], optional = true }
 futures = { version = "0.3", default-features = false, features = ["std"], optional = true }
+# pdfium（Chrome PDF 引擎）绑定：运行时动态库加载，缺失降级
+pdfium-render = { version = "0.5", default-features = false, optional = true }
 # 轮询退避原语：MinerU 三客户端共享 poll_delay 走 limiteron delay_for_attempt
 limiteron = { version = "0.3.0-rc.10", default-features = false, features = ["retry"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }

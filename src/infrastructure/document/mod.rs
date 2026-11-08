@@ -14,6 +14,7 @@ pub mod html_moli;
 pub mod ipynb;
 pub mod latex_source;
 pub mod pdf;
+pub mod pdfium;
 pub mod pptx;
 pub mod shared;
 pub mod text;
@@ -29,6 +30,8 @@ pub use html::HtmlConverter;
 pub use ipynb::IpynbConverter;
 pub use latex_source::LatexSourceConverter;
 pub use pdf::PdfConverter;
+#[cfg(feature = "pdfium")]
+pub use pdfium::PdfiumConverter;
 pub use pptx::PptxConverter;
 pub use shared::{detect_encoding, local_tag_name};
 pub use text::TextConverter;
