@@ -30,7 +30,7 @@ use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 ///
 /// 契约（上游 `Dom` trait，只读视图、不二次解码实体）：
 /// - `node_kind`：Document/Fragment → Document；Element → 小写局部名；Text → 已解码文本；
-///   注释/doctype/处理指令 → Other
+///   注释/doctype/处理指令 → Other；**懒加载占位图 → Other**（见 `is_placeholder_img`）
 /// - `first_child` / `next_sibling`：ego_tree 直接映射（scraper 内部树，NodeId Copy）
 /// - `attribute`：大小写不敏感匹配（scraper 属性名已小写化，双保险）
 /// - `control_value` / `has_block_layout` / `has_text_boundary`：保留 trait 默认实现
@@ -45,6 +45,36 @@ impl<'a> ScraperDom<'a> {
     }
 }
 
+/// 懒加载占位图判定（解析器级，ScraperDom 专属视图约定）。
+///
+/// 懒加载站点（BBC 等）的每个图片位先给一张禁用-JS 场景的灰色占位图
+/// （`hide-when-no-script` 类），JS 就绪后由浏览器隐藏并换上真图。静态转换
+/// 不执行 JS，两张 img 都会被遍历——把占位图判成 Other 让 moli 状态机
+/// 整体跳过（不产出、不进子树），等效于浏览器「有 JS 视图」。
+///
+/// 判据（URL 关键词，方案 A）：src 含 `placeholder` / `spacer`，或 data: URI
+/// 小图（≤64 字节的 base64 载荷约一张 1×1 像素）。各站占位图命名高度趋同，
+/// 误伤面可忽略；srcSet/src 为真图的节点不命中。
+fn is_placeholder_img(el: &scraper::node::Element) -> bool {
+    if el.name() != "img" {
+        return false;
+    }
+    let Some(src) = el.attr("src") else {
+        return false;
+    };
+    let lower = src.to_ascii_lowercase();
+    if lower.contains("placeholder") || lower.contains("spacer") {
+        return true;
+    }
+    // data:image/...;base64,<载荷>：1×1 透明 PNG/GIF 的 base64 载荷 ≤ 100 字符
+    lower.starts_with("data:image/")
+        && lower
+            .rsplit("base64,")
+            .next()
+            .map(|payload| payload.len() <= 100)
+            .unwrap_or(false)
+}
+
 impl Dom for ScraperDom<'_> {
     type NodeId = ego_tree::NodeId;
 
@@ -52,6 +82,7 @@ impl Dom for ScraperDom<'_> {
         match self.doc.tree.get(node).map(|n| n.value()) {
             Some(Node::Document) | Some(Node::Fragment) => NodeKind::Document,
             // scraper 的 Element::name() 即 html5ever 归一化后的小写局部名
+            Some(Node::Element(el)) if is_placeholder_img(el) => NodeKind::Other,
             Some(Node::Element(el)) => NodeKind::Element(el.name()),
             // scraper 的 Text 节点在解析时已完成实体解码（StrTendril 明文）
             Some(Node::Text(text)) => NodeKind::Text(text.text.as_ref()),
@@ -602,6 +633,77 @@ mod tests {
             extracted.markdown.contains("body words"),
             "{:?}",
             extracted.markdown
+        );
+    }
+
+    /// 懒加载占位图判定：URL 关键词与 data: 小图命中；真图与非 img 不命中。
+    #[test]
+    fn is_placeholder_img_judgement() {
+        fn el_from(html: &str) -> scraper::node::Element {
+            let doc = scraper::Html::parse_fragment(html);
+            // parse_fragment 会包出 html/body 包装元素——必须精确选 img，
+            // find_map 首个 Element 是包装节点。
+            let found = doc.tree.nodes().find_map(|n| match n.value() {
+                Node::Element(el) if el.name() == "img" => Some(el.clone()),
+                _ => None,
+            });
+            if found.is_none() {
+                eprintln!("PROBE el_from: no img in {html:?}");
+            }
+            found.expect("test helper: input must contain an <img>")
+        }
+        // BBC 灰色占位图（真页形态）
+        assert!(is_placeholder_img(&el_from(
+            r#"<img src="https://static.files.bbci.co.uk/bbcdotcom/web/x/grey-placeholder.png" aria-label="image unavailable"/>"#,
+        )));
+        // 通用 spacer
+        assert!(is_placeholder_img(&el_from(
+            r#"<img src="/assets/spacer.gif"/>"#,
+        )));
+        // 1×1 data: 透明图（懒加载占位另一常见形态）
+        assert!(is_placeholder_img(&el_from(
+            r#"<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"/>"#,
+        )));
+        // 真图：srcSet 站点的 src 是真 URL
+        assert!(!is_placeholder_img(&el_from(
+            r#"<img src="https://ichef.bbci.co.uk/news/480/cpsprodpb/x.jpg.webp" alt="real photo"/>"#,
+        )));
+        // 误伤面：非 img 元素与无 src 的 img 绝不命中（el_from 专找 img，
+        // div 负例需独立构造）。
+        let doc = scraper::Html::parse_fragment(r#"<div src="/x/spacer.gif"/>"#);
+        let div = doc
+            .tree
+            .nodes()
+            .find_map(|n| match n.value() {
+                Node::Element(el) => Some(el.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert!(!is_placeholder_img(&div), "non-img must never match");
+        assert!(!is_placeholder_img(&el_from(r#"<img alt="no src"/>"#)));
+    }
+
+    /// 解析器级端到端：全页路径下占位图也不产出（ScraperDom 视图层判定，
+    /// 两条 moli 路径——提取与全页——同时生效，无需各自过滤）。
+    #[tokio::test]
+    async fn placeholder_img_dropped_in_full_page_path() {
+        let html = r#"<html><body>
+            <figure>
+              <img src="https://cdn.example/img/grey-placeholder.png" aria-label="image unavailable"/>
+              <img src="https://cdn.example/photo.jpg" alt="real photo"/>
+              <figcaption>caption text</figcaption>
+            </figure>
+        </body></html>"#;
+        let result = engine().convert(page_input(html)).await.unwrap();
+        assert!(
+            !result.markdown.contains("grey-placeholder"),
+            "placeholder img must not reach markdown: {:?}",
+            result.markdown
+        );
+        assert!(
+            result.markdown.contains("(https://cdn.example/photo.jpg)"),
+            "real image must survive: {:?}",
+            result.markdown
         );
     }
 }
