@@ -294,6 +294,19 @@ pub fn parse_body(xml: &[u8], ctx: &mut BodyCtx) -> Result<Vec<Block>, Alchemize
                     _ => {}
                 }
             }
+            Ok(Event::GeneralRef(r)) if in_paragraph => {
+                let text = crate::infrastructure::document::decode_entity(r.as_ref());
+                if !text.is_empty() {
+                    let mut props = run_props;
+                    if let Some(style_id) = &run_char_style {
+                        props = props.merge(ctx.style_table.resolve_character(style_id));
+                    }
+                    para_inlines.push(Inline::Text {
+                        text,
+                        style: props.to_style(),
+                    });
+                }
+            }
             Ok(Event::Text(t)) if in_paragraph => {
                 let text = String::from_utf8_lossy(t.as_bytes()).into_owned();
                 if !text.is_empty() {

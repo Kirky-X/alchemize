@@ -35,7 +35,7 @@ pub use pdf::PdfConverter;
 #[cfg(feature = "pdfium")]
 pub use pdfium::PdfiumConverter;
 pub use pptx::PptxConverter;
-pub use shared::{detect_encoding, local_tag_name};
+pub use shared::{decode_entity, detect_encoding, local_tag_name};
 pub use text::TextConverter;
 pub use xlsx::XlsxConverter;
 pub use zip::ZipConverter;

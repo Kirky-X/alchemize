@@ -57,6 +57,11 @@ pub fn parse_notes(xml: &[u8], kind: NoteKind) -> Vec<Note> {
                     current_text.push_str(&String::from_utf8_lossy(t.as_bytes()));
                 }
             }
+            Ok(Event::GeneralRef(r)) => {
+                if in_paragraph && !skip_marker {
+                    current_text.push_str(&crate::infrastructure::document::decode_entity(r.as_ref()));
+                }
+            }
             Ok(Event::End(e)) => {
                 let local = crate::infrastructure::document::local_tag_name(e.name().as_ref());
                 match local.as_str() {

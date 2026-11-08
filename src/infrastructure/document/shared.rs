@@ -11,6 +11,19 @@ pub fn local_tag_name(tag: &str) -> String {
     }
 }
 
+/// Decode the five XML predefined entities (`quick-xml` 0.42 surfaces them
+/// as `Event::GeneralRef`).
+pub fn decode_entity(name: &str) -> String {
+    match name {
+        "amp" => "&".into(),
+        "lt" => "<".into(),
+        "gt" => ">".into(),
+        "quot" => "\"".into(),
+        "apos" => "'".into(),
+        other => format!("&{other};"), // unknown: keep verbatim, no silent loss
+    }
+}
+
 /// Decode bytes to a string, trying UTF-8 first then common legacy encodings.
 ///
 /// Returns `(decoded, encoding_name)`; falls back to lossy UTF-8.
