@@ -136,17 +136,17 @@ fn render_table(table: &crate::domain::document::Table, out: &mut String) {
     if header_rows > 0 {
         rows.remove(0);
     }
-    out.push('|');
-    out.push_str(&header.join("|"));
-    out.push_str("|\n|");
-    for _ in 0..cols {
-        out.push_str("---|");
+    out.push_str("| ");
+    out.push_str(&header.join(" | "));
+    out.push_str(" |\n|");
+    for c in 0..cols {
+        out.push_str(if c + 1 < cols { "---|" } else { "---|" });
     }
-    out.push_str("|\n");
+    out.push_str("\n");
     for row in rows {
-        out.push('|');
-        out.push_str(&row.join("|"));
-        out.push_str("|\n");
+        out.push_str("| ");
+        out.push_str(&row.join(" | "));
+        out.push_str(" |\n");
     }
     out.push('\n');
 }

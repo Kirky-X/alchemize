@@ -8,6 +8,7 @@ pub mod gfm_render;
 pub mod csv;
 pub mod docx;
 pub mod epub;
+pub mod office;
 pub mod html;
 #[cfg(feature = "moli")]
 pub mod html_moli;
@@ -26,6 +27,7 @@ pub use anydoc::AnydocConverter;
 pub use csv::CsvConverter;
 pub use docx::DocxConverter;
 pub use epub::EpubConverter;
+pub use office::DocxDeepConverter;
 pub use html::HtmlConverter;
 pub use ipynb::IpynbConverter;
 pub use latex_source::LatexSourceConverter;
