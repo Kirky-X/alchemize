@@ -1,5 +1,5 @@
 //! Self-hosted office-format deep parsers.
 
-pub mod docx_deep;
+pub mod docx;
 
-pub use docx_deep::DocxDeepConverter;
+pub use docx::DocxDeepConverter;

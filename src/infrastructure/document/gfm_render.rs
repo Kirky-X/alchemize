@@ -39,7 +39,7 @@ fn render_blocks(blocks: &[Block], out: &mut String) {
                 out.push('\n');
                 out.push_str(&"#".repeat(depth as usize));
                 out.push(' ');
-                out.push_str(&render_inlines(content).trim().to_string());
+                out.push_str(render_inlines(content).trim());
                 out.push_str("\n\n");
             }
             Block::Paragraph(inlines) => {
@@ -140,7 +140,7 @@ fn render_table(table: &crate::domain::document::Table, out: &mut String) {
     out.push_str(&header.join(" | "));
     out.push_str(" |\n|");
     for c in 0..cols {
-        out.push_str(if c + 1 < cols { "---|" } else { "---|" });
+        out.push_str("---|");
     }
     out.push_str("\n");
     for row in rows {
@@ -156,33 +156,103 @@ fn escape_cell(text: &str) -> String {
 }
 
 fn render_inlines(inlines: &[Inline]) -> String {
-    let mut out = String::new();
+    // First, coalesce adjacent text runs with identical styles (Word emits
+    // one run per toggle; GFM wants one span per styled region).
+    let mut coalesced: Vec<Coalesced> = Vec::new();
     for inline in inlines {
         match inline {
-            Inline::Text { text, .. } => out.push_str(text),
-            Inline::Link { content, target } => {
-                let label = render_inlines(content);
-                let url = match target {
-                    LinkTarget::External(u) | LinkTarget::Relative(u) => u.clone(),
-                    LinkTarget::Anchor(id) => format!("#{id}"),
-                };
-                out.push_str(&format!("[{label}]({url})"));
-            }
-            Inline::Image { alt, source } => match source {
-                ImageSource::External(url) => {
-                    out.push_str(&format!("![{alt}]({url})"));
+            Inline::Text { text, style } => match coalesced.last_mut() {
+                Some(Coalesced::Text {
+                    text: prev,
+                    style: prev_style,
+                }) if prev_style == style => {
+                    prev.push_str(text);
                 }
-                ImageSource::Asset(_) | ImageSource::Unavailable => {
-                    out.push_str(alt);
-                }
+                _ => coalesced.push(Coalesced::Text {
+                    text: text.clone(),
+                    style: *style,
+                }),
             },
-            Inline::Math(tex) => out.push_str(&format!("${tex}$")),
-            Inline::Checkbox(checked) => {
-                out.push_str(if *checked { "[x] " } else { "[ ] " });
+            other => coalesced.push(Coalesced::Other(other)),
+        }
+    }
+
+    let mut out = String::new();
+    for item in &coalesced {
+        match item {
+            Coalesced::Text { text, style } => {
+                let (open, close) = style_markers(style);
+                // Trim inner edge whitespace out of the emphasis markers so
+                // `**bold **` (invalid GFM emphasis) becomes `**bold** `.
+                let trimmed = text.trim_matches(' ');
+                let lead = text.len() - text.trim_start_matches(' ').len();
+                let trail = text.len() - text.trim_end_matches(' ').len();
+                if open.is_empty() {
+                    out.push_str(text);
+                } else {
+                    out.push_str(&" ".repeat(lead));
+                    out.push_str(open);
+                    out.push_str(trimmed);
+                    out.push_str(close);
+                    out.push_str(&" ".repeat(trail));
+                }
             }
-            Inline::Anchor(_) | Inline::NoteRef(_) => {}
-            Inline::LineBreak => out.push_str("  \n"),
+            Coalesced::Other(inline) => render_inline_other(inline, &mut out),
         }
     }
     out
 }
+
+/// A coalesced inline: either a maximal same-style text run or any other
+/// inline element, passed through untouched.
+enum Coalesced<'a> {
+    Text {
+        text: String,
+        style: crate::domain::document::Style,
+    },
+    Other(&'a Inline),
+}
+
+fn render_inline_other(inline: &Inline, out: &mut String) {
+    match inline {
+        Inline::Link { content, target } => {
+            let label = render_inlines(content);
+            let url = match target {
+                LinkTarget::External(u) | LinkTarget::Relative(u) => u.clone(),
+                LinkTarget::Anchor(id) => format!("#{id}"),
+            };
+            out.push_str(&format!("[{label}]({url})"));
+        }
+        Inline::Image { alt, source } => match source {
+            ImageSource::External(url) => {
+                out.push_str(&format!("![{alt}]({url})"));
+            }
+            ImageSource::Asset(_) | ImageSource::Unavailable => {
+                out.push_str(alt);
+            }
+        },
+        Inline::Math(tex) => out.push_str(&format!("${tex}$")),
+        Inline::Checkbox(checked) => {
+            out.push_str(if *checked { "[x] " } else { "[ ] " });
+        }
+        Inline::Anchor(_) | Inline::NoteRef(_) => {}
+        Inline::LineBreak => out.push_str("  \n"),
+        Inline::Text { text, style } => {
+            let (open, close) = style_markers(style);
+            out.push_str(open);
+            out.push_str(text);
+            out.push_str(close);
+        }
+    }
+}
+
+/// Opening/closing markers for a text style (`**` bold, `*` italic).
+fn style_markers(style: &crate::domain::document::Style) -> (&'static str, &'static str) {
+    match (style.bold, style.italic) {
+        (true, true) => ("***", "***"),
+        (true, false) => ("**", "**"),
+        (false, true) => ("*", "*"),
+        (false, false) => ("", ""),
+    }
+}
+

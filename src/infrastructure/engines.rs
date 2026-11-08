@@ -35,6 +35,12 @@ pub fn default_converters(
     engines.push(Box::new(
         crate::infrastructure::document::AnydocConverter::new(),
     ));
+    // Self-hosted deep DOCX parser (priority 18): style cascade, footnotes,
+    // merged cells, drawing assets. Above the native docx (10) so the deep
+    // parser is preferred; above anydoc (15) too — self-hosted wins ties.
+    engines.push(Box::new(
+        crate::infrastructure::document::DocxDeepConverter::new(),
+    ));
     // Office XML (fallback tier below anydoc).
     engines.push(Box::new(
         crate::infrastructure::document::DocxConverter::new(),

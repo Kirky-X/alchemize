@@ -363,6 +363,7 @@ fn bridge_to_selfhost(doc: anydoc::model::Document) -> crate::domain::document::
                         italic: style.italic,
                         code: style.code,
                         strike: style.strike,
+                        size_pt: None,
                     },
                 },
                 anydoc::model::Inline::Link { content, target } => dm::Inline::Link {

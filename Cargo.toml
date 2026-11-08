@@ -55,11 +55,17 @@ asr = ["dep:vecboost", "dep:reqwest", "reqwest/multipart"]
 pdfium = ["dep:pdfium-render"]
 # LibreOffice headless 旧格式引擎（外部 soffice 二进制）
 libreoffice = []
+# 归档容器族（tar/tgz/gz/xz/zst/7z）
+containers = ["dep:tar", "dep:flate2", "dep:xz2", "dep:zstd", "dep:sevenz-rust"]
+# 结构化数据引擎（parquet/sqlite/bib）
+data = ["dep:parquet", "dep:rusqlite", "dep:biblatex"]
+# 邮件（eml）
+eml = ["dep:mail"]
 # MCP 工具面：sdforge rmcp stdio 服务（alch-mcp）；CLI 封装（cli feature）恒在
 mcp = ["sdforge/mcp"]
 # html-moli 引擎：crawlrs 吸收的 moli→htmd 转换链 + 主内容提取（third_party vendor）
 moli = ["dep:moli-html2md", "dep:scraper", "dep:dom_smoothie", "dep:ego_tree", "dep:regex", "dep:url"]
-full = ["mineru", "anydoc", "asr", "moli"]
+full = ["mineru", "anydoc", "asr", "moli", "containers", "data", "eml"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
@@ -108,6 +114,21 @@ limiteron = { version = "0.3.0-rc.10", default-features = false, features = ["re
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
 # 自研转录引擎门面：Qwen3-ASR ONNX 三图 + silero VAD（load-dynamic ort）
 vecboost = { path = "../vecboost", version = "0.3.0-rc.3", default-features = false, features = ["transcribe"], optional = true }
+
+# 归档容器族（feature containers）
+tar = { version = "0.4", default-features = false, optional = true }
+flate2 = { version = "1", default-features = false, optional = true }
+xz2 = { version = "0.1", default-features = false, optional = true }
+zstd = { version = "0.13", default-features = false, optional = true }
+sevenz-rust = { version = "0.6", default-features = false, optional = true }
+
+# 结构化数据（feature data）
+parquet = { version = "60", default-features = false, features = ["arrow"], optional = true }
+rusqlite = { version = "0.37", default-features = false, features = ["bundled"], optional = true }
+biblatex = { version = "0.12", default-features = false, optional = true }
+
+# 邮件（feature eml）
+mail = { version = "0.7", default-features = false, optional = true }
 
 [dev-dependencies]
 http = { version = "1.5", default-features = false, features = ["std"] }

@@ -128,7 +128,7 @@ pub enum Inline {
 }
 
 /// Character style bitset over a text run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Style {
     /// Bold.
     pub bold: bool,
@@ -138,6 +138,9 @@ pub struct Style {
     pub code: bool,
     /// Strikethrough.
     pub strike: bool,
+    /// Font size in points, when the source names one.
+    #[serde(default)]
+    pub size_pt: Option<f32>,
 }
 
 impl Style {
@@ -147,6 +150,7 @@ impl Style {
         italic: false,
         code: false,
         strike: false,
+        size_pt: None,
     };
 
     /// Bold style.
