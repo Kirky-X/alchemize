@@ -15,7 +15,7 @@ use crate::application::registry::ConverterRegistry;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::infrastructure::containers::{
-    check_entry_size, ContainerBase, ContainerEntry, RecursiveContainer,
+    ContainerBase, ContainerEntry, RecursiveContainer, check_entry_size,
 };
 
 /// View over raw 7z bytes implementing the shared container skeleton.
@@ -71,7 +71,10 @@ impl Converter for SevenZConverter {
         "7z"
     }
 
-    async fn convert(&self, input: Input) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
+    async fn convert(
+        &self,
+        input: Input,
+    ) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
         let _depth = self.base.acquire_depth()?;
         let bytes = input
             .to_bytes()
@@ -94,8 +97,9 @@ impl Converter for SevenZConverter {
 /// would stop enumeration early, so we always return `true` and rely on the
 /// per-entry size guard to reject oversized payloads.
 fn extract_sevenz(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
-    let mut reader = sevenz_rust2::ArchiveReader::new(Cursor::new(bytes), sevenz_rust2::Password::empty())
-    .map_err(|e| AlchemizeError::other(format!("failed to open 7z archive: {e}")))?;
+    let mut reader =
+        sevenz_rust2::ArchiveReader::new(Cursor::new(bytes), sevenz_rust2::Password::empty())
+            .map_err(|e| AlchemizeError::other(format!("failed to open 7z archive: {e}")))?;
 
     let mut out: Vec<ContainerEntry> = Vec::new();
     let limit = crate::infrastructure::containers::MAX_ENTRY_BYTES;
@@ -105,16 +109,20 @@ fn extract_sevenz(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
                 return Ok(true);
             }
             if entry.size > limit {
-                return Err(sevenz_rust2::Error::Other(format!(
-                    "entry '{}' is {} bytes, exceeds the {limit}-byte per-entry limit",
-                    entry.name, entry.size
-                )
-                .into()));
+                return Err(sevenz_rust2::Error::Other(
+                    format!(
+                        "entry '{}' is {} bytes, exceeds the {limit}-byte per-entry limit",
+                        entry.name, entry.size
+                    )
+                    .into(),
+                ));
             }
             let mut buf = Vec::new();
-            data.take(limit + 1)
-                .read_to_end(&mut buf)
-                .map_err(|e| sevenz_rust2::Error::Other(format!("failed to read entry '{}': {e}", entry.name).into()))?;
+            data.take(limit + 1).read_to_end(&mut buf).map_err(|e| {
+                sevenz_rust2::Error::Other(
+                    format!("failed to read entry '{}': {e}", entry.name).into(),
+                )
+            })?;
             check_entry_size(&entry.name, buf.len() as u64)
                 .map_err(|e| sevenz_rust2::Error::Other(e.to_string().into()))?;
             out.push(ContainerEntry {

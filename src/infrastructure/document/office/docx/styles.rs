@@ -11,8 +11,8 @@
 
 use std::collections::HashMap;
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 use crate::domain::document::Style;
 
@@ -263,9 +263,7 @@ pub fn parse_styles(xml: &[u8]) -> StyleTable {
                             } else {
                                 table.defaults.italic = Some(on);
                             }
-                        } else if in_style_rpr
-                            && let Some((_, def, _)) = &mut current
-                        {
+                        } else if in_style_rpr && let Some((_, def, _)) = &mut current {
                             if key == "b" {
                                 def.bold = Some(on);
                             } else {
@@ -279,9 +277,7 @@ pub fn parse_styles(xml: &[u8]) -> StyleTable {
                         {
                             if in_rpr_default {
                                 table.defaults.size_pt = Some(hp as f32 / 2.0);
-                            } else if in_style_rpr
-                                && let Some((_, def, _)) = &mut current
-                            {
+                            } else if in_style_rpr && let Some((_, def, _)) = &mut current {
                                 def.sz_half_points = Some(hp);
                             }
                         }
@@ -302,9 +298,7 @@ pub fn parse_styles(xml: &[u8]) -> StyleTable {
                             } else {
                                 table.defaults.italic = Some(on);
                             }
-                        } else if in_style_rpr
-                            && let Some((_, def, _)) = &mut current
-                        {
+                        } else if in_style_rpr && let Some((_, def, _)) = &mut current {
                             if key == "b" {
                                 def.bold = Some(on);
                             } else {
@@ -318,9 +312,7 @@ pub fn parse_styles(xml: &[u8]) -> StyleTable {
                         {
                             if in_rpr_default {
                                 table.defaults.size_pt = Some(hp as f32 / 2.0);
-                            } else if in_style_rpr
-                                && let Some((_, def, _)) = &mut current
-                            {
+                            } else if in_style_rpr && let Some((_, def, _)) = &mut current {
                                 def.sz_half_points = Some(hp);
                             }
                         }
@@ -479,6 +471,103 @@ mod tests {
         assert_eq!(outline, Some(1));
         let (_, _, title) = table.resolve_paragraph("T");
         assert_eq!(title, Some(1));
+    }
+
+    #[test]
+    fn doc_defaults_italic_and_numbering_styles_ignored() {
+        let styles = r#"<?xml version="1.0"?><w:styles xmlns:w="w">
+<w:docDefaults><w:rPrDefault><w:rPr><w:i/><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>
+<w:style w:type="numbering" w:styleId="NoList"><w:name w:val="No List"/></w:style>
+<w:style w:type="paragraph" w:styleId="P"><w:name w:val="P"/><w:rPr><w:sz w:val="28"/></w:rPr></w:style>
+</w:styles>"#;
+        let table = parse_styles(styles.as_bytes());
+        assert_eq!(table.defaults.italic, Some(true));
+        assert!(
+            table.styles.get("NoList").is_none(),
+            "numbering styles must not enter the paragraph table"
+        );
+        let (props, _, _) = table.resolve_paragraph("P");
+        assert_eq!(props.size_pt, Some(14.0), "own sz overrides docDefaults");
+        assert_eq!(props.italic, Some(true), "docDefaults italic inherited");
+        let (missing, _, _) = table.resolve_paragraph("NoSuchStyle");
+        assert_eq!(
+            missing.size_pt,
+            Some(10.0),
+            "unknown id falls back to defaults"
+        );
+    }
+
+    #[test]
+    fn title_subtitle_and_chinese_heading_names() {
+        let styles = r#"<?xml version="1.0"?><w:styles xmlns:w="w">
+<w:style w:type="paragraph" w:styleId="T"><w:name w:val="Title"/></w:style>
+<w:style w:type="paragraph" w:styleId="S"><w:name w:val="Subtitle"/></w:style>
+<w:style w:type="paragraph" w:styleId="CN"><w:name w:val="标题 1"/></w:style>
+</w:styles>"#;
+        let table = parse_styles(styles.as_bytes());
+        let (_, _, title) = table.resolve_paragraph("T");
+        assert_eq!(title, Some(1));
+        let (_, _, subtitle) = table.resolve_paragraph("S");
+        assert_eq!(subtitle, Some(2));
+        let (_, outline, cn) = table.resolve_paragraph("CN");
+        assert_eq!(cn, Some(1));
+        assert_eq!(outline, Some(0));
+    }
+
+    #[test]
+    fn character_style_inherits_based_on() {
+        let styles = r#"<?xml version="1.0"?><w:styles xmlns:w="w">
+<w:style w:type="character" w:styleId="Base"><w:name w:val="Base"/><w:rPr><w:b/></w:rPr></w:style>
+<w:style w:type="character" w:styleId="Derived"><w:name w:val="Derived"/><w:basedOn w:val="Base"/><w:rPr><w:i/></w:rPr></w:style>
+</w:styles>"#;
+        let table = parse_styles(styles.as_bytes());
+        let props = table.resolve_character("Derived");
+        assert_eq!(props.bold, Some(true));
+        assert_eq!(props.italic, Some(true));
+        assert_eq!(table.resolve_character("Nope").bold, None);
+    }
+
+    #[test]
+    fn explicit_off_toggle_parsed_from_empty_element() {
+        let styles = r#"<?xml version="1.0"?><w:styles xmlns:w="w">
+<w:style w:type="paragraph" w:styleId="Off"><w:name w:val="Off"/><w:rPr><w:b w:val="false"/><w:i w:val="0"/></w:rPr></w:style>
+</w:styles>"#;
+        let table = parse_styles(styles.as_bytes());
+        let def = table.styles.get("Off").expect("style parsed");
+        assert_eq!(def.bold, Some(false));
+        assert_eq!(def.italic, Some(false));
+    }
+
+    #[test]
+    fn start_form_properties_name_text_and_empty_ids() {
+        let styles = r#"<?xml version="1.0"?><w:styles xmlns:w="w">
+<w:docDefaults><w:rPrDefault><w:rPr><w:b>1</w:b><w:sz w:val="18"></w:sz></w:rPr></w:rPrDefault></w:docDefaults>
+<w:style w:type="paragraph" w:styleId="Lvl"><w:name w:val="Custom"/><w:outlineLvl w:val="3"></w:outlineLvl><w:rPr><w:i></w:i><w:sz w:val="30"></w:sz></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="TextName"><w:name>heading 4</w:name></w:style>
+<w:style w:type="paragraph" w:styleId="Sub"><w:name w:val="副标题"/></w:style>
+<w:style w:type="paragraph" w:styleId="NoDigits"><w:name w:val="Heading"/></w:style>
+<w:style w:type="paragraph" styleId="NoAttrs"><w:name w:val="ignored"/></w:style>
+</w:styles>"#;
+        let table = parse_styles(styles.as_bytes());
+        // Start-form toggles and sz inside docDefaults and a style body.
+        assert_eq!(table.defaults.bold, Some(true));
+        assert_eq!(table.defaults.size_pt, Some(9.0));
+        let (props, outline, heading) = table.resolve_paragraph("Lvl");
+        assert_eq!(props.italic, Some(true));
+        assert_eq!(props.size_pt, Some(15.0));
+        assert_eq!(outline, Some(3), "outlineLvl from the style body");
+        assert_eq!(heading, None, "a custom name is not a heading level");
+        // Name carried as element text, not the w:val attribute.
+        let (_, _, text_name) = table.resolve_paragraph("TextName");
+        assert_eq!(text_name, Some(4));
+        // Chinese subtitle convention.
+        let (_, _, sub) = table.resolve_paragraph("Sub");
+        assert_eq!(sub, Some(2));
+        // "Heading" without digits is still a heading: level defaults to 2.
+        let (_, _, no_digits) = table.resolve_paragraph("NoDigits");
+        assert_eq!(no_digits, Some(2));
+        // A style without w:styleId is dropped instead of stored under "".
+        assert!(table.styles.get("").is_none());
     }
 
     #[test]

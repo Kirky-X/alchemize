@@ -157,6 +157,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn delimiter_sensing_covers_tsv_psv_and_csv() {
+        let c = CsvConverter::new();
+        assert_eq!(c.effective_delimiter("tsv", "a\tb"), b'\t');
+        assert_eq!(c.effective_delimiter("psv", "a|b"), b'|');
+        assert_eq!(c.effective_delimiter("csv", "a,b,c"), b',');
+        // Mislabelled: pipes dominate in a .csv.
+        assert_eq!(c.effective_delimiter("csv", "a|b|c,d"), b'|');
+        // Mislabelled: tabs dominate.
+        assert_eq!(c.effective_delimiter("csv", "a\tb\tc,d"), b'\t');
+        assert_eq!(
+            CsvConverter::with_delimiter(b';').effective_delimiter("csv", "a,b"),
+            b';'
+        );
+    }
+
+    #[test]
     fn supported_extensions() {
         assert_eq!(
             CsvConverter::new().supported_extensions(),

@@ -392,6 +392,106 @@ mod tests {
         }
     }
 
+    const ALL_FORMATS: &[InputFormat] = &[
+        InputFormat::Pdf,
+        InputFormat::Pptx,
+        InputFormat::Docx,
+        InputFormat::Xlsx,
+        InputFormat::Xls,
+        InputFormat::Odt,
+        InputFormat::Html,
+        InputFormat::Epub,
+        InputFormat::Csv,
+        InputFormat::Zip,
+        InputFormat::Txt,
+        InputFormat::Ipynb,
+        InputFormat::Gif,
+        InputFormat::Png,
+        InputFormat::Jpeg,
+        InputFormat::Webp,
+        InputFormat::Wav,
+        InputFormat::Mp3,
+        InputFormat::Ogg,
+        InputFormat::Flac,
+        InputFormat::Mp4,
+    ];
+
+    #[test]
+    fn format_tables_are_complete_and_round_trip() {
+        for &format in ALL_FORMATS {
+            let primary = format.extension();
+            assert!(!primary.is_empty(), "{format:?}");
+            assert!(!format.extensions().is_empty(), "{format:?}");
+            assert!(
+                format.extensions().contains(&primary),
+                "{format:?} primary {primary} missing from aliases"
+            );
+            for alias in format.extensions() {
+                assert_eq!(ext_to_format(alias), Some(format), "alias {alias}");
+            }
+            let _ = format.content_type();
+        }
+        assert_eq!(InputFormat::Unknown.extension(), "unknown");
+        assert_eq!(InputFormat::Unknown.extensions(), &["unknown"]);
+        assert_eq!(
+            InputFormat::Unknown.content_type(),
+            crate::domain::result::ContentType::Document
+        );
+        assert_eq!(ext_to_format("not-a-format"), None);
+    }
+
+    #[test]
+    fn magic_bytes_identify_every_container() {
+        fn pkg(payload: &[u8]) -> Vec<u8> {
+            let mut v = b"PK\x03\x04".to_vec();
+            v.extend_from_slice(&[0u8; 26]);
+            v.extend_from_slice(payload);
+            v
+        }
+        let cases = [
+            (b"%PDF-1.7 header".to_vec(), InputFormat::Pdf),
+            (
+                b"PK\x03\x04mimetypeapplication/vnd.oasis.opendocument.text".to_vec(),
+                InputFormat::Odt,
+            ),
+            (pkg(b"word/document.xml"), InputFormat::Docx),
+            (pkg(b"ppt/slides/slide1.xml"), InputFormat::Pptx),
+            (pkg(b"xl/workbook.xml"), InputFormat::Xlsx),
+            (pkg(b"META-INF/container.xml"), InputFormat::Epub),
+            (pkg(b"content.xml"), InputFormat::Odt),
+            (b"RIFF\0\0\0\0WEBPpayload".to_vec(), InputFormat::Webp),
+            (b"RIFF\0\0\0\0WAVEpayload".to_vec(), InputFormat::Wav),
+            (b"RIFF\0\0\0\0AVI payload".to_vec(), InputFormat::Mp4),
+            (vec![0xFF, 0xFB, 0x90, 0x00], InputFormat::Mp3),
+        ];
+        for (data, expected) in cases {
+            // Bytes win over a misleading extension.
+            let input = bytes_input(data, "wrong.bin");
+            assert_eq!(detect_format(&input), Some(expected), "{expected:?}");
+        }
+        // Short payloads and unknown magic fall through to the extension.
+        assert_eq!(
+            detect_format(&bytes_input(vec![0, 1], "note.txt")),
+            Some(InputFormat::Txt)
+        );
+        assert_eq!(
+            detect_format(&bytes_input(vec![0x00; 12], "sheet.xlsx")),
+            Some(InputFormat::Xlsx)
+        );
+        assert_eq!(detect_format(&bytes_input(vec![0x00; 12], "blob")), None);
+        // A path input has no synchronous magic read: extension decides.
+        assert_eq!(
+            detect_format(&Input::Path(PathBuf::from("/tmp/a.pdf"))),
+            Some(InputFormat::Pdf)
+        );
+        assert_eq!(detect_format(&Input::Path(PathBuf::from("/tmp/a"))), None);
+        // RIFF with an unknown sub-brand stays undetected by magic.
+        assert_eq!(
+            detect_format(&bytes_input(b"RIFF\0\0\0\0NOPEdata".to_vec(), "a.weird")),
+            None
+        );
+    }
+
     #[test]
     fn input_path_filename() {
         let input = Input::Path(PathBuf::from("/tmp/test.pdf"));

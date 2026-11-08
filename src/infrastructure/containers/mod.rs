@@ -16,8 +16,8 @@ pub use single::{GzConverter, XzConverter, ZstConverter};
 pub use tar::{TarConverter, TarGzConverter};
 
 use std::io::Read;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::application::registry::ConverterRegistry;
 use crate::domain::asset::Asset;
@@ -239,7 +239,11 @@ pub(crate) fn fallback_entry(name: &str, bytes: &[u8]) -> (String, Option<Asset>
                 while !text.is_char_boundary(cut) {
                     cut -= 1;
                 }
-                format!("{}\n… (truncated, {} bytes total)", &text[..cut], text.len())
+                format!(
+                    "{}\n… (truncated, {} bytes total)",
+                    &text[..cut],
+                    text.len()
+                )
             } else {
                 text.to_string()
             };

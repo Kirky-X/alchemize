@@ -84,8 +84,7 @@ impl Converter for XlsxConverter {
 
             markdown_parts.push(format!("## {}\n", sheet_name));
 
-            let (formats, fmt_fallback) =
-                read_cell_formats(&bytes, sheet_index);
+            let (formats, fmt_fallback) = read_cell_formats(&bytes, sheet_index);
             numfmt_fallback += fmt_fallback;
             let table =
                 range_to_markdown_table(&range, &formats, &mut total_rows, &mut total_cells);
@@ -163,7 +162,10 @@ fn range_to_markdown_table(
             .map(|c| {
                 let cell = range.get((r, c));
                 let code = formats.get(&(r as u32, c as u32));
-                escape_cell(&format_cell_value_with_format(cell, code.map(String::as_str)))
+                escape_cell(&format_cell_value_with_format(
+                    cell,
+                    code.map(String::as_str),
+                ))
             })
             .collect();
 
@@ -190,7 +192,8 @@ fn escape_cell(text: &str) -> String {
 /// pre-rendered from calamine. Unsupported codes fall back to the raw value.
 fn format_cell_value_with_format(cell: Option<&Data>, format_code: Option<&str>) -> String {
     if let (Some(Data::Float(f)), Some(code)) = (cell, format_code)
-        && let Some(rendered) = crate::infrastructure::document::office::numfmt::apply_format(*f, code)
+        && let Some(rendered) =
+            crate::infrastructure::document::office::numfmt::apply_format(*f, code)
     {
         return rendered;
     }
@@ -224,7 +227,6 @@ fn column_letter(idx: usize) -> String {
     }
 }
 
-
 // ---- T014: number-format (numFmt) display values ------------------------
 //
 // calamine does not expose per-cell format codes, so the style chain is read
@@ -240,8 +242,8 @@ type CellFormats = std::collections::HashMap<(u32, u32), String>;
 /// Returns an empty map for non-xlsx inputs or unreadable packages: number
 /// formatting is a display nicety, never a conversion blocker.
 fn read_cell_formats(bytes: &[u8], sheet_index: usize) -> (CellFormats, usize) {
-    use quick_xml::events::Event;
     use quick_xml::Reader;
+    use quick_xml::events::Event;
     use std::io::Read;
 
     let mut formats: CellFormats = std::collections::HashMap::new();
@@ -320,7 +322,10 @@ fn read_cell_formats(bytes: &[u8], sheet_index: usize) -> (CellFormats, usize) {
             code_by_id
                 .get(id)
                 .cloned()
-                .or_else(|| crate::infrastructure::document::office::numfmt::builtin_format(*id as u16).map(|s| s.to_string()))
+                .or_else(|| {
+                    crate::infrastructure::document::office::numfmt::builtin_format(*id as u16)
+                        .map(|s| s.to_string())
+                })
                 .filter(|c| c != "General")
         })
         .collect();
@@ -404,7 +409,10 @@ mod tests {
     #[test]
     fn supported_extensions() {
         let converter = XlsxConverter::new();
-        assert_eq!(converter.supported_extensions(), &["xlsx", "xls", "xlsb", "ods"]);
+        assert_eq!(
+            converter.supported_extensions(),
+            &["xlsx", "xls", "xlsb", "ods"]
+        );
     }
 
     #[test]
@@ -467,6 +475,132 @@ mod tests {
         );
     }
 
+    fn package(parts: &[(&str, &str)]) -> Vec<u8> {
+        use std::io::Write;
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut w = zip::ZipWriter::new(buf);
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, body) in parts {
+            w.start_file(*name, opts).unwrap();
+            w.write_all(body.as_bytes()).unwrap();
+        }
+        w.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn cell_formats_parser_covers_package_edge_cases() {
+        // Non-zip input and a package without styles yield no formats.
+        assert_eq!(read_cell_formats(b"not a zip", 0), (CellFormats::new(), 0));
+        let no_styles = package(&[("xl/worksheets/sheet1.xml", "<worksheet/>")]);
+        assert_eq!(read_cell_formats(&no_styles, 0), (CellFormats::new(), 0));
+
+        // A style table without a worksheet part also yields nothing.
+        let styles_only = package(&[(
+            "xl/styles.xml",
+            r#"<styleSheet><cellXfs><xf numFmtId="200"/></cellXfs></styleSheet>"#,
+        )]);
+        assert_eq!(read_cell_formats(&styles_only, 0), (CellFormats::new(), 0));
+
+        let full = package(&[
+            (
+                "xl/styles.xml",
+                r#"<styleSheet>
+<numFmts><numFmt numFmtId="200" formatCode="0.000"/><numFmt numFmtId="201"/><numFmt formatCode="0.0"/></numFmts>
+<cellStyleXfs><xf numFmtId="200"/></cellStyleXfs>
+<cellXfs><xf numFmtId="200"/><xf/><xf numFmtId="14"/></cellXfs>
+</styleSheet>"#,
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<worksheet><sheetData><row>
+<c r="A1" s="0"><v>1.2345</v></c>
+<c r="C3" s="2"><v>45000</v></c>
+<c r="B2" s="1"><v>2</v></c>
+<c r="D5" s="99"><v>3</v></c>
+<c r="D4"><v>4</v></c>
+<c r="1A" s="0"><v>5</v></c>
+<c r="A0" s="0"><v>6</v></c>
+<c r="E5" s="abc"><v>7</v></c>
+</row></sheetData></worksheet>"#,
+            ),
+        ]);
+        let (formats, fallback) = read_cell_formats(&full, 0);
+        assert_eq!(
+            formats.get(&(0, 0)).map(String::as_str),
+            Some("0.000"),
+            "custom numFmt code: {formats:?}"
+        );
+        assert_eq!(
+            formats.get(&(2, 2)).map(String::as_str),
+            Some("mm-dd-yy"),
+            "builtin numFmtId 14 resolves: {formats:?}"
+        );
+        assert_eq!(formats.len(), 2, "invalid/absent styles add no entries");
+        // xf with no numFmtId → General (filtered) and out-of-range index.
+        assert_eq!(fallback, 2, "cells whose style resolves to no code");
+    }
+
+    #[test]
+    fn cell_value_formats_cover_iso_variants_and_fallbacks() {
+        assert_eq!(
+            format_cell_value(Some(&Data::DateTimeIso("2024-01-02T03:04:05".into()))),
+            "2024-01-02T03:04:05"
+        );
+        assert_eq!(
+            format_cell_value(Some(&Data::DurationIso("PT1H30M".into()))),
+            "PT1H30M"
+        );
+        assert_eq!(
+            format_cell_value_with_format(Some(&Data::Float(1234.5)), Some("0.00")),
+            "1234.50"
+        );
+        // A text-only code does not apply to a number: plain rendering wins.
+        assert_eq!(
+            format_cell_value_with_format(Some(&Data::Float(3.0)), Some("@")),
+            "3"
+        );
+        // Non-numeric cells ignore the format code entirely.
+        assert_eq!(
+            format_cell_value_with_format(Some(&Data::String("x".into())), Some("0.00")),
+            "x"
+        );
+        assert_eq!(format_cell_value_with_format(None, Some("0.00")), "");
+        assert_eq!(
+            format_cell_value_with_format(Some(&Data::Float(1.5)), None),
+            "1.5"
+        );
+    }
+
+    #[test]
+    fn column_letters_past_z() {
+        assert_eq!(column_letter(25), "Z");
+        assert_eq!(column_letter(26), "AA");
+        assert_eq!(column_letter(51), "AZ");
+        assert_eq!(column_letter(52), "BA");
+        assert_eq!(column_letter(25), "Z");
+        assert_eq!(column_letter(26), "AA");
+        assert_eq!(column_letter(27), "AB");
+    }
+
+    #[test]
+    fn cell_values_of_every_variant() {
+        assert_eq!(format_cell_value(None), "");
+        assert_eq!(format_cell_value(Some(&Data::Empty)), "");
+        assert_eq!(format_cell_value(Some(&Data::Bool(true))), "true");
+        assert_eq!(format_cell_value(Some(&Data::Int(-3))), "-3");
+        assert_eq!(format_cell_value(Some(&Data::String("x|y".into()))), "x|y");
+        assert!(
+            format_cell_value(Some(&Data::Error(calamine::CellErrorType::Div0))).contains("ERROR")
+        );
+    }
+
+    #[test]
+    fn escape_cell_protects_table_shape() {
+        assert_eq!(escape_cell("a|b"), "a\\|b");
+        assert_eq!(escape_cell("line1\nline2"), "line1 line2");
+        assert_eq!(escape_cell("cr\rlf"), "cr lf");
+    }
+
     #[test]
     fn column_letter_a() {
         assert_eq!(column_letter(0), "A");
@@ -516,7 +650,10 @@ mod tests {
     #[test]
     fn default_creates_instance() {
         let converter = XlsxConverter;
-        assert_eq!(converter.supported_extensions(), &["xlsx", "xls", "xlsb", "ods"]);
+        assert_eq!(
+            converter.supported_extensions(),
+            &["xlsx", "xls", "xlsb", "ods"]
+        );
     }
 
     #[test]

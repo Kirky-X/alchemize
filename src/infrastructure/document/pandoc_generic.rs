@@ -57,9 +57,8 @@ impl Converter for PandocGenericConverter {
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
         let ext = input.extension().unwrap_or_default();
-        let format = pandoc_format(&ext).ok_or_else(|| {
-            AlchemizeError::UnsupportedFormat(format!("pandoc-generic: .{ext}"))
-        })?;
+        let format = pandoc_format(&ext)
+            .ok_or_else(|| AlchemizeError::UnsupportedFormat(format!("pandoc-generic: .{ext}")))?;
         let bytes = input
             .to_bytes()
             .await
@@ -102,7 +101,14 @@ impl Converter for PandocGenericConverter {
     fn supported_extensions(&self) -> &[&str] {
         // Static list mirroring FORMATS (trait requires &'static ct).
         &[
-            "org", "rst", "adoc", "asciidoc", "opml", "mediawiki", "wiki", "textile",
+            "org",
+            "rst",
+            "adoc",
+            "asciidoc",
+            "opml",
+            "mediawiki",
+            "wiki",
+            "textile",
         ]
     }
 
@@ -153,7 +159,11 @@ mod tests {
             assert!(result.markdown.contains("**bold**"), "{}", result.markdown);
         } else {
             // No pandoc: the fenced fallback keeps the source intact.
-            assert!(result.markdown.starts_with("```asciidoc"), "{}", result.markdown);
+            assert!(
+                result.markdown.starts_with("```asciidoc"),
+                "{}",
+                result.markdown
+            );
             assert!(result.markdown.contains("*bold*"));
         }
     }
@@ -165,13 +175,13 @@ mod tests {
             .convert(Input::bytes(org.as_bytes().to_vec(), "notes.org"))
             .await
             .unwrap();
-        assert!(
-            result.markdown.contains("Heading"),
-            "{}",
-            result.markdown
-        );
+        assert!(result.markdown.contains("Heading"), "{}", result.markdown);
         if result.metadata["engine"] == "pandoc" {
-            assert!(result.markdown.contains("https://x.test"), "{}", result.markdown);
+            assert!(
+                result.markdown.contains("https://x.test"),
+                "{}",
+                result.markdown
+            );
         }
     }
 

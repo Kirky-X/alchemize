@@ -2,7 +2,6 @@
 
 //! Apache Parquet converter — schema + rows rendered as a markdown table (T024).
 
-
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -289,10 +288,26 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.markdown.contains("| id | score | name | flag | ts |"));
-        assert!(result.markdown.contains("| 1 | 0.5 | alpha | true | 1700000000000 |"));
-        assert!(result.markdown.contains("| 2 | 2.25 | beta | false | 1700000001000 |"));
-        assert!(result.markdown.contains("| 3 | -1 | gamma | true | 1700000002000 |"));
+        assert!(
+            result
+                .markdown
+                .contains("| id | score | name | flag | ts |")
+        );
+        assert!(
+            result
+                .markdown
+                .contains("| 1 | 0.5 | alpha | true | 1700000000000 |")
+        );
+        assert!(
+            result
+                .markdown
+                .contains("| 2 | 2.25 | beta | false | 1700000001000 |")
+        );
+        assert!(
+            result
+                .markdown
+                .contains("| 3 | -1 | gamma | true | 1700000002000 |")
+        );
 
         assert_eq!(result.metadata["source_format"], "parquet");
         assert_eq!(result.metadata["rows"], 3);
@@ -351,11 +366,12 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        let mut writer =
-            SerializedFileWriter::new(Vec::new(), schema, Default::default()).unwrap();
+        let mut writer = SerializedFileWriter::new(Vec::new(), schema, Default::default()).unwrap();
         let mut row_group = writer.next_row_group().unwrap();
         let mut col = row_group.next_column().unwrap().unwrap();
-        col.typed::<Int32Type>().write_batch(&ids, None, None).unwrap();
+        col.typed::<Int32Type>()
+            .write_batch(&ids, None, None)
+            .unwrap();
         col.close().unwrap();
         row_group.close().unwrap();
         let data = writer.into_inner().unwrap();
@@ -368,7 +384,11 @@ mod tests {
         assert_eq!(result.metadata["rows"], MAX_ROWS);
         assert_eq!(result.metadata["total_rows"], total as i64);
         assert_eq!(result.metadata["truncated"], true);
-        assert!(result.markdown.contains(&format!("first {MAX_ROWS} of {total} rows")));
+        assert!(
+            result
+                .markdown
+                .contains(&format!("first {MAX_ROWS} of {total} rows"))
+        );
     }
 
     #[tokio::test]

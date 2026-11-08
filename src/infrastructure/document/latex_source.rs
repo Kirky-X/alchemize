@@ -469,6 +469,79 @@ fn collapse_blank_lines(md: &str) -> String {
 }
 
 #[cfg(test)]
+mod noise_tests {
+    use super::*;
+
+    #[test]
+    fn inline_dollar_backtick_is_unwrapped() {
+        assert_eq!(normalize_pandoc_math("a $`x^2`$ b"), "a $x^2$ b");
+        // Unterminated stays as written.
+        assert_eq!(normalize_pandoc_math("a $`x"), "a $`x");
+    }
+
+    #[test]
+    fn labels_are_stripped() {
+        assert_eq!(normalize_pandoc_math("eq \\label{eq:1} done"), "eq  done");
+    }
+
+    #[test]
+    fn fenced_math_environment_becomes_display_math() {
+        // A ```latex fence wrapping a display environment becomes $$...$$.
+        let md = "```latex\n\\begin{equation}\nE=mc^2\n\\end{equation}\n```\n";
+        let out = normalize_pandoc_math(md);
+        assert!(out.contains("$$"), "{out}");
+        assert!(out.contains("E=mc^2"), "{out}");
+        // Non-math fences are left untouched.
+        let code = "```python\nprint(1)\n```\n";
+        assert_eq!(normalize_pandoc_math(code), code);
+    }
+
+    #[test]
+    fn div_noise_is_removed_and_images_converted() {
+        let md = "<div class=\"CCSXML\"><ccsxml>x</ccsxml></div>keep <div>inner</div> <img src=\"a.png\"/> <figure><embed src=\"b.svg\"/></figure>";
+        let out = strip_latex_div_noise(md);
+        assert!(!out.contains("ccsxml"), "{out}");
+        assert!(out.contains("keep"), "{out}");
+        assert!(out.contains("inner"), "{out}");
+        assert!(out.contains("a.png"), "img converted: {out}");
+        assert!(out.contains("b.svg"), "embed converted: {out}");
+    }
+
+    #[test]
+    fn figcaption_converts_to_emphasis() {
+        let out = strip_latex_div_noise("<figcaption>cap text</figcaption>");
+        assert!(out.contains("cap text"), "{out}");
+    }
+
+    #[test]
+    fn collect_media_files_walks_subdirectories() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("media/sub")).unwrap();
+        std::fs::write(tmp.path().join("media/a.png"), b"1").unwrap();
+        std::fs::write(tmp.path().join("media/sub/b.png"), b"2").unwrap();
+        let mut out = Vec::new();
+        collect_media_files(tmp.path(), "", &mut out);
+        let names: Vec<String> = out.iter().map(|a| a.filename.clone()).collect();
+        assert_eq!(out.len(), 2, "{names:?}");
+        // Names are relative to the scanned root (here the temp dir).
+        assert!(
+            names.iter().any(|n| n.ends_with("media/a.png")),
+            "{names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n.ends_with("media/sub/b.png")),
+            "{names:?}"
+        );
+    }
+
+    #[test]
+    fn missing_media_root_yields_nothing() {
+        let mut out = Vec::new();
+        collect_media_files(std::path::Path::new("/nonexistent-xyz"), "", &mut out);
+        assert!(out.is_empty());
+    }
+}
+
 mod tests {
     use super::*;
 

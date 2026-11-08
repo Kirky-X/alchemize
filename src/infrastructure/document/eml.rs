@@ -44,7 +44,9 @@ impl Converter for EmlConverter {
 
         let parsed = mail_parser::MessageParser::default()
             .parse(&bytes[..])
-            .ok_or_else(|| AlchemizeError::other("EML parse failed: not a valid RFC 822 message"))?;
+            .ok_or_else(|| {
+                AlchemizeError::other("EML parse failed: not a valid RFC 822 message")
+            })?;
 
         let markdown = render_message(&parsed);
         let attachments = collect_attachments(&parsed);
@@ -90,7 +92,10 @@ fn render_message(parsed: &mail_parser::Message<'_>) -> String {
             format!("- **{name}**: {value}\n")
         }
     };
-    out.push_str(&field("From", parsed.from().map(|l| render_address_list(&l))));
+    out.push_str(&field(
+        "From",
+        parsed.from().map(|l| render_address_list(&l)),
+    ));
     out.push_str(&field("To", parsed.to().map(|l| render_address_list(&l))));
     out.push_str(&field("Cc", parsed.cc().map(|l| render_address_list(&l))));
     out.push_str(&field("Date", parsed.date().map(|d| d.to_rfc3339())));
@@ -200,7 +205,11 @@ col1,col2\r
             .convert(Input::bytes(sample_eml(), "mail.eml"))
             .await
             .unwrap();
-        assert!(result.markdown.contains("Quarterly numbers"), "{}", result.markdown);
+        assert!(
+            result.markdown.contains("Quarterly numbers"),
+            "{}",
+            result.markdown
+        );
         assert!(result.markdown.contains("alice@example.com"));
         assert!(result.markdown.contains("bob@example.com"));
         assert!(result.markdown.contains("Hello Bob"), "{}", result.markdown);

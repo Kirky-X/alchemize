@@ -271,7 +271,11 @@ pub fn apply_format(value: f64, code: &str) -> Option<String> {
     let mut sec = parse_section(num_code)?;
 
     // Percent scales the magnitude.
-    let magnitude = if sec.percent { value.abs() * 100.0 } else { value.abs() };
+    let magnitude = if sec.percent {
+        value.abs() * 100.0
+    } else {
+        value.abs()
+    };
 
     if let Some(kind) = sec.datetime {
         return format_datetime(value, kind);
@@ -349,7 +353,11 @@ fn format_plain(magnitude: f64, int_digits: u32, dec_digits: u32) -> String {
     if let Some((int_part, dec_part)) = formatted.split_once('.') {
         let int_part = int_part.strip_prefix('-').unwrap_or(int_part);
         let padded = if (int_part.len() as u32) < int_digits {
-            format!("{}{}", "0".repeat((int_digits - int_part.len() as u32) as usize), int_part)
+            format!(
+                "{}{}",
+                "0".repeat((int_digits - int_part.len() as u32) as usize),
+                int_part
+            )
         } else {
             int_part.to_string()
         };
@@ -361,7 +369,11 @@ fn format_plain(magnitude: f64, int_digits: u32, dec_digits: u32) -> String {
     } else {
         let int_part = formatted.strip_prefix('-').unwrap_or(&formatted);
         let padded = if (int_part.len() as u32) < int_digits {
-            format!("{}{}", "0".repeat((int_digits - int_part.len() as u32) as usize), int_part)
+            format!(
+                "{}{}",
+                "0".repeat((int_digits - int_part.len() as u32) as usize),
+                int_part
+            )
         } else {
             int_part.to_string()
         };
@@ -375,9 +387,7 @@ fn format_thousands(magnitude: f64, dec_digits: u32) -> String {
     let factor = 10f64.powi(dec_digits as i32);
     let rounded = (magnitude * factor + 0.5).floor() / factor;
     let formatted = format!("{rounded:.0$}", dec_digits as usize);
-    let (int_part, dec_part) = formatted
-        .split_once('.')
-        .unwrap_or((&formatted, ""));
+    let (int_part, dec_part) = formatted.split_once('.').unwrap_or((&formatted, ""));
     let int_part = int_part.strip_prefix('-').unwrap_or(int_part);
     let grouped = group_thousands(int_part);
     if dec_digits == 0 {
@@ -407,7 +417,11 @@ fn format_scientific(value: f64) -> Option<String> {
     }
     let exp = value.abs().log10().floor() as i32;
     let mantissa = value / 10f64.powi(exp);
-    Some(format!("{mantissa:.2}E{}{:02}", if exp >= 0 { "+" } else { "-" }, exp.abs()))
+    Some(format!(
+        "{mantissa:.2}E{}{:02}",
+        if exp >= 0 { "+" } else { "-" },
+        exp.abs()
+    ))
 }
 
 /// Excel serial datetime → formatted string.

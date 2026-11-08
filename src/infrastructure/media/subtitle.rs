@@ -238,7 +238,9 @@ pub fn parse_lrc(content: &str) -> Vec<TimelineEvent> {
         let mut rest = line;
         let mut stamps: Vec<u64> = Vec::new();
         while let Some(stripped) = rest.strip_prefix('[') {
-            let Some(close) = stripped.find(']') else { break };
+            let Some(close) = stripped.find(']') else {
+                break;
+            };
             let tag = &stripped[..close];
             if let Some(ms) = parse_lrc_timestamp(tag) {
                 stamps.push(ms);

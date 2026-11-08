@@ -8,15 +8,15 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 use crate::domain::document::{
     Block, Cell, CellSlot, ImageSource, Inline, LinkTarget, Table, TableKind,
 };
 use crate::domain::error::AlchemizeError;
 
-use super::styles::{attr_value, has_attr_false, RunProps, StyleTable};
+use super::styles::{RunProps, StyleTable, attr_value, has_attr_false};
 
 /// Body parsing context: style cascade, relationships, and media access.
 pub struct BodyCtx<'a> {
@@ -52,6 +52,21 @@ impl BodyCtx<'_> {
             bytes,
         });
         Some(idx)
+    }
+}
+
+/// Classify a relationship target: absolute URLs stay external, everything
+/// else is resolved against the `word/` package root.
+pub fn classify_target(target: &str) -> LinkTarget {
+    let lower = target.to_ascii_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("mailto:")
+        || lower.starts_with("ftp://")
+    {
+        LinkTarget::External(target.to_string())
+    } else {
+        LinkTarget::Relative(normalize_target(target))
     }
 }
 
@@ -145,6 +160,8 @@ pub fn parse_body(xml: &[u8], ctx: &mut BodyCtx) -> Result<Vec<Block>, Alchemize
     let mut in_run = false;
     let mut in_rpr = false;
     let mut run_char_style: Option<String> = None;
+    // Nested hyperlink buffers: (target, collected content).
+    let mut link_stack: Vec<(LinkTarget, Vec<Inline>)> = Vec::new();
 
     // Table state.
     let mut table_grid: Vec<Vec<CellSlot>> = Vec::new();
@@ -179,6 +196,7 @@ pub fn parse_body(xml: &[u8], ctx: &mut BodyCtx) -> Result<Vec<Block>, Alchemize
                         para_outline = None;
                         para_props = ctx.style_table.defaults;
                         run_props = para_props;
+                        link_stack.clear();
                         in_heading = false;
                         heading_level = None;
                     }
@@ -246,29 +264,19 @@ pub fn parse_body(xml: &[u8], ctx: &mut BodyCtx) -> Result<Vec<Block>, Alchemize
                         });
                     }
                     "hyperlink" if in_paragraph => {
-                        // Hyperlink target resolved at End (children accumulate).
+                        // Hyperlink: collect the children into the link body.
                         let rid = e
                             .attributes()
                             .flatten()
                             .find(|a| a.key.as_ref().ends_with("id"))
                             .map(|a| a.value.clone().into_owned());
-                        if let Some(rid) = rid
-                            && let Some(target) = ctx.rels.get(&rid).cloned()
-                        {
-                                let target = normalize_target(&target);
-                                let link_target = if target.starts_with("http://")
-                                    || target.starts_with("https://")
-                                    || target.starts_with("mailto:")
-                                {
-                                    LinkTarget::External(target)
-                                } else {
-                                    LinkTarget::Relative(target)
-                                };
-                                para_inlines.push(Inline::Link {
-                                    content: Vec::new(),
-                                    target: link_target,
-                                });
-                        }
+                        let target = rid
+                            .as_ref()
+                            .and_then(|rid| ctx.rels.get(rid))
+                            .map(|t| classify_target(t));
+                        let link_target =
+                            target.unwrap_or_else(|| LinkTarget::Relative(String::new()));
+                        link_stack.push((link_target, Vec::new()));
                     }
                     "blip" => {
                         if let Some(idx) = blip_asset(&e, ctx) {
@@ -302,28 +310,53 @@ pub fn parse_body(xml: &[u8], ctx: &mut BodyCtx) -> Result<Vec<Block>, Alchemize
                     if let Some(style_id) = &run_char_style {
                         props = props.merge(ctx.style_table.resolve_character(style_id));
                     }
-                    para_inlines.push(Inline::Text {
+                    let inline = Inline::Text {
                         text,
                         style: props.to_style(),
-                    });
+                    };
+                    match link_stack.last_mut() {
+                        Some((_, body)) => body.push(inline),
+                        None => para_inlines.push(inline),
+                    }
                 }
             }
             Ok(Event::Text(t)) if in_paragraph => {
                 let text = String::from_utf8_lossy(t.as_bytes()).into_owned();
-                if !text.is_empty() {
-                    let mut props = run_props;
-                    if let Some(style_id) = &run_char_style {
-                        props = props.merge(ctx.style_table.resolve_character(style_id));
-                    }
-                    para_inlines.push(Inline::Text {
-                        text,
-                        style: props.to_style(),
-                    });
+                // Pretty-printed XML puts indentation between elements; a
+                // whitespace-only run carries no content and would otherwise
+                // leak newlines into headings and cells.
+                if text.trim().is_empty() {
+                    buf.clear();
+                    continue;
+                }
+                let mut props = run_props;
+                if let Some(style_id) = &run_char_style {
+                    props = props.merge(ctx.style_table.resolve_character(style_id));
+                }
+                let inline = Inline::Text {
+                    text,
+                    style: props.to_style(),
+                };
+                match link_stack.last_mut() {
+                    Some((_, body)) => body.push(inline),
+                    None => para_inlines.push(inline),
                 }
             }
             Ok(Event::End(e)) => {
                 let local = crate::infrastructure::document::local_tag_name(e.name().as_ref());
                 match local.as_str() {
+                    "hyperlink" => {
+                        if let Some((target, body)) = link_stack.pop() {
+                            let link = Inline::Link {
+                                content: body,
+                                target,
+                            };
+                            match link_stack.last_mut() {
+                                Some((_, parent)) => parent.push(link),
+                                None => para_inlines.push(link),
+                            }
+                        }
+                    }
                     "rPr" => in_rpr = false,
                     "r" => {
                         in_run = false;
@@ -356,11 +389,14 @@ pub fn parse_body(xml: &[u8], ctx: &mut BodyCtx) -> Result<Vec<Block>, Alchemize
                     "tc" if in_table => {
                         in_cell = false;
                         match cell_vmerge {
-                            Some(VMerge::Continue) => {
+                            // Continuation only makes sense below a restart row.
+                            // A malformed first-row continuation keeps its own
+                            // content instead of silently becoming covered.
+                            Some(VMerge::Continue) if row_index > 0 => {
                                 // Vertical merge continuation: the covered
                                 // position points back at the origin cell.
                                 row_cells.push(CellSlot::Covered {
-                                    origin_row: row_index.saturating_sub(1),
+                                    origin_row: row_index - 1,
                                     origin_col: cell_col,
                                 });
                             }
@@ -476,7 +512,7 @@ pub fn parse_body(xml: &[u8], ctx: &mut BodyCtx) -> Result<Vec<Block>, Alchemize
             Err(e) => {
                 return Err(AlchemizeError::Xml(format!(
                     "document.xml parse error: {e}"
-                )))
+                )));
             }
             _ => {}
         }
@@ -548,6 +584,37 @@ mod tests {
     }
 
     #[test]
+    fn classify_target_keeps_absolute_urls_external() {
+        for target in [
+            "http://x.test/a",
+            "HTTPS://x.test/a",
+            "mailto:a@b.c",
+            "ftp://x.test/f",
+        ] {
+            assert!(
+                matches!(classify_target(target), LinkTarget::External(ref t) if t == target),
+                "{target} must stay external"
+            );
+        }
+        assert_eq!(
+            classify_target("media/pic.png"),
+            LinkTarget::Relative("word/media/pic.png".into())
+        );
+        assert_eq!(
+            classify_target("../customXml/x.xml"),
+            LinkTarget::Relative("customXml/x.xml".into())
+        );
+    }
+
+    #[test]
+    fn normalize_target_handles_dots_and_double_slashes() {
+        assert_eq!(normalize_target("./media/a.png"), "word/media/a.png");
+        assert_eq!(normalize_target("media//a.png"), "word/media/a.png");
+        assert_eq!(normalize_target("/media/a.png"), "word/media/a.png");
+        assert_eq!(normalize_target("../a"), "a");
+    }
+
+    #[test]
     fn media_type_guessing() {
         assert_eq!(guess_media_type("word/media/a.png"), "image/png");
         assert_eq!(guess_media_type("word/media/a.jpeg"), "image/jpeg");
@@ -555,5 +622,16 @@ mod tests {
             guess_media_type("word/media/a.bin"),
             "application/octet-stream"
         );
+        for (part, expected) in [
+            ("word/media/a.gif", "image/gif"),
+            ("word/media/a.bmp", "image/bmp"),
+            ("word/media/a.svg", "image/svg+xml"),
+            ("word/media/a.webp", "image/webp"),
+            ("word/media/a.wmf", "image/x-emf"),
+            ("word/media/a.tif", "image/tiff"),
+            ("no_extension", "application/octet-stream"),
+        ] {
+            assert_eq!(guess_media_type(part), expected, "{part}");
+        }
     }
 }

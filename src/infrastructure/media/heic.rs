@@ -71,11 +71,13 @@ impl Converter for HeicConverter {
                         "decoded_bytes": png.len(),
                     });
                     let asset = Asset::new("images/0000-heic.png", png);
-                    return Ok(
-                        ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
-                            .with_quality(ConversionQuality::LocalFull)
-                            .with_asset(asset),
-                    );
+                    return Ok(ConvertResult::with_metadata(
+                        markdown,
+                        ContentType::Document,
+                        metadata,
+                    )
+                    .with_quality(ConversionQuality::LocalFull)
+                    .with_asset(asset));
                 }
                 Err(e) => {
                     // Decoder present but failed: report it, do not pretend.
@@ -89,10 +91,12 @@ impl Converter for HeicConverter {
                         "decode_error": e,
                         "brand": info.brand,
                     });
-                    return Ok(
-                        ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
-                            .with_quality(ConversionQuality::LocalFallback),
-                    );
+                    return Ok(ConvertResult::with_metadata(
+                        markdown,
+                        ContentType::Document,
+                        metadata,
+                    )
+                    .with_quality(ConversionQuality::LocalFallback));
                 }
             }
         }
@@ -272,6 +276,31 @@ mod tests {
             "md: {}",
             result.markdown
         );
+    }
+
+    #[tokio::test]
+    async fn decode_failure_is_reported_not_hidden() {
+        if !decoder_available() {
+            return; // branch needs a decoder to fail
+        }
+        // Structurally valid boxes, but no actual image data: sips rejects it.
+        let mut bad = fake_heic();
+        bad.extend_from_slice(&[0u8; 64]);
+        let result = HeicConverter::new()
+            .convert(Input::bytes(bad, "broken.heic"))
+            .await
+            .unwrap();
+        assert!(
+            result.metadata["decode_error"].as_str().is_some(),
+            "decode failure must be surfaced: {}",
+            result.metadata
+        );
+        assert!(
+            result.markdown.contains("decode failed"),
+            "md: {}",
+            result.markdown
+        );
+        assert!(result.assets.is_empty(), "no asset on failure");
     }
 
     #[test]

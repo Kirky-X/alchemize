@@ -117,7 +117,10 @@ impl LibreOfficeRunner {
             .map_err(|e| std::io::Error::other(format!("soffice semaphore closed: {e}")))?;
         std::fs::create_dir_all(out_dir)?;
 
-        let profile_url = format!("-env:UserInstallation=file://{}", self.profile.path().display());
+        let profile_url = format!(
+            "-env:UserInstallation=file://{}",
+            self.profile.path().display()
+        );
         let mut cmd = tokio::process::Command::new("soffice");
         cmd.arg(profile_url)
             .arg("--headless")
@@ -170,6 +173,7 @@ mod tests {
 
     #[test]
     fn probe_reports_unavailable_with_empty_path() {
+        let _serial = lock_path();
         // Simulate a machine without LibreOffice: empty PATH.
         let saved = std::env::var("PATH").ok();
         unsafe { std::env::set_var("PATH", "/nonexistent-dir") };
@@ -186,6 +190,7 @@ mod tests {
 
     #[test]
     fn on_path_matches_which_program() {
+        let _serial = lock_path();
         assert_eq!(LibreOfficeTool::on_path(), which_program("soffice"));
     }
 
@@ -198,6 +203,152 @@ mod tests {
         let dir = runner.profile_dir().to_path_buf();
         drop(runner);
         assert!(!dir.exists(), "profile must be removed on drop");
+    }
+
+    /// PATH is process-global: serialize with the other env-mutating tests.
+    fn lock_path() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_support::env_lock()
+    }
+
+    /// Install a fake `soffice` script on PATH; returns the guard that
+    /// restores PATH on drop and the script path.
+    struct PathGuard {
+        saved: Option<String>,
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match &self.saved {
+                Some(p) => unsafe { std::env::set_var("PATH", p) },
+                None => unsafe { std::env::remove_var("PATH") },
+            }
+        }
+    }
+
+    fn fake_soffice(dir: &std::path::Path, body: &str) -> PathGuard {
+        let script = dir.join("soffice");
+        std::fs::write(&script, body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script, perms).unwrap();
+        }
+        let saved = std::env::var("PATH").ok();
+        let mut paths = vec![dir.to_path_buf()];
+        if let Some(p) = &saved {
+            paths.extend(std::env::split_paths(p));
+        }
+        unsafe {
+            std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        }
+        PathGuard { saved }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn convert_reports_stderr_when_soffice_fails() {
+        let _serial = lock_path();
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = fake_soffice(tmp.path(), "#!/bin/sh\necho boom >&2\nexit 3\n");
+        let runner = LibreOfficeRunner::new().unwrap();
+        let input = tmp.path().join("in.rtf");
+        std::fs::write(&input, b"x").unwrap();
+        let err = runner
+            .convert(
+                &input,
+                "docx",
+                "Office Open XML Text",
+                &tmp.path().join("out"),
+            )
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("boom"), "stderr must surface: {msg}");
+        assert!(msg.contains('3'), "exit code must surface: {msg}");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn convert_errors_when_output_is_missing() {
+        let _serial = lock_path();
+        let tmp = tempfile::tempdir().unwrap();
+        // Exits 0 but writes nothing.
+        let _guard = fake_soffice(tmp.path(), "#!/bin/sh\nexit 0\n");
+        let runner = LibreOfficeRunner::new().unwrap();
+        let input = tmp.path().join("in.doc");
+        std::fs::write(&input, b"x").unwrap();
+        let err = runner
+            .convert(
+                &input,
+                "docx",
+                "Office Open XML Text",
+                &tmp.path().join("out"),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("is missing"),
+            "missing output must be reported: {err}"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn convert_succeeds_and_names_output_after_input_stem() {
+        let _serial = lock_path();
+        let tmp = tempfile::tempdir().unwrap();
+        // A fake soffice that copies a prepared payload to <outdir>/<stem>.docx.
+        let payload = tmp.path().join("payload.docx");
+        std::fs::write(&payload, b"PKfake-docx").unwrap();
+        let script = format!(
+            "#!/bin/sh\n\
+             outdir=\"\"\n\
+             input=\"\"\n\
+             prev=\"\"\n\
+             for arg in \"$@\"; do\n\
+               if [ \"$prev\" = \"--outdir\" ]; then outdir=\"$arg\"; fi\n\
+               case \"$arg\" in *.doc|*.rtf) input=\"$arg\" ;; esac\n\
+               prev=\"$arg\"\n\
+             done\n\
+             stem=$(basename \"$input\")\n\
+             stem=${{stem%.*}}\n\
+             cp '{}' \"$outdir/$stem.docx\"\n",
+            payload.display()
+        );
+        let _guard = fake_soffice(tmp.path(), &script);
+        let runner = LibreOfficeRunner::new().unwrap();
+        let input = tmp.path().join("report.rtf");
+        std::fs::write(&input, b"x").unwrap();
+        let out_dir = tmp.path().join("out");
+        let produced = runner
+            .convert(&input, "docx", "Office Open XML Text", &out_dir)
+            .await
+            .unwrap();
+        assert_eq!(produced, out_dir.join("report.docx"));
+        assert_eq!(std::fs::read(produced).unwrap(), b"PKfake-docx");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn probe_accepts_a_working_binary_and_rejects_a_broken_one() {
+        let _serial = lock_path();
+        let tmp = tempfile::tempdir().unwrap();
+        {
+            let _guard = fake_soffice(tmp.path(), "#!/bin/sh\necho 'LibreOffice 25.2'\n");
+            assert_eq!(LibreOfficeTool::probe(), Availability::Available);
+            assert!(LibreOfficeTool::on_path());
+        }
+        {
+            let _guard = fake_soffice(tmp.path(), "#!/bin/sh\nexit 9\n");
+            match LibreOfficeTool::probe() {
+                Availability::Unavailable { reason } => {
+                    assert!(reason.contains("exit status: 9"), "{reason}")
+                }
+                Availability::Available => panic!("non-zero --version must be unavailable"),
+            }
+        }
     }
 
     #[tokio::test]

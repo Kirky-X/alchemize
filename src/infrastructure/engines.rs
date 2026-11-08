@@ -154,7 +154,9 @@ pub fn default_converters(
 
     // E-mail (eml) — feature gated.
     #[cfg(feature = "eml")]
-    engines.push(Box::new(crate::infrastructure::document::EmlConverter::new()));
+    engines.push(Box::new(
+        crate::infrastructure::document::EmlConverter::new(),
+    ));
 
     // Structured data engines (parquet/sqlite/bib) — feature gated.
     #[cfg(feature = "data")]
@@ -162,9 +164,7 @@ pub fn default_converters(
         engines.push(Box::new(
             crate::infrastructure::data::ParquetConverter::new(),
         ));
-        engines.push(Box::new(
-            crate::infrastructure::data::SqliteConverter::new(),
-        ));
+        engines.push(Box::new(crate::infrastructure::data::SqliteConverter::new()));
         engines.push(Box::new(crate::infrastructure::data::BibConverter::new()));
     }
 

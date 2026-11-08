@@ -91,8 +91,8 @@ impl Converter for SqliteConverter {
             }
         };
 
-        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|e| {
+        let conn =
+            Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| {
                 AlchemizeError::other(format!("failed to open SQLite database read-only: {e}"))
             })?;
 
@@ -336,7 +336,10 @@ mod tests {
         assert!(result.markdown.contains("schema_version"));
         // words has 7 rows; only the first 5 are sampled.
         assert!(result.markdown.contains("first 5"));
-        assert!(!result.markdown.contains("plasma"), "row 7 must not be sampled");
+        assert!(
+            !result.markdown.contains("plasma"),
+            "row 7 must not be sampled"
+        );
 
         assert_eq!(result.metadata["source_format"], "sqlite");
         assert_eq!(result.metadata["table_count"], 2);
@@ -387,7 +390,10 @@ mod tests {
     #[test]
     fn supported_extensions_and_name() {
         let converter = SqliteConverter::new();
-        assert_eq!(converter.supported_extensions(), &["sqlite", "db", "sqlite3"]);
+        assert_eq!(
+            converter.supported_extensions(),
+            &["sqlite", "db", "sqlite3"]
+        );
         assert_eq!(converter.name(), "sqlite");
     }
 

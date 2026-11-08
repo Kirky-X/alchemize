@@ -14,5 +14,5 @@ pub mod converter;
 pub mod notes;
 pub mod styles;
 
-pub use converter::{parse, DocxDeepConverter, Warnings};
-pub use styles::{parse_styles, RunProps, StyleTable};
+pub use converter::{DocxDeepConverter, Warnings, parse};
+pub use styles::{RunProps, StyleTable, parse_styles};

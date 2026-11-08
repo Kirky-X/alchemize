@@ -203,7 +203,11 @@ fn extract(
             a.top
                 .partial_cmp(&b.top)
                 .map(|o| {
-                    o.then(a.left.partial_cmp(&b.left).unwrap_or(std::cmp::Ordering::Equal))
+                    o.then(
+                        a.left
+                            .partial_cmp(&b.left)
+                            .unwrap_or(std::cmp::Ordering::Equal),
+                    )
                 })
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -300,8 +304,8 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires pdfium library (ALCHEMIZE_PDFIUM_PATH or ~/.cache/alchemize/lib)"]
     async fn real_pdf_extracts_text() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/real/real.pdf");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/real/real.pdf");
         let conv = PdfiumConverter::new();
         assert_eq!(conv.availability(), Availability::Available);
         let result = conv.convert(Input::Path(path)).await.unwrap();

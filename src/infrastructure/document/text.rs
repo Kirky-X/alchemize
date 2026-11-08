@@ -82,10 +82,54 @@ impl Default for TextConverter {
 
 /// Code/config extensions recognized by the converter.
 pub const CODE_EXTENSIONS: &[&str] = &[
-    "py", "pyi", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "go", "java", "kt", "kts", "swift",
-    "c", "h", "cpp", "cc", "cxx", "hpp", "cs", "rb", "php", "lua", "r", "sql", "sh", "bash", "zsh",
-    "fish", "json", "jsonl", "ndjson", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf", "proto",
-    "graphql", "gql", "css", "scss", "env", "properties", "mmd",
+    "py",
+    "pyi",
+    "rs",
+    "js",
+    "mjs",
+    "cjs",
+    "jsx",
+    "ts",
+    "tsx",
+    "go",
+    "java",
+    "kt",
+    "kts",
+    "swift",
+    "c",
+    "h",
+    "cpp",
+    "cc",
+    "cxx",
+    "hpp",
+    "cs",
+    "rb",
+    "php",
+    "lua",
+    "r",
+    "sql",
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "json",
+    "jsonl",
+    "ndjson",
+    "yaml",
+    "yml",
+    "toml",
+    "xml",
+    "ini",
+    "cfg",
+    "conf",
+    "proto",
+    "graphql",
+    "gql",
+    "css",
+    "scss",
+    "env",
+    "properties",
+    "mmd",
 ];
 
 #[async_trait]
@@ -138,7 +182,9 @@ impl Converter for TextConverter {
 
 /// Supported extensions (text family + code family), built once.
 static SUPPORTED: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
-    let mut v = vec!["txt", "text", "log", "md", "markdown", "rmd", "qmd", "rst", "org"];
+    let mut v = vec![
+        "txt", "text", "log", "md", "markdown", "rmd", "qmd", "rst", "org",
+    ];
     v.extend_from_slice(CODE_EXTENSIONS);
     v.sort_unstable();
     v

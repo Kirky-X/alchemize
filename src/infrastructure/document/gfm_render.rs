@@ -76,9 +76,15 @@ fn render_blocks(blocks: &[Block], out: &mut String) {
 fn render_list(list: &List, depth: usize, out: &mut String) {
     let mut ordinal = list.start;
     for item in &list.items {
+        // GFM only distinguishes bullets from ordered lists, but the ordinal
+        // itself can still reflect the source family (a/b/c, i/ii/iii).
         let marker = match list.marker {
             MarkerKind::Bullet => "- ".to_string(),
-            _ => format!("{ordinal}. "),
+            MarkerKind::Decimal => format!("{ordinal}. "),
+            MarkerKind::LowerAlpha => format!("{}. ", alpha_marker(ordinal, false)),
+            MarkerKind::UpperAlpha => format!("{}. ", alpha_marker(ordinal, true)),
+            MarkerKind::LowerRoman => format!("{}. ", roman_marker(ordinal).to_lowercase()),
+            MarkerKind::UpperRoman => format!("{}. ", roman_marker(ordinal)),
         };
         out.push_str(&"  ".repeat(depth));
         out.push_str(&marker);
@@ -105,6 +111,102 @@ fn render_list(list: &List, depth: usize, out: &mut String) {
         ordinal += 1;
     }
     out.push('\n');
+}
+
+/// Alpha ordinal: 1 → a/A, 27 → aa/AA (spreadsheet-column style).
+fn alpha_marker(mut n: u64, upper: bool) -> String {
+    if n == 0 {
+        n = 1;
+    }
+    let mut out = String::new();
+    while n > 0 {
+        let rem = ((n - 1) % 26) as u8;
+        let ch = (b'a' + rem) as char;
+        out.insert(0, if upper { ch.to_ascii_uppercase() } else { ch });
+        n = (n - 1) / 26;
+    }
+    out
+}
+
+/// Roman numeral for the ordinals a list realistically reaches.
+fn roman_marker(mut n: u64) -> String {
+    if n == 0 || n > 3999 {
+        return n.to_string();
+    }
+    const TABLE: &[(u64, &str)] = &[
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut out = String::new();
+    for (value, glyph) in TABLE {
+        while n >= *value {
+            out.push_str(glyph);
+            n -= value;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::*;
+    use crate::domain::document::{ListItem, Style};
+
+    #[test]
+    fn alpha_markers_follow_spreadsheet_columns() {
+        assert_eq!(alpha_marker(1, false), "a");
+        assert_eq!(alpha_marker(26, false), "z");
+        assert_eq!(alpha_marker(27, false), "aa");
+        assert_eq!(alpha_marker(2, true), "B");
+        assert_eq!(alpha_marker(0, false), "a");
+    }
+
+    #[test]
+    fn roman_markers_render_and_fall_back() {
+        assert_eq!(roman_marker(1), "I");
+        assert_eq!(roman_marker(4), "IV");
+        assert_eq!(roman_marker(1994), "MCMXCIV");
+        assert_eq!(roman_marker(4000), "4000");
+        assert_eq!(roman_marker(0), "0");
+    }
+
+    #[test]
+    fn lists_use_their_marker_family() {
+        let list = |marker| List {
+            marker,
+            start: 1,
+            items: (1..=4)
+                .map(|i| ListItem {
+                    blocks: vec![Block::Paragraph(vec![Inline::Text {
+                        text: format!("i{i}"),
+                        style: Style::PLAIN,
+                    }])],
+                })
+                .collect(),
+        };
+        let render = |m| {
+            let mut out = String::new();
+            render_list(&list(m), 0, &mut out);
+            out
+        };
+        assert!(render(MarkerKind::Bullet).contains("- i1"));
+        assert!(render(MarkerKind::Decimal).contains("3. i3"));
+        assert!(render(MarkerKind::LowerAlpha).contains("c. i3"));
+        assert!(render(MarkerKind::UpperAlpha).contains("D. i4"));
+        assert!(render(MarkerKind::LowerRoman).contains("iv. i4"));
+        assert!(render(MarkerKind::UpperRoman).contains("II. i2"));
+    }
 }
 
 fn render_table(table: &crate::domain::document::Table, out: &mut String) {
@@ -255,4 +357,3 @@ fn style_markers(style: &crate::domain::document::Style) -> (&'static str, &'sta
         (false, false) => ("", ""),
     }
 }
-

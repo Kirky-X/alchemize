@@ -284,7 +284,10 @@ mod tests {
             given_initials: None,
             use_prefix: None,
         };
-        assert_eq!(format_people(&[mk("Einstein", "Albert")]), "Albert Einstein");
+        assert_eq!(
+            format_people(&[mk("Einstein", "Albert")]),
+            "Albert Einstein"
+        );
         assert_eq!(
             format_people(&[mk("Curie", "Marie"), mk("Curie", "Pierre")]),
             "Marie Curie & Pierre Curie"

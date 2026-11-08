@@ -3,17 +3,17 @@
 
 //! Document format converters.
 
-pub mod gfm_render;
 pub mod csv;
 pub mod docx;
 pub mod eml;
 pub mod epub;
-pub mod office;
+pub mod gfm_render;
 pub mod html;
 #[cfg(feature = "moli")]
 pub mod html_moli;
 pub mod ipynb;
 pub mod latex_source;
+pub mod office;
 pub mod pandoc_generic;
 pub mod pdf;
 pub mod pdfium;
@@ -28,14 +28,12 @@ pub use docx::DocxConverter;
 #[cfg(feature = "eml")]
 pub use eml::EmlConverter;
 pub use epub::EpubConverter;
-pub use office::{
-    DocxDeepConverter, OdpConverter, OdtConverter, PptxDeepConverter,
-};
-#[cfg(feature = "libreoffice")]
-pub use office::{LegacyOfficeConverter, LegacyPptConverter};
 pub use html::HtmlConverter;
 pub use ipynb::IpynbConverter;
 pub use latex_source::LatexSourceConverter;
+pub use office::{DocxDeepConverter, OdpConverter, OdtConverter, PptxDeepConverter};
+#[cfg(feature = "libreoffice")]
+pub use office::{LegacyOfficeConverter, LegacyPptConverter};
 pub use pandoc_generic::PandocGenericConverter;
 pub use pdf::PdfConverter;
 #[cfg(feature = "pdfium")]

@@ -158,11 +158,20 @@ async fn real_rtf_via_legacy_office() {
     let result = alch.convert(&Input::Path(path)).await;
     if !soffice_available() {
         // No LibreOffice: the engine reports Unavailable and the chain has no
-        // other rtf handler — the failure must be explicit.
-        assert!(
-            matches!(result, Err(alchemize::AlchemizeError::UnsupportedFormat(_))),
-            "without soffice rtf must be UnsupportedFormat"
-        );
+        // other rtf handler — the failure must be explicit (the registry
+        // reports every attempt, including the unavailable reason).
+        match result {
+            Err(alchemize::AlchemizeError::AllBackendsFailed { ext, attempts }) => {
+                assert_eq!(ext, "rtf");
+                assert!(
+                    attempts
+                        .iter()
+                        .any(|(name, why)| name == "legacy-office" && why.contains("soffice")),
+                    "attempts: {attempts:?}"
+                );
+            }
+            other => panic!("without soffice rtf must fail; got {other:?}"),
+        }
         return;
     }
     let result = result.unwrap();

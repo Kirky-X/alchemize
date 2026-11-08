@@ -63,7 +63,7 @@ Hand `alch` a file — PDF, Office, audio/video, a zip archive — and it picks 
 
 <table style="width:100%; border-collapse: collapse">
 <tr>
-<td width="50%" style="vertical-align:top; padding: 12px">📄 <b>Full document formats</b><br><span style="color:#64748B">PDF, docx/pptx/xlsx (+xls/ods), odt/odp/rtf, legacy binary Office (<code>anydoc</code>), html/epub, csv/tsv, LaTeX (pandoc), ipynb</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">📄 <b>Full document formats</b><br><span style="color:#64748B">PDF (pdfium/pure-Rust/MinerU), docx/pptx/xlsx (+xls/xlsb/ods), odt/odp, legacy binary Office (doc/ppt/rtf via LibreOffice), html/epub, csv/tsv/psv, LaTeX/org/rst/asciidoc (pandoc), ipynb</span></td>
 <td width="50%" style="vertical-align:top; padding: 12px">🧬 <b>Code fencing</b><br><span style="color:#64748B">py/rs/js/ts/go/java/c/cpp/json/yaml/toml/xml/sh and ~45 extensions total, as language-tagged fenced code blocks</span></td>
 </tr>
 <tr>
@@ -103,7 +103,7 @@ rustc --version
 # Default features (zero external-service dependencies)
 cargo build --release          # binary: target/release/alch
 
-# Full build (MinerU cloud + anydoc office backend + local ASR)
+# Full build (MinerU cloud + self-hosted office deep parsers + containers/data/e-mail + LibreOffice + local ASR)
 cargo build --release --features full
 
 # Install locally
@@ -117,10 +117,10 @@ cargo install --path . --features full
 alch convert paper.pdf
 
 # Write file + engine preference + asset mode (parent dirs auto-created)
-alch convert report.docx -o report.md --engine anydoc --assets dir|inline
+alch convert report.docx -o report.md --engine docx-deep --assets dir|inline
 
 # stderr summary line: quality tier and actual engine at a glance
-# converted report.docx -> report.md [local_full] (engine: anydoc)
+# converted report.docx -> report.md [local_full] (engine: docx-deep)
 ```
 
 ```bash
@@ -131,11 +131,34 @@ alch formats
 
 Exit codes: `0` success (including degraded output); `1` other errors; `2` unsupported format; `3` entire chain failed (stderr lists each engine's failure reason).
 
+### 📊 Supported-format matrix
+
+| Category | Extensions | Engine (priority) | Feature |
+| --- | --- | --- | --- |
+| Word (OOXML) | docx | docx-deep(18) → docx(10) | — |
+| Word (legacy) | doc, rtf | legacy-office(15, LibreOffice) | `libreoffice` |
+| OpenDocument text | odt | odt-deep(18) | — |
+| Presentations | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `libreoffice` (legacy binary only) |
+| Spreadsheets | xlsx, xls, xlsb, ods | xlsx (calamine + numFmt display values) | — |
+| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdfium` / `mineru` |
+| Web / e-book | html, htm / epub | html(htmd) → html-moli(15) / epub | `moli` (html-moli) |
+| Plain text / code | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 code extensions | text (fenced) | — |
+| Tabular text | csv, tsv, psv | csv (delimiter sensing) | — |
+| Markup languages | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | — |
+| Notebooks | ipynb | ipynb | — |
+| Images | png, jpg, jpeg, gif, webp, bmp, tif, tiff, svg / heic, heif | image (optional Vision) / heic (sips or metadata) | — |
+| Audio | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio (optional ASR) | `asr` |
+| Video | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video (ffmpeg + optional ASR/Vision) | `asr` (transcription) |
+| Subtitles | srt, vtt, ass, ssa, lrc | subtitle | — |
+| E-mail | eml | eml | `eml` |
+| Structured data | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `data` |
+| Archives | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip recursion / tar family / 7z | `containers` (all but zip) |
+
 ### 🧭 Core Concepts
 
 - **Registry & fallback chain**: engines for an extension are tried in descending `priority()`; on failure the next engine takes over; `Unavailable` engines are skipped with the reason recorded.
 - **Quality tiers**: every output is labeled `api` (cloud high-fidelity) / `local_full` (full local) / `local_fallback` (degraded local), recorded in `metadata` and the stderr summary line together with the actual engine name.
-- **Local first**: the PDF chain is anydoc(15) → pdf-extract(10) → MinerU(5, chain tail once configured) — the cloud is only a fallback after the local chain fails.
+- **Local first**: the PDF chain is pdfium(20, optional feature) → pdf-extract(10) → MinerU(5, chain tail once configured) — the cloud is only a fallback after the local chain fails.
 
 ---
 
@@ -146,19 +169,23 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | Preset | Command | Use case |
 | --- | --- | --- |
 | Minimal | `cargo build` | pure local conversion, zero external services |
-| Recommended | `cargo build --features anydoc` | + office full formats (incl. legacy binary Office) |
-| Production | `cargo build --features full` | + MinerU cloud PDF + local ASR |
+| Recommended | `cargo build --features containers,data,eml,libreoffice` | + archives / structured data / e-mail / legacy Office (needs soffice) |
+| Production | `cargo build --features full` | + MinerU cloud PDF + local ASR + html-moli |
 
 ### 📋 Feature Matrix
 
 | feature | Pulls in | Notes |
 | --- | --- | --- |
 | `mineru` | MinerU cloud PDF engine (reqwest/limiteron) | registered only after the endpoint is configured via `ALCHEMIZE_MINERU_URL` |
-| `anydoc` | office full-format backend (firecrawl/anydoc, MIT) | priority 15 above native parsers; image bytes exported in document order |
+| `pdfium` | local high-fidelity PDF engine (pdfium-render) | probes the dynamic library at runtime; falls back to pdf-extract |
+| `libreoffice` | legacy binary Office engine (external soffice) | doc/rtf→docx and ppt/pps/pot→pptx, then the deep chain; degrades when absent |
+| `containers` | archive family (tar/tgz/gz/xz/zst/7z) | recursive conversion, magic-byte detection of the inner format |
+| `data` | structured data engines (parquet/sqlite/bib) | streaming parquet with a 100k-row cap, read-only sqlite, biblatex entries |
+| `eml` | e-mail engine (mail-parser) | headers / body / attachment list |
 | `asr` | vecboost transcription facade + Whisper-compatible API | Qwen3-ASR ONNX + silero VAD, path dependency on sibling crate vecboost |
 | `mcp` | MCP tool surface (`alch-mcp` stdio server) | convert/doctor/formats exposed as MCP tools; CLI wrapping (sdforge) always on |
 | `moli` | html-moli engine (moli→htmd chain absorbed from crawlrs) | main-content extraction (`--extract-main`) and link absolutization (`--base-url`); pages with LaTeX math auto-route to htmd for fidelity |
-| `full` | all of the above | |
+| `full` | all of the above (`mineru`+`asr`+`moli`+`containers`+`data`+`eml`+`libreoffice`) | |
 
 Default is `default = ["cli"]` (CLI wrapping always on) — engines behind disabled features are not compiled at all.
 
@@ -231,7 +258,7 @@ Single-crate DDD three layers: `domain` (types and rules, no network/process IO)
 flowchart LR
     CLI["alch CLI"] --> FACADE["Alchemize facade"]
     FACADE --> REG["ConverterRegistry<br/>priority descending"]
-    REG -- "anydoc 15 → native parsers 10 → MinerU 5, tail" --> RESULT["ConvertResult<br/>markdown · metadata.converter · quality · assets"]
+    REG -- "deep parsers 18 → native parsers 10 → MinerU 5, tail" --> RESULT["ConvertResult<br/>markdown · metadata.converter · quality · assets"]
 ```
 
 Design principles, module layout and data flows in the [🏗️ Architecture doc](docs/ARCHITECTURE.md).
@@ -298,11 +325,11 @@ Four defense lines: structured error handling for untrusted input (no panics); S
 <table style="width:100%; border-collapse: collapse">
 <tr><th style="text-align:center">Status</th><th style="text-align:left">Area</th><th style="text-align:left">Items</th></tr>
 <tr><td align="center">✅</td><td>Conversion engines</td><td>registry fallback chain, full document formats, code fencing, recursive zip, multi-encoding detection</td></tr>
-<tr><td align="center">✅</td><td>Optional backends</td><td>anydoc office formats, MinerU cloud PDF (SSRF guards + limits), vecboost local ASR</td></tr>
+<tr><td align="center">✅</td><td>Optional backends</td><td>self-hosted office deep parsers (docx/odt/odp/pptx), MinerU cloud PDF (SSRF guards + limits), vecboost local ASR</td></tr>
 <tr><td align="center">✅</td><td>Media pipelines</td><td>vision port, ffmpeg track extraction, native subtitle parsing, frame dedup, VAD-segmented transcription</td></tr>
 <tr><td align="center">✅</td><td>CLI & diagnostics</td><td>sdforge-wrapped (CLI+MCP dual surface), convert/doctor/formats, semantic exit codes, engine preference & asset modes</td></tr>
 <tr><td align="center">✅</td><td>Docs & compliance</td><td>seven-doc suite (structure aligned with confers), bilingual README, SPDX headers 59/59, coverage 90.49%</td></tr>
-<tr><td align="center">🔲</td><td>Supply chain</td><td>fork anydoc onto zip 9.4 (one-line change already proven) to clear cargo-audit advisories</td></tr>
+<tr><td align="center">✅</td><td>Supply chain</td><td>anydoc dependency removed, zip is 9.4.1 only; cargo audit vulnerabilities at zero (unmaintained notices remain)</td></tr>
 <tr><td align="center">🔲</td><td>Release</td><td>first crates.io publish (vecboost first) + crates.io/docs.rs badges</td></tr>
 <tr><td align="center">🔲</td><td>CI & quality</td><td>GitHub Actions two-tier matrix + codecov coverage badge</td></tr>
 <tr><td align="center">🔲</td><td>Performance</td><td>criterion benchmarks → real data for a PERFORMANCE doc</td></tr>
@@ -355,7 +382,14 @@ Apache-2.0 ([LICENSE](LICENSE)). Every source file carries an SPDX header; files
 
 ### 🌟 Core Dependencies
 
-- [firecrawl/anydoc](https://github.com/firecrawl/anydoc) (MIT) — office full-format backend dependency.
+- [calamine](https://github.com/tafia/calamine) (MIT) — xlsx/xls/xlsb/ods reading.
+- [pdf-extract](https://github.com/jrmuizel/pdf-extract) (MIT) — PDF text-layer extraction.
+- [quick-xml](https://github.com/tafia/quick-xml) (MIT/Apache-2.0) — OOXML/ODF/OMML event streams.
+- [sevenz-rust2](https://github.com/hasenbanck/sevenz-rust2) (Apache-2.0) plus [tar](https://github.com/alexcrichton/tar-rs)/[flate2](https://github.com/rust-lang/flate2)/[xz2](https://github.com/alexcrichton/xz2-rs)/[zstd](https://github.com/gyscos/zstd-rs) (MIT/Apache-2.0) — archive containers.
+- [parquet](https://github.com/apache/arrow-rs) (Apache-2.0), [rusqlite](https://github.com/rusqlite/rusqlite) (MIT), [biblatex](https://github.com/typst/biblatex) (MIT) — structured data engines.
+- [mail-parser](https://github.com/stalwartlabs/mail-parser) (Apache-2.0/MIT) — EML parsing.
+- [LibreOffice](https://www.libreoffice.org/) (MPL-2.0) — legacy binary Office conversion (optional external tool).
+- [pandoc](https://pandoc.org/) (GPL-2.0+) — LaTeX/org/rst/asciidoc markup conversion (optional external tool).
 - [vecboost](https://github.com/Kirky-X/vecboost) (own project) — Qwen3-ASR ONNX + silero VAD local transcription facade.
 - Excellent open-source crates: [pdf-extract](https://crates.io/crates/pdf-extract), [calamine](https://crates.io/crates/calamine), [quick-xml](https://crates.io/crates/quick-xml), [aspasia](https://crates.io/crates/aspasia), [rbook](https://crates.io/crates/rbook), [htmd](https://crates.io/crates/htmd), and more.
 

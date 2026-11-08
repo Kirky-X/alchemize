@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use async_trait::async_trait;
-use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
+use quick_xml::events::{BytesStart, Event};
 
 use super::docx::body::{guess_media_type, read_part};
 use super::docx::styles::RunProps;
@@ -203,7 +203,10 @@ impl<'a> OdfWalker<'a> {
                     current.push(block);
                     return;
                 }
-                Container::Para { inlines, .. } | Container::Link { content: inlines, .. } => {
+                Container::Para { inlines, .. }
+                | Container::Link {
+                    content: inlines, ..
+                } => {
                     if let Block::Paragraph(inner) = &block {
                         if !inlines.is_empty() {
                             inlines.push(Inline::LineBreak);
@@ -253,7 +256,9 @@ impl<'a> OdfWalker<'a> {
     }
 
     fn span_push(&mut self, name: Option<&str>) {
-        let resolved = name.map(|n| resolve_style(&self.styles, n)).unwrap_or_default();
+        let resolved = name
+            .map(|n| resolve_style(&self.styles, n))
+            .unwrap_or_default();
         for c in self.containers.iter_mut().rev() {
             if let Container::Para { props, spans, .. } = c {
                 let parent = spans.last().copied().unwrap_or(*props);
@@ -280,7 +285,9 @@ impl<'a> OdfWalker<'a> {
     // ---- container ends ---------------------------------------------------
 
     fn start_para(&mut self, heading: Option<u8>, style: Option<&str>) {
-        let props = style.map(|s| resolve_style(&self.styles, s)).unwrap_or_default();
+        let props = style
+            .map(|s| resolve_style(&self.styles, s))
+            .unwrap_or_default();
         self.containers.push(Container::Para {
             heading,
             inlines: Vec::new(),
@@ -341,6 +348,11 @@ impl<'a> OdfWalker<'a> {
     }
 
     fn close_link(&mut self) {
+        // `<text:a>` without an href never opened a Link container and must
+        // not pop the enclosing paragraph.
+        if !matches!(self.containers.last(), Some(Container::Link { .. })) {
+            return;
+        }
         if let Some(Container::Link { content, target }) = self.containers.pop() {
             self.push_inline(Inline::Link { content, target });
         }
@@ -360,7 +372,11 @@ impl<'a> OdfWalker<'a> {
             return;
         }
         let id = id.unwrap_or_else(|| self.gen_note_id());
-        self.notes.push(Note { id: id.clone(), kind, blocks });
+        self.notes.push(Note {
+            id: id.clone(),
+            kind,
+            blocks,
+        });
         if emit_ref {
             self.push_inline(Inline::NoteRef(id));
         }
@@ -381,7 +397,8 @@ impl<'a> OdfWalker<'a> {
             if cell.row_span > 1 {
                 for i in 1..cell.row_span as usize {
                     for j in 0..cell.col_span as usize {
-                        t.coverage.insert((t.row_index + i, col + j), (t.row_index, col));
+                        t.coverage
+                            .insert((t.row_index + i, col + j), (t.row_index, col));
                     }
                 }
             }
@@ -504,8 +521,7 @@ impl<'a> OdfWalker<'a> {
                 self.start_para(None, style.as_deref());
             }
             "h" if start => {
-                let level = attr(e, "outline-level")
-                    .and_then(|v| v.trim().parse::<u8>().ok());
+                let level = attr(e, "outline-level").and_then(|v| v.trim().parse::<u8>().ok());
                 let style = attr(e, "style-name");
                 self.start_para(Some(level.unwrap_or(1)), style.as_deref());
             }
@@ -662,11 +678,7 @@ impl<'a> OdfWalker<'a> {
             "note" => {
                 // The citation text lands in `last_citation` during the walk;
                 // an id-less note picks it up here.
-                if let Some(text) = self
-                    .last_citation
-                    .take()
-                    .or_else(|| self.citation.take())
-                {
+                if let Some(text) = self.last_citation.take().or_else(|| self.citation.take()) {
                     let text = text.trim().to_string();
                     if !text.is_empty()
                         && let Some(Container::Note { id, .. }) = self.containers.last_mut()
@@ -761,11 +773,7 @@ pub(crate) fn walk_content(xml: &[u8], w: &mut OdfWalker) -> Result<(), Alchemiz
             }
             Ok(Event::End(e)) => w.on_end(local_tag_name(e.name().as_ref()).as_str()),
             Ok(Event::Eof) => break,
-            Err(e) => {
-                return Err(AlchemizeError::Xml(format!(
-                    "content.xml parse error: {e}"
-                )))
-            }
+            Err(e) => return Err(AlchemizeError::Xml(format!("content.xml parse error: {e}"))),
             _ => {}
         }
         buf.clear();
@@ -1146,9 +1154,7 @@ pub(crate) fn parse_odf_styles(xml: &[u8]) -> HashMap<String, OdfStyleDef> {
             Ok(Event::End(e)) => {
                 let local = local_tag_name(e.name().as_ref());
                 let style_done = local == "style" || local == "list-style";
-                if style_done
-                    && let Some((name, def)) = current.take()
-                {
+                if style_done && let Some((name, def)) = current.take() {
                     out.insert(name, def);
                 }
             }
@@ -1189,6 +1195,105 @@ mod tests {
     }
 
     const NS: &str = r#"xmlns:office="o" xmlns:text="t" xmlns:style="s" xmlns:fo="f" xmlns:table="tb" xmlns:draw="d" xmlns:xlink="x""#;
+
+    #[test]
+    fn odf_style_parser_covers_negative_toggles_and_markers() {
+        let xml = r#"<?xml version="1.0"?><office:document-styles xmlns:office="o" xmlns:style="s" xmlns:text="t" xmlns:fo="f">
+<style:style style:name="Base"><style:text-properties fo:font-weight="bold" fo:font-size="12pt"/></style:style>
+<style:style style:name="Derived" style:parent-style-name="Base"><style:text-properties fo:font-weight="normal" fo:font-style="normal" fo:font-size="bogus"/></style:style>
+<style:style style:name="CycleA" style:parent-style-name="CycleB"/>
+<style:style style:name="CycleB" style:parent-style-name="CycleA"/>
+<style:list-style style:name="LUpper"><text:list-level-style-number text:num-format="I"/></style:list-style>
+<style:list-style style:name="LAlpha"><text:list-level-style-number text:num-format="a"/></style:list-style>
+<style:list-style style:name="LBullet"><text:list-level-style-bullet/></style:list-style>
+<style:list-style style:name="LDefault"><text:list-level-style-number/></style:list-style>
+</office:document-styles>"#;
+        let styles = parse_odf_styles(xml.as_bytes());
+        let derived = resolve_style(&styles, "Derived");
+        assert_eq!(
+            derived.bold,
+            Some(false),
+            "explicit normal clears parent bold"
+        );
+        assert_eq!(derived.italic, Some(false));
+        assert_eq!(
+            derived.size_pt,
+            Some(12.0),
+            "an unparsable own font-size inherits the parent value"
+        );
+        assert_eq!(
+            styles.get("LUpper").and_then(|d| d.marker),
+            Some(MarkerKind::UpperRoman)
+        );
+        assert_eq!(
+            styles.get("LAlpha").and_then(|d| d.marker),
+            Some(MarkerKind::LowerAlpha)
+        );
+        assert_eq!(
+            styles.get("LBullet").and_then(|d| d.marker),
+            Some(MarkerKind::Bullet)
+        );
+        assert_eq!(
+            styles.get("LDefault").and_then(|d| d.marker),
+            Some(MarkerKind::Decimal)
+        );
+        // Cycle guard: resolving terminates and fabricates no flags.
+        let cycle = resolve_style(&styles, "CycleA");
+        assert_eq!(cycle.bold, None);
+    }
+
+    #[tokio::test]
+    async fn empty_elements_binary_images_and_normalized_hrefs() {
+        let content = format!(
+            r#"<?xml version="1.0"?><office:document-content {NS}><office:body><office:text>
+<text:h style-name="P2">No level heading</text:h>
+<text:p style-name="P1">normal run</text:p>
+<text:p><text:a>no href</text:a><text:s text:c="oops"/><text:s text:c="99999"/>end</text:p>
+<text:p><text:note/></text:p>
+<table:table><table:table-row>
+<table:table-cell/><table:covered-table-cell/><table:table-cell><text:p>kept</text:p></table:table-cell>
+</table:table-row></table:table>
+<text:p><draw:image href="http://x.test/a.png"/></text:p>
+<text:p><draw:image href="../Pictures/b.bin"/></text:p>
+<text:p><draw:image><office:binary-data>aGVsbG8=</office:binary-data></draw:image></text:p>
+<text:p><draw:image><office:binary-data>!!!notbase64!!!</office:binary-data></draw:image></text:p>
+</office:text></office:body></office:document-content>"#
+        );
+        let styles = format!(
+            r#"<?xml version="1.0"?><office:document-styles {NS}><office:automatic-styles>
+<style:style style:name="P1"><style:text-properties fo:font-weight="normal" fo:font-style="normal"/></style:style>
+<style:style style:name="P2" style:parent-style-name="P1"><style:text-properties fo:font-weight="bold"/></style:style>
+</office:automatic-styles></office:document-styles>"#
+        );
+        let bytes = zip_parts(&[
+            ("content.xml", content.as_bytes()),
+            ("styles.xml", styles.as_bytes()),
+            ("Pictures/b.bin", b"binary-part"),
+        ]);
+        let result = convert(bytes).await;
+        let md = &result.markdown;
+        // h without outline-level defaults to level 1.
+        assert!(md.contains("# **No level heading**"), "md: {md}");
+        // Explicit normal toggles clear inherited property state.
+        assert!(md.contains("normal run"), "md: {md}");
+        assert!(!md.contains("**normal run**"), "md: {md}");
+        assert!(md.contains("kept"), "empty cells keep the row: {md}");
+        assert!(
+            md.contains("](http://x.test/a.png)"),
+            "external image: {md}"
+        );
+        assert!(
+            md.contains("no href"),
+            "anchor without href keeps text: {md:?}"
+        );
+        // Real part + base64 payload; the invalid payload adds nothing.
+        assert_eq!(result.assets.len(), 2, "assets: {:?}", result.assets);
+        assert_eq!(
+            md.matches("](images/").count(),
+            2,
+            "internal image links: {md}"
+        );
+    }
 
     #[test]
     fn converter_traits() {
@@ -1338,7 +1443,10 @@ mod tests {
         let sha8 = Asset::new("x.png", png.to_vec()).sha8();
         let reference = format!("images/0000-{sha8}.png");
         assert_eq!(r.assets.len(), 1, "same bytes in two parts dedupe");
-        assert_eq!(r.assets[0].filename, reference, "filename must match md ref");
+        assert_eq!(
+            r.assets[0].filename, reference,
+            "filename must match md ref"
+        );
         assert_eq!(
             r.markdown.matches(&format!("![]({reference})")).count(),
             2,
@@ -1362,9 +1470,9 @@ mod tests {
         assert_eq!(doc.notes[0].id, "ftn1", "text:id wins over citation text");
         assert_eq!(doc.notes[0].kind, NoteKind::Footnote);
         let has_ref = doc.blocks.iter().any(|b| match b {
-            Block::Paragraph(inlines) => {
-                inlines.iter().any(|i| matches!(i, Inline::NoteRef(id) if id == "ftn1"))
-            }
+            Block::Paragraph(inlines) => inlines
+                .iter()
+                .any(|i| matches!(i, Inline::NoteRef(id) if id == "ftn1")),
             _ => false,
         });
         assert!(has_ref, "note reference must appear inline");
@@ -1416,7 +1524,11 @@ mod tests {
             })
             .expect("nested list inside item");
         assert_eq!(nested.items.len(), 1);
-        assert_eq!(lists[1].marker, MarkerKind::Decimal, "num-format 1 → decimal");
+        assert_eq!(
+            lists[1].marker,
+            MarkerKind::Decimal,
+            "num-format 1 → decimal"
+        );
         let r = convert(bytes).await;
         assert!(r.markdown.contains("- bullet alpha"), "md: {}", r.markdown);
         assert!(r.markdown.contains("1. numbered one"), "md: {}", r.markdown);
@@ -1433,7 +1545,11 @@ mod tests {
         .await;
         assert!(r.markdown.contains("a\tb"), "md: {:?}", r.markdown);
         assert!(r.markdown.contains("c   d"), "md: {:?}", r.markdown);
-        assert!(r.markdown.contains("  \n"), "hard break renders: {:?}", r.markdown);
+        assert!(
+            r.markdown.contains("  \n"),
+            "hard break renders: {:?}",
+            r.markdown
+        );
     }
 
     #[tokio::test]
@@ -1444,7 +1560,11 @@ mod tests {
 </office:text></office:body></office:document-content>"#
         )))
         .await;
-        assert!(r.markdown.contains("A & B <tag> done"), "md: {}", r.markdown);
+        assert!(
+            r.markdown.contains("A & B <tag> done"),
+            "md: {}",
+            r.markdown
+        );
     }
 
     #[tokio::test]
@@ -1466,7 +1586,10 @@ mod tests {
             }
         }
         assert_eq!(targets.len(), 2);
-        assert_eq!(targets[0], LinkTarget::External("https://example.com/x".into()));
+        assert_eq!(
+            targets[0],
+            LinkTarget::External("https://example.com/x".into())
+        );
         assert_eq!(targets[1], LinkTarget::Relative("specs/a.odt".into()));
     }
 
@@ -1489,13 +1612,114 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn image_href_resolves_and_becomes_asset() {
+        let content = format!(
+            r#"<office:document-content {NS}><office:body><office:text>
+<text:p><draw:frame><draw:image xlink:href="../Pictures/a.png"/></draw:frame></text:p>
+</office:text></office:body></office:document-content>"#
+        );
+        let png: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        let r = convert(zip_parts(&[
+            ("content.xml", content.as_bytes()),
+            ("Pictures/a.png", png),
+        ]))
+        .await;
+        assert_eq!(r.assets.len(), 1, "one picture asset: {r:?}");
+        assert!(
+            r.assets[0].filename.starts_with("images/"),
+            "sha8-named asset: {}",
+            r.assets[0].filename
+        );
+        assert!(r.markdown.contains("!["), "image reference: {}", r.markdown);
+    }
+
+    #[tokio::test]
+    async fn list_markers_cover_alpha_and_roman() {
+        for (num_format, expected) in [
+            ("a", "a."),
+            ("A", "A."),
+            ("i", "i."),
+            ("I", "I."),
+            ("1", "1."),
+        ] {
+            let r = convert(odt_with(&format!(
+                r#"<office:document-content {NS}>
+<office:automatic-styles>
+<text:list-style style:name="L"><text:list-level-style-number text:level="1" style:num-format="{num_format}"/></text:list-style>
+</office:automatic-styles>
+<office:body><office:text>
+<text:list text:style-name="L"><text:list-item><text:p>item</text:p></text:list-item></text:list>
+</office:text></office:body></office:document-content>"#
+            )))
+            .await;
+            assert!(
+                r.markdown.contains(expected),
+                "num-format {num_format} should render '{expected}': {}",
+                r.markdown
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn header_rows_are_marked() {
+        let r = convert(odt_with(&format!(
+            r#"<office:document-content {NS}><office:body><office:text>
+<table:table>
+<table:table-header-rows>
+<table:table-row><table:table-cell><text:p>H</text:p></table:table-cell></table:table-row>
+</table:table-header-rows>
+<table:table-row><table:table-cell><text:p>1</text:p></table:table-cell></table:table-row>
+</table:table>
+</office:text></office:body></office:document-content>"#
+        )))
+        .await;
+        assert!(r.markdown.contains("| H |"), "header row: {}", r.markdown);
+        assert!(r.markdown.contains("| 1 |"), "body row: {}", r.markdown);
+    }
+
+    #[tokio::test]
+    async fn unknown_span_style_falls_back_to_plain() {
+        let r = convert(odt_with(&format!(
+            r#"<office:document-content {NS}><office:body><office:text>
+<text:p><text:span text:style-name="NoSuchStyle">plain</text:span></text:p>
+</office:text></office:body></office:document-content>"#
+        )))
+        .await;
+        assert!(r.markdown.contains("plain"));
+        assert!(!r.markdown.contains("**plain**"), "{}", r.markdown);
+    }
+
+    #[tokio::test]
+    async fn odt_convert_requires_content_xml() {
+        // Zip without content.xml: explicit error, not empty output.
+        use std::io::Write;
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut w = zip::ZipWriter::new(buf);
+        let opts = zip::write::SimpleFileOptions::default();
+        w.start_file("mimetype", opts).unwrap();
+        w.write_all(b"application/vnd.oasis.opendocument.text")
+            .unwrap();
+        w.start_file("other.xml", opts).unwrap();
+        w.write_all(b"<x/>").unwrap();
+        let bytes = w.finish().unwrap().into_inner();
+        assert!(parse(&bytes).is_err());
+    }
+
+    #[tokio::test]
     async fn real_odt_fixture_parses() {
         // 构造合法 fixture（磁盘未找到真实 ODT 样本）：断言其 content.xml
         // 中的真实关键词与资产命名。
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/real/real.odt");
-        let r = OdtConverter::new().convert(Input::Path(path)).await.unwrap();
-        assert!(r.markdown.contains("Quarterly Review"), "md: {}", r.markdown);
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/real/real.odt");
+        let r = OdtConverter::new()
+            .convert(Input::Path(path))
+            .await
+            .unwrap();
+        assert!(
+            r.markdown.contains("Quarterly Review"),
+            "md: {}",
+            r.markdown
+        );
         assert!(r.markdown.contains("**bold run**"), "md: {}", r.markdown);
         assert!(
             r.markdown.contains("***inherited italic***"),

@@ -66,8 +66,8 @@ impl Converter for OdpConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::document::{Block, Inline, NoteKind};
     use crate::domain::document::Document;
+    use crate::domain::document::{Block, Inline, NoteKind};
     use std::io::Cursor;
 
     const NS: &str = r#"xmlns:office="o" xmlns:text="t" xmlns:style="s" xmlns:fo="f" xmlns:draw="d" xmlns:presentation="p" xmlns:xlink="x""#;
@@ -166,11 +166,7 @@ mod tests {
         let buf = Cursor::new(Vec::new());
         let mut w = zip::ZipWriter::new(buf);
         let opts = zip::write::SimpleFileOptions::default();
-        w.start_file(
-            "content.xml",
-            opts,
-        )
-        .unwrap();
+        w.start_file("content.xml", opts).unwrap();
         w.write_all(
             format!(
                 r#"<office:document-content {NS}><office:body><office:presentation>
@@ -215,13 +211,24 @@ mod tests {
     async fn real_odp_fixture_parses() {
         // 构造合法 fixture（磁盘未找到真实 ODP 样本）：断言其 content.xml
         // 中的真实关键词、页序与讲者备注。
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/real/real.odp");
-        let r = OdpConverter::new().convert(Input::Path(path)).await.unwrap();
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/real/real.odp");
+        let r = OdpConverter::new()
+            .convert(Input::Path(path))
+            .await
+            .unwrap();
         assert!(r.markdown.contains("# Slide 1"), "md: {}", r.markdown);
         assert!(r.markdown.contains("# Slide 2"), "md: {}", r.markdown);
-        assert!(r.markdown.contains("Slide one headline"), "md: {}", r.markdown);
-        assert!(r.markdown.contains("Slide two headline"), "md: {}", r.markdown);
+        assert!(
+            r.markdown.contains("Slide one headline"),
+            "md: {}",
+            r.markdown
+        );
+        assert!(
+            r.markdown.contains("Slide two headline"),
+            "md: {}",
+            r.markdown
+        );
         assert!(
             r.markdown.contains("speaker notes sentence for slide two"),
             "notes reach md: {}",

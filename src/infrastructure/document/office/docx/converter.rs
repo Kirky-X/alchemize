@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use async_trait::async_trait;
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 use crate::application::ports::{Availability, Converter};
 use crate::domain::asset::Asset;
@@ -16,9 +16,11 @@ use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 
+use crate::infrastructure::document::office::{RawMedia, rewrite_image_assets};
+
 use super::body::{self, BodyCtx};
 use super::notes::parse_notes;
-use super::styles::{parse_styles, StyleTable};
+use super::styles::{StyleTable, parse_styles};
 
 /// Deep DOCX converter: WordprocessingML → the unified document model.
 pub struct DocxDeepConverter;
@@ -53,13 +55,27 @@ impl Converter for DocxDeepConverter {
             .map_err(|e| AlchemizeError::other(format!("docx-deep task panicked: {e}")))?;
 
         let parsed = result?;
-        let doc = parsed.document;
+        let mut doc = parsed.document;
         let warnings = parsed.warnings;
+        // Turn internal asset indices into resolvable `images/…` references:
+        // the renderer only emits links for external sources, and the CLI
+        // writes exactly these filenames.
+        let media: Vec<RawMedia<'_>> = parsed
+            .raw_assets
+            .iter()
+            .map(|a| RawMedia {
+                part: &a.part,
+                media_type: &a.media_type,
+                bytes: &a.bytes,
+            })
+            .collect();
+        let assets = rewrite_image_assets(&mut doc, &media);
+        doc.assets.clear();
         let markdown = crate::infrastructure::document::gfm_render::render_markdown(&doc);
 
         let metadata = serde_json::json!({
             "source_format": "docx",
-            "asset_count": doc.assets.len(),
+            "asset_count": assets.len(),
             "footnote_count": doc.notes.len(),
             "parser": "docx-deep",
             "omml_fallback": warnings.omml_fallback,
@@ -68,8 +84,8 @@ impl Converter for DocxDeepConverter {
 
         let mut out = ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
             .with_quality(ConversionQuality::LocalFull);
-        for asset in &parsed.raw_assets {
-            out = out.with_asset(Asset::new(asset_name(asset), asset.bytes.clone()));
+        for asset in assets {
+            out = out.with_asset(asset);
         }
         Ok(out)
     }
@@ -85,16 +101,6 @@ impl Converter for DocxDeepConverter {
     fn availability(&self) -> Availability {
         Availability::Available
     }
-}
-
-/// Filename written for an extracted media part.
-fn asset_name(asset: &RawAsset) -> String {
-    asset
-        .part
-        .rsplit('/')
-        .next()
-        .unwrap_or("asset.bin")
-        .to_string()
 }
 
 /// Parser warnings surfaced into metadata.
@@ -161,7 +167,10 @@ pub fn parse(bytes: &[u8]) -> Result<ParsedDocx, AlchemizeError> {
     let blocks = body::parse_body(&document_xml, &mut ctx)?;
     let mut notes = Vec::new();
     if let Some(xml) = footnotes_xml.as_deref() {
-        notes.extend(parse_notes(xml, crate::domain::document::NoteKind::Footnote));
+        notes.extend(parse_notes(
+            xml,
+            crate::domain::document::NoteKind::Footnote,
+        ));
     }
     if let Some(xml) = endnotes_xml.as_deref() {
         notes.extend(parse_notes(xml, crate::domain::document::NoteKind::Endnote));
@@ -270,7 +279,11 @@ mod tests {
             .convert(Input::bytes(doc, "t.docx"))
             .await
             .unwrap();
-        assert!(result.markdown.contains("# Title"), "md: {}", result.markdown);
+        assert!(
+            result.markdown.contains("# Title"),
+            "md: {}",
+            result.markdown
+        );
         assert!(result.markdown.contains("Body text"));
     }
 
@@ -286,7 +299,11 @@ mod tests {
             .convert(Input::bytes(doc, "t.docx"))
             .await
             .unwrap();
-        assert!(result.markdown.contains("| A | B |"), "md: {}", result.markdown);
+        assert!(
+            result.markdown.contains("| A | B |"),
+            "md: {}",
+            result.markdown
+        );
     }
 
     #[tokio::test]
@@ -417,10 +434,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.assets.len(), 1, "one image asset expected");
+        // Assets follow the shared `images/{seq:04}-{sha8}.{ext}` convention.
+        let expected_name = format!(
+            "images/0000-{}.png",
+            Asset::new("x.png", png.to_vec()).sha8()
+        );
         assert_eq!(
-            result.assets[0].filename, "image1.png",
+            result.assets[0].filename, expected_name,
             "asset filename: {}",
             result.assets[0].filename
+        );
+        assert!(
+            result.markdown.contains(&format!("]({expected_name})")),
+            "markdown must link the asset: {}",
+            result.markdown
         );
         assert_eq!(
             result.assets[0].bytes.len(),
@@ -428,15 +455,67 @@ mod tests {
             "asset bytes must equal the source media bytes"
         );
         // sha8 of the asset must match the sha8 of the source bytes.
-        assert_eq!(result.assets[0].sha8(), Asset::new("x.png", png.to_vec()).sha8());
+        assert_eq!(
+            result.assets[0].sha8(),
+            Asset::new("x.png", png.to_vec()).sha8()
+        );
+    }
+
+    #[tokio::test]
+    async fn hostile_shapes_parse_without_loss() {
+        // Edge shapes: skipped note ids, hyperlink without a rel, unknown
+        // character style, empty table, breaks inside a cell, oMathPara,
+        // text outside any paragraph, and a second table without rows.
+        let doc = docx_zip(&[
+            (
+                "word/document.xml",
+                r#"<?xml version="1.0"?><w:document xmlns:w="w" xmlns:m="m"><w:body>
+<w:p><w:r><w:t>loose</w:t></w:r></w:p>
+<w:p>
+  <w:hyperlink><w:r><w:t>no-rel link</w:t></w:r></w:hyperlink>
+  <w:r><w:rPr><w:rStyle w:val="Ghost"/></w:rPr><w:t>ghost style</w:t></w:r>
+  <w:r><w:footnoteReference w:id="0"/></w:r>
+  <w:r><w:footnoteReference w:id="-1"/></w:r>
+  <w:r><w:endnoteReference w:id="7"/></w:r>
+</w:p>
+<w:p><m:oMathPara><m:oMath><m:r><m:t>m1</m:t></m:r></m:oMath></m:oMathPara></w:p>
+<w:tbl><w:tr><w:tc><w:p><w:r><w:t>a</w:t></w:r><w:r><w:br/></w:r><w:r><w:t>b</w:t></w:r></w:p><w:p><w:r><w:t>second</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+<w:tbl></w:tbl>
+<w:p><w:r><w:drawing><a:blip r:embed="rIdMissing"/></w:drawing></w:r><w:r><w:t>after-bad-image</w:t></w:r></w:p>
+</w:body></w:document>"#,
+            ),
+            (
+                "word/endnotes.xml",
+                r#"<?xml version="1.0"?><w:endnotes xmlns:w="w"><w:endnote w:id="7"><w:p><w:r><w:t>end seven</w:t></w:r></w:p></w:endnote></w:endnotes>"#,
+            ),
+        ]);
+        let result = DocxDeepConverter::new()
+            .convert(Input::bytes(doc, "hostile.docx"))
+            .await
+            .unwrap();
+        let md = &result.markdown;
+        assert!(md.contains("loose"), "{md}");
+        assert!(
+            md.contains("no-rel link"),
+            "text of a rel-less link survives: {md}"
+        );
+        assert!(md.contains("ghost style"), "{md}");
+        assert!(md.contains("m1"), "oMathPara content survives: {md}");
+        assert!(md.contains("a") && md.contains("b"), "{md}");
+        assert!(md.contains("second"), "second cell paragraph: {md}");
+        assert!(md.contains("after-bad-image"), "{md}");
+        assert!(md.contains("end seven"), "{md}");
+        // Note ids 0/-1 are separators: only the endnote counts.
+        assert_eq!(result.metadata["footnote_count"].as_u64(), Some(1));
+        assert_eq!(result.metadata["asset_count"].as_u64(), Some(0));
     }
 
     #[tokio::test]
     async fn real_docx_recall_smoke() {
         // Character-recall smoke: deep parse of the real 923KB wordlist must
         // recover the bulk of extractable characters.
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/real/real.docx");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/real/real.docx");
         let result = DocxDeepConverter::new()
             .convert(Input::Path(path))
             .await

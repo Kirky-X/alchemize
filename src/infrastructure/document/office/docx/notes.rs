@@ -5,8 +5,8 @@
 //! (`w:footnoteRef` / `w:endnoteRef`) is skipped so it does not leak into
 //! the extracted text; separator entries (id `-1` / `0`) are dropped.
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 use crate::domain::document::{Block, Inline, Note, NoteKind, Style};
 
@@ -59,7 +59,8 @@ pub fn parse_notes(xml: &[u8], kind: NoteKind) -> Vec<Note> {
             }
             Ok(Event::GeneralRef(r)) => {
                 if in_paragraph && !skip_marker {
-                    current_text.push_str(&crate::infrastructure::document::decode_entity(r.as_ref()));
+                    current_text
+                        .push_str(&crate::infrastructure::document::decode_entity(r.as_ref()));
                 }
             }
             Ok(Event::End(e)) => {

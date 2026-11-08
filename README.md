@@ -63,7 +63,7 @@
 
 <table style="width:100%; border-collapse: collapse">
 <tr>
-<td width="50%" style="vertical-align:top; padding: 12px">📄 <b>文档全格式</b><br><span style="color:#64748B">PDF、docx/pptx/xlsx（+xls/ods）、odt/odp/rtf、旧版二进制 Office（<code>anydoc</code>）、html/epub、csv/tsv、LaTeX（pandoc）、ipynb</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">📄 <b>文档全格式</b><br><span style="color:#64748B">PDF（pdfium/纯 Rust/MinerU）、docx/pptx/xlsx（+xls/xlsb/ods）、odt/odp、旧版二进制 Office（doc/ppt/rtf，LibreOffice）、html/epub、csv/tsv/psv、LaTeX/org/rst/asciidoc（pandoc）、ipynb</span></td>
 <td width="50%" style="vertical-align:top; padding: 12px">🧬 <b>代码围栏化</b><br><span style="color:#64748B">py/rs/js/ts/go/java/c/cpp/json/yaml/toml/xml/sh 等 ~45 扩展名，带语言标签的围栏代码块</span></td>
 </tr>
 <tr>
@@ -103,7 +103,7 @@ rustc --version
 # 默认特性构建（零外部服务依赖）
 cargo build --release          # 二进制：target/release/alch
 
-# 全功能（MinerU 云端 + anydoc office 后端 + 本地 ASR）
+# 全功能（MinerU 云端 + 自研 office 深解析 + 容器/数据/邮件 + LibreOffice + 本地 ASR）
 cargo build --release --features full
 
 # 安装到本地
@@ -117,10 +117,10 @@ cargo install --path . --features full
 alch convert paper.pdf
 
 # 写文件 + 引擎偏好 + 资产模式（父目录自动创建）
-alch convert report.docx -o report.md --engine anydoc --assets dir|inline
+alch convert report.docx -o report.md --engine docx-deep --assets dir|inline
 
 # stderr 摘要行：质量层级与实际引擎一目了然
-# converted report.docx -> report.md [local_full] (engine: anydoc)
+# converted report.docx -> report.md [local_full] (engine: docx-deep)
 ```
 
 ```bash
@@ -131,11 +131,34 @@ alch formats
 
 退出码：`0` 成功（含降级产出）；`1` 其他错误；`2` 不支持格式；`3` 全链失败（stderr 列出各引擎失败原因）。
 
+### 📊 支持格式矩阵
+
+| 类别 | 扩展名 | 引擎（priority） | 需要的 feature |
+| --- | --- | --- | --- |
+| Word（OOXML） | docx | docx-deep(18) → docx(10) | — |
+| Word（旧版） | doc, rtf | legacy-office(15，LibreOffice) | `libreoffice` |
+| OpenDocument 文本 | odt | odt-deep(18) | — |
+| 演示文稿 | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `libreoffice`（仅旧二进制） |
+| 电子表格 | xlsx, xls, xlsb, ods | xlsx（calamine + numFmt 显示值） | — |
+| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdfium` / `mineru` |
+| 网页 / 电子书 | html, htm / epub | html(htmd) → html-moli(15) / epub | `moli`（html-moli） |
+| 纯文本 / 代码 | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 代码扩展 | text（围栏化） | — |
+| 表格文本 | csv, tsv, psv | csv（分隔符自探测） | — |
+| 标记语言 | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | — |
+| 笔记本 | ipynb | ipynb | — |
+| 图片 | png, jpg, jpeg, gif, webp, bmp, tif, tiff, svg / heic, heif | image（Vision 可选） / heic（sips 或元数据） | — |
+| 音频 | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio（ASR 可选） | `asr` |
+| 视频 | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video（ffmpeg + ASR/Vision 可选） | `asr`（转录） |
+| 字幕 | srt, vtt, ass, ssa, lrc | subtitle | — |
+| 邮件 | eml | eml | `eml` |
+| 结构化数据 | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `data` |
+| 归档 | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip 递归 / tar 族递归 / 7z 递归 | `containers`（除 zip） |
+
 ### 🧭 核心概念
 
 - **注册表与 fallback 链**：同扩展名的引擎按 `priority()` 降序尝试，前序失败自动降级，`Unavailable` 引擎跳过并记录原因。
 - **质量分层**：每次产出标注 `api`（云端高保真）/ `local_full`（本地全功能）/ `local_fallback`（本地降级），与实际引擎名一起记录在 `metadata` 与 stderr 摘要行。
-- **本地优先**：PDF 链为 anydoc(15) → pdf-extract(10) → MinerU(5 链尾，配置端点后)——云端只在本地链失败后兜底。
+- **本地优先**：PDF 链为 pdfium(20，可选 feature) → pdf-extract(10) → MinerU(5 链尾，配置端点后)——云端只在本地链失败后兜底。
 
 ---
 
@@ -146,19 +169,23 @@ alch formats
 | 预设 | 命令 | 适用场景 |
 | --- | --- | --- |
 | 最小化 | `cargo build` | 纯本地转换，零外部服务依赖 |
-| 推荐 | `cargo build --features anydoc` | + office 全格式（含旧版二进制 Office） |
-| 生产 | `cargo build --features full` | + MinerU 云端 PDF + 本地 ASR |
+| 推荐 | `cargo build --features containers,data,eml,libreoffice` | + 归档/结构化数据/邮件/旧版 Office（soffice 存在时生效） |
+| 生产 | `cargo build --features full` | + MinerU 云端 PDF + 本地 ASR + html-moli |
 
 ### 📋 功能矩阵
 
 | feature | 引入 | 说明 |
 | --- | --- | --- |
 | `mineru` | MinerU 云端 PDF 引擎（reqwest/limiteron） | 端点经 `ALCHEMIZE_MINERU_URL` 配置后才注册 |
-| `anydoc` | office 全格式后端（firecrawl/anydoc, MIT） | priority 15 压过原生解析；图片按文档序导出 |
+| `pdfium` | 本地 PDF 高保真引擎（pdfium-render） | 运行时探测动态库；缺失降级到 pdf-extract |
+| `libreoffice` | 旧版二进制 Office 引擎（外部 soffice） | doc/rtf→docx、ppt/pps/pot→pptx 后进深解析链；缺席自动降级 |
+| `containers` | 归档容器族（tar/tgz/gz/xz/zst/7z） | 递归转换，魔数检测内层格式 |
+| `data` | 结构化数据引擎（parquet/sqlite/bib） | parquet 流式 10 万行截断、sqlite 只读、biblatex 条目 |
+| `eml` | 邮件引擎（mail-parser） | 头部/正文/附件清单 |
 | `asr` | vecboost 转录门面 + Whisper 兼容 API | Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
 | `mcp` | MCP 工具面（`alch-mcp` stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；CLI 封装（sdforge）恒在 |
 | `moli` | html-moli 引擎（crawlrs 吸收的 moli→htmd 转换链） | 主内容提取（`--extract-main`）与链接绝对化（`--base-url`）；含 LaTeX 数学的页面自动路由 htmd 保真 |
-| `full` | 以上全部 | |
+| `full` | 以上全部（`mineru`+`asr`+`moli`+`containers`+`data`+`eml`+`libreoffice`） | |
 
 默认 `default = ["cli"]`（CLI 封装恒在）——feature 关闭的引擎根本不参与编译。
 
@@ -231,7 +258,7 @@ async fn main() -> Result<(), alchemize::AlchemizeError> {
 flowchart LR
     CLI["alch CLI"] --> FACADE["Alchemize 门面"]
     FACADE --> REG["ConverterRegistry<br/>priority 降序"]
-    REG -- "anydoc 15 → 原生解析 10 → MinerU 5 链尾" --> RESULT["ConvertResult<br/>markdown · metadata.converter · quality · assets"]
+    REG -- "深解析 18 → 原生解析 10 → MinerU 5 链尾" --> RESULT["ConvertResult<br/>markdown · metadata.converter · quality · assets"]
 ```
 
 设计原则、模块划分与数据流详见 [🏗️ 架构文档](docs/ARCHITECTURE.md)。
@@ -298,11 +325,11 @@ cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
 <table style="width:100%; border-collapse: collapse">
 <tr><th style="text-align:center">状态</th><th style="text-align:left">方向</th><th style="text-align:left">条目</th></tr>
 <tr><td align="center">✅</td><td>转换引擎</td><td>注册表 fallback 链、文档全格式、代码围栏化、zip 递归、多编码探测</td></tr>
-<tr><td align="center">✅</td><td>可选后端</td><td>anydoc office 全格式、MinerU 云端 PDF（SSRF 防护 + 限量）、vecboost 本地 ASR</td></tr>
+<tr><td align="center">✅</td><td>可选后端</td><td>自研 office 深解析（docx/odt/odp/pptx）、MinerU 云端 PDF（SSRF 防护 + 限量）、vecboost 本地 ASR</td></tr>
 <tr><td align="center">✅</td><td>媒体链路</td><td>图片视觉端口、ffmpeg 抽轨、字幕原生解析、帧去重、VAD 段级转录</td></tr>
 <tr><td align="center">✅</td><td>CLI 与诊断</td><td>sdforge 封装（CLI+MCP 双面）、convert/doctor/formats、退出码语义化、引擎偏好与资产模式</td></tr>
 <tr><td align="center">✅</td><td>文档与合规</td><td>七篇文档套件（结构对齐 confers）、双语 README、SPDX 版权头 59/59、覆盖率 90.49%</td></tr>
-<tr><td align="center">🔲</td><td>供应链收口</td><td>fork anydoc 换 zip 9.4（一行改动已实证）消除 cargo-audit 通告</td></tr>
+<tr><td align="center">✅</td><td>供应链收口</td><td>anydoc 依赖已移除，zip 仅 9.4.1；cargo audit 漏洞归零（仅余 unmaintained 提示）</td></tr>
 <tr><td align="center">🔲</td><td>发布</td><td>首次 crates.io 发布（vecboost 先行）+ crates.io/docs.rs 徽章</td></tr>
 <tr><td align="center">🔲</td><td>CI 与质量</td><td>GitHub Actions 双档矩阵 + codecov 覆盖率徽章</td></tr>
 <tr><td align="center">🔲</td><td>性能</td><td>criterion 基准 → 补 PERFORMANCE 篇真实数据</td></tr>
@@ -355,7 +382,14 @@ Apache-2.0（[LICENSE](LICENSE)）。全部源文件带 SPDX 头；自其他仓�
 
 ### 🌟 核心依赖
 
-- [firecrawl/anydoc](https://github.com/firecrawl/anydoc)（MIT）——office 全格式后端依赖。
+- [calamine](https://github.com/tafia/calamine)（MIT）——xlsx/xls/xlsb/ods 读取。
+- [pdf-extract](https://github.com/jrmuizel/pdf-extract)（MIT）——PDF 文本层提取。
+- [quick-xml](https://github.com/tafia/quick-xml)（MIT/Apache-2.0）——OOXML/ODF/OMML 事件流。
+- [sevenz-rust2](https://github.com/hasenbanck/sevenz-rust2)（Apache-2.0）与 [tar](https://github.com/alexcrichton/tar-rs)/[flate2](https://github.com/rust-lang/flate2)/[xz2](https://github.com/alexcrichton/xz2-rs)/[zstd](https://github.com/gyscos/zstd-rs)（MIT/Apache-2.0）——归档容器。
+- [parquet](https://github.com/apache/arrow-rs)（Apache-2.0）、[rusqlite](https://github.com/rusqlite/rusqlite)（MIT）、[biblatex](https://github.com/typst/biblatex)（MIT）——结构化数据引擎。
+- [mail-parser](https://github.com/stalwartlabs/mail-parser)（Apache-2.0/MIT）——EML 解析。
+- [LibreOffice](https://www.libreoffice.org/)（MPL-2.0）——旧版二进制 Office 转换（可选外部工具）。
+- [pandoc](https://pandoc.org/)（GPL-2.0+）——LaTeX/org/rst/asciidoc 等标记语言转换（可选外部工具）。
 - [vecboost](https://github.com/Kirky-X/vecboost)（自有）——Qwen3-ASR ONNX + silero VAD 本地转录门面。
 - [pdf-extract](https://crates.io/crates/pdf-extract)、[calamine](https://crates.io/crates/calamine)、[quick-xml](https://crates.io/crates/quick-xml)、[aspasia](https://crates.io/crates/aspasia)、[rbook](https://crates.io/crates/rbook)、[htmd](https://crates.io/crates/htmd) 等优秀开源 crate。
 

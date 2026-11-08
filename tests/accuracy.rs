@@ -61,7 +61,9 @@ fn docx_source_text(path: &std::path::Path) -> String {
         let after = &rest[start..];
         let Some(gt) = after.find('>') else { break };
         let body = &after[gt + 1..];
-        let Some(end) = body.find("</w:t>") else { break };
+        let Some(end) = body.find("</w:t>") else {
+            break;
+        };
         out.push_str(&body[..end]);
         rest = &body[end + 6..];
     }
@@ -149,7 +151,10 @@ async fn accuracy_xlsx_rows_and_columns_align() {
         "xlsx: worksheet_rows={sheet_rows} table_rows={table_rows} meta_rows={} engine={}",
         meta["total_rows"], meta["converter"]
     );
-    assert!(sheet_rows > 1000, "fixture should be large, got {sheet_rows}");
+    assert!(
+        sheet_rows > 1000,
+        "fixture should be large, got {sheet_rows}"
+    );
     let ratio = table_rows as f64 / sheet_rows as f64;
     assert!(
         ratio >= 0.95 && ratio <= 1.05,
@@ -191,7 +196,10 @@ async fn accuracy_pdf_char_recall_over_90_percent() {
     let pages = meta["page_count"].as_u64().unwrap_or(0).max(1);
     let chars = md.chars().filter(|c| c.is_alphanumeric()).count() as u64;
     let per_page = chars / pages;
-    println!("pdf: pages={pages} alnum_chars={chars} per_page={per_page} engine={}", meta["converter"]);
+    println!(
+        "pdf: pages={pages} alnum_chars={chars} per_page={per_page} engine={}",
+        meta["converter"]
+    );
     assert!(pages >= 3, "multi-page fixture expected, got {pages}");
     assert!(
         per_page >= 200,
@@ -214,7 +222,7 @@ async fn accuracy_formula_zero_silent_loss() {
             br#"<?xml version="1.0"?><w:document xmlns:w="w" xmlns:m="m"><w:body>
 <w:p><w:r><w:t>Before</w:t></w:r>
 <m:oMath><m:f><m:num><m:r><m:t>a</m:t></m:r></m:num><m:den><m:r><m:t>b</m:t></m:r></m:den></m:f></m:oMath>
-<m:oMath><m:box><m:r><m:t>odd</m:t></m:r></m:box></m:oMath>
+<m:oMath><m:mysteryTag><m:r><m:t>odd</m:t></m:r></m:mysteryTag></m:oMath>
 <w:r><w:t>After</w:t></w:r></w:p>
 </w:body></w:document>"#,
         )
@@ -312,12 +320,16 @@ async fn accuracy_odt_pptx_content_preserved() {
     }
 }
 
+#[cfg(feature = "data")]
 #[tokio::test]
 async fn accuracy_bib_sqlite_parquet_contents() {
     let (md, _) = convert("real.bib").await;
     assert!(md.contains("**"), "bib entries render as list items: {md}");
     let (md, _) = convert("real.sqlite").await;
-    assert!(md.contains("CREATE TABLE") || md.contains("|"), "sqlite: {md}");
+    assert!(
+        md.contains("CREATE TABLE") || md.contains("|"),
+        "sqlite: {md}"
+    );
     let (md, _) = convert("real.parquet").await;
     assert!(md.starts_with('|'), "parquet table expected: {md}");
 }

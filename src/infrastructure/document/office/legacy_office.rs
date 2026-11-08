@@ -87,9 +87,11 @@ impl Converter for LegacyOfficeConverter {
 
         // Second hop: self-hosted deep parsers handle the OOXML.
         let result = match hop.target {
-            "docx" => crate::infrastructure::document::office::docx::converter::DocxDeepConverter::new()
-                .convert(Input::bytes(converted, format!("{}.docx", stem(&filename))))
-                .await?,
+            "docx" => {
+                crate::infrastructure::document::office::docx::converter::DocxDeepConverter::new()
+                    .convert(Input::bytes(converted, format!("{}.docx", stem(&filename))))
+                    .await?
+            }
             other => {
                 return Err(AlchemizeError::other(format!(
                     "unsupported intermediate format '{other}'"
@@ -195,10 +197,9 @@ impl Converter for LegacyPptConverter {
         let converted = std::fs::read(&produced)
             .map_err(|e| AlchemizeError::other(format!("converted output unreadable: {e}")))?;
 
-        let result =
-            crate::infrastructure::document::office::pptx_deep::PptxDeepConverter::new()
-                .convert(Input::bytes(converted, format!("{}.pptx", stem(&filename))))
-                .await?;
+        let result = crate::infrastructure::document::office::pptx_deep::PptxDeepConverter::new()
+            .convert(Input::bytes(converted, format!("{}.pptx", stem(&filename))))
+            .await?;
 
         let mut out = ConvertResult::with_metadata(
             result.markdown,
@@ -252,6 +253,7 @@ mod tests {
 
     #[test]
     fn availability_degrades_without_soffice() {
+        let _serial = crate::test_support::env_lock();
         let saved = std::env::var("PATH").ok();
         unsafe { std::env::set_var("PATH", "/nonexistent-dir") };
         match LegacyOfficeConverter::new().availability() {
@@ -276,6 +278,7 @@ mod tests {
     async fn missing_soffice_errors_instead_of_silently_degrading() {
         // availability() reports Unavailable, so the registry skips this
         // engine; a direct convert() call must still fail loudly.
+        let _serial = crate::test_support::env_lock();
         let saved = std::env::var("PATH").ok();
         unsafe { std::env::set_var("PATH", "/nonexistent-dir") };
         let err = LegacyOfficeConverter::new()

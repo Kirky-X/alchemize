@@ -6,8 +6,8 @@
 //! Elements outside the table fall back to `\text{…}` wrapping and are
 //! counted in `warnings` — nothing silently disappears.
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 /// Conversion warnings surfaced into metadata.
 #[derive(Default, Debug, PartialEq)]
@@ -18,104 +18,26 @@ pub struct OmmlWarnings {
     pub fallback: usize,
 }
 
-/// One entry of the conversion table: OMML element → LaTeX wrapping.
-struct Rule {
-    /// OMML local name (`f`, `sSub`, `rad`, …).
-    local: &'static str,
-    /// LaTeX template; `{}` slots are filled with child conversions in
-    /// document order.
-    template: &'static str,
-    /// Number of `{}` slots in the template.
-    slots: usize,
-}
-
-/// The conversion table (R-self-004).
-const RULES: &[Rule] = &[
-    // Fraction: <m:f><m:num>…</m:num><m:den>…</m:den></m:f>
-    Rule {
-        local: "f",
-        template: "\\frac{}{}",
-        slots: 2,
-    },
-    // Subscript: <m:sSub><m:e>…</m:e><m:sub>…</m:sub></m:sSub>
-    Rule {
-        local: "sSub",
-        template: "{}_{{}}",
-        slots: 1,
-    }, // handled specially below
-    // Superscript
-    Rule {
-        local: "sSup",
-        template: "{}^{}",
-        slots: 2,
-    },
-    // Sub+sup combined
-    Rule {
-        local: "sSubSup",
-        template: "{}_{}^{}",
-        slots: 3,
-    },
-    // Radical: <m:rad><m:deg>…</m:deg><m:e>…</m:e></m:rad>; deg=2 → \sqrt
-    Rule {
-        local: "rad",
-        template: "\\sqrt{}",
-        slots: 1,
-    },
-    // Parenthesized delimiter: <m:d><m:e>…</m:e></m:d>
-    Rule {
-        local: "d",
-        template: "\\left({}\\right)",
-        slots: 1,
-    },
-    // N-ary (sum/integral): <m:nary><m:chr w:val="∑"/><m:sub>…</m:sub><m:sup>…</m:sup><m:e>…</m:e></m:nary>
-    Rule {
-        local: "nary",
-        template: "\\sum_{}^{} {}",
-        slots: 3,
-    },
-    // Accent: <m:acc><m:e>…</m:e></m:acc>
-    Rule {
-        local: "acc",
-        template: "\\hat{{{}}}",
-        slots: 1,
-    },
-    // Bar: <m:bar><m:e>…</m:e></m:bar>
-    Rule {
-        local: "bar",
-        template: "\\overline{{{}}}",
-        slots: 1,
-    },
-    // Function apply: <m:func><m:fName>…</m:fName><m:e>…</m:e></m:func>
-    Rule {
-        local: "func",
-        template: "{}\\left({}\\right)",
-        slots: 2,
-    },
-    // Matrix row → cells separated by &
-    Rule {
-        local: "mr",
-        template: "{} & {}",
-        slots: 2,
-    },
-    // Box (borderBox) → mathrm
-    Rule {
-        local: "borderBox",
-        template: "\\boxed{{{}}}",
-        slots: 1,
-    },
-    // Group character (phantom container) → pass through
-    Rule {
-        local: "groupChr",
-        template: "{}",
-        slots: 1,
-    },
-    // Equation array: rows separated by \\
-    Rule {
-        local: "eqArr",
-        template: "\\begin{{aligned}}{}\\end{{aligned}}",
-        slots: 1,
-    },
+/// Single-slot wrappers: OMML element → (LaTeX prefix, suffix).
+///
+/// Multi-slot constructs (fractions, scripts, radicals, n-ary) are matched
+/// explicitly below because their child order and arity matter; this table
+/// covers the uniform "one body" family and is consulted before the unknown
+/// fallback.
+const SINGLE_SLOT_WRAPPERS: &[(&str, &str, &str)] = &[
+    ("borderBox", "\\boxed{", "}"),
+    ("groupChr", "", ""),
+    ("box", "", ""),
+    ("phant", "\\phantom{", "}"),
 ];
+
+/// Look up a single-slot wrapper for an OMML local name.
+fn wrapper_for(local: &str) -> Option<(&'static str, &'static str)> {
+    SINGLE_SLOT_WRAPPERS
+        .iter()
+        .find(|(name, _, _)| *name == local)
+        .map(|(_, prefix, suffix)| (*prefix, *suffix))
+}
 
 /// Convert every `m:oMath` in a WordprocessingML document to LaTeX.
 ///
@@ -134,9 +56,11 @@ pub fn convert_document_omml(xml: &[u8]) -> (Vec<String>, OmmlWarnings) {
                 let local = crate::infrastructure::document::local_tag_name(e.name().as_ref());
                 if local == "oMath" {
                     let (latex, used_fallback) = convert_island(&mut reader);
-                    warnings.converted += 1;
-                    warnings.fallback += usize::from(used_fallback);
-                    out.push(latex);
+                    if !latex.trim().is_empty() {
+                        warnings.converted += 1;
+                        warnings.fallback += usize::from(used_fallback);
+                        out.push(latex);
+                    }
                     continue; // convert_island consumed through </m:oMath>
                 }
             }
@@ -234,10 +158,17 @@ fn convert_island(reader: &mut Reader<&[u8]>) -> (String, bool) {
                         converted.push_str(&format!("\\begin{{matrix}}{rows}\\end{{matrix}}"));
                     }
                     _ => {
-                        // Unknown OMML element: consume and mark fallback so
-                        // the loss is counted, never silent.
+                        // Table lookup first: uniform single-slot wrappers.
                         let text = collect_any_until_end(reader, &local);
-                        if !text.trim().is_empty() {
+                        if text.trim().is_empty() {
+                            // nothing to emit
+                        } else if let Some((prefix, suffix)) = wrapper_for(&local) {
+                            converted.push_str(prefix);
+                            converted.push_str(&text);
+                            converted.push_str(suffix);
+                        } else {
+                            // Unknown OMML element: wrap in \text{} and count
+                            // the fallback so the loss is never silent.
                             fallback = true;
                             converted.push_str(&format!("\\text{{{}}}", escape_latex(&text)));
                         }
@@ -254,9 +185,7 @@ fn convert_island(reader: &mut Reader<&[u8]>) -> (String, bool) {
             Ok(Event::GeneralRef(r)) => {
                 // &amp; &lt; … arrive as separate events in quick-xml 0.42;
                 // decode or the character silently vanishes.
-                converted.push_str(&escape_latex(&decode_entity(
-                    &r,
-                )));
+                converted.push_str(&escape_latex(&decode_entity(&r)));
             }
             Ok(Event::End(e)) => {
                 if crate::infrastructure::document::local_tag_name(e.name().as_ref()) == "oMath" {
@@ -570,12 +499,59 @@ mod tests {
 
     #[test]
     fn unknown_element_falls_back_and_is_counted() {
-        let (out, warnings) =
-            convert_document_omml(&omml(r#"<m:box><m:r><m:t>weird</m:t></m:r></m:box>"#));
+        let (out, warnings) = convert_document_omml(&omml(
+            r#"<m:mysteryTag><m:r><m:t>weird</m:t></m:r></m:mysteryTag>"#,
+        ));
         assert_eq!(out.len(), 1);
         assert!(out[0].contains("\\text{weird}"), "got: {}", out[0]);
         assert_eq!(warnings.fallback, 1, "fallback must be counted");
         assert_eq!(warnings.converted, 1);
+    }
+
+    #[test]
+    fn eqarr_groupchr_borderbox_and_unknown_run() {
+        // eqArr rows join with \\.
+        assert_eq!(
+            convert(r#"<m:eqArr><m:e><m:r><m:t>a=1</m:t></m:r></m:e></m:eqArr>"#),
+            "\\begin{aligned}a=1\\end{aligned}"
+        );
+        // groupChr passes through.
+        assert_eq!(
+            convert(r#"<m:groupChr><m:e><m:r><m:t>v</m:t></m:r></m:e></m:groupChr>"#),
+            "v"
+        );
+        // borderBox wraps in \boxed.
+        assert_eq!(
+            convert(r#"<m:borderBox><m:e><m:r><m:t>z</m:t></m:r></m:e></m:borderBox>"#),
+            "\\boxed{z}"
+        );
+        // A bare run of text inside oMath (no m:r wrapper).
+        assert_eq!(convert("loose"), "loose");
+    }
+
+    #[test]
+    fn omathpara_is_walked_like_omath() {
+        let doc = br#"<?xml version="1.0"?><w:document xmlns:w="w" xmlns:m="m"><w:body>
+<w:p><m:oMathPara><m:oMath><m:r><m:t>para math</m:t></m:r></m:oMath></m:oMathPara></w:p>
+</w:body></w:document>"#;
+        let (out, warnings) = convert_document_omml(doc);
+        assert_eq!(out, vec!["para math".to_string()]);
+        assert_eq!(warnings.converted, 1);
+    }
+
+    #[test]
+    fn multi_row_matrix_joins_rows() {
+        let got = convert(
+            r#"<m:m><m:mr><m:r><m:t>a</m:t></m:r></m:mr><m:mr><m:r><m:t>b</m:t></m:r></m:mr></m:m>"#,
+        );
+        assert_eq!(got, "\\begin{matrix}a \\\\ b\\end{matrix}");
+    }
+
+    #[test]
+    fn empty_island_yields_empty_latex() {
+        let (out, warnings) = convert_document_omml(&omml(""));
+        assert_eq!(out.len(), 0, "an empty oMath produces no island");
+        assert_eq!(warnings.converted, 0);
     }
 
     #[test]

@@ -55,20 +55,46 @@ impl Converter for ZipConverter {
         let mut markdown_parts = Vec::new();
         let file_count = extracted_files.len();
         let mut converted_count = 0;
+        let mut attachments: Vec<String> = Vec::new();
+        let mut assets: Vec<crate::domain::asset::Asset> = Vec::new();
 
         for (filename, content) in extracted_files {
             let nested_input = Input::Bytes {
-                data: content,
+                data: content.clone(),
                 filename: filename.clone(),
                 mimetype: None,
                 extension: None,
             };
 
-            if let Ok(result) = self.registry.convert(&nested_input).await {
-                markdown_parts.push(format!("### {filename}\n"));
-                markdown_parts.push(result.markdown);
-                markdown_parts.push(String::new());
-                converted_count += 1;
+            match self.registry.convert(&nested_input).await {
+                Ok(result) => {
+                    markdown_parts.push(format!("### {filename}\n"));
+                    markdown_parts.push(result.markdown);
+                    markdown_parts.push(String::new());
+                    converted_count += 1;
+                }
+                Err(_) => {
+                    // No engine for this member: never drop it silently —
+                    // text becomes a fenced block, binary stays an attachment.
+                    markdown_parts.push(format!("### {filename}\n"));
+                    if let Ok(text) = std::str::from_utf8(&content)
+                        && !text.trim().is_empty()
+                        && !text
+                            .chars()
+                            .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+                    {
+                        let ext = filename.rsplit('.').next().unwrap_or("txt");
+                        markdown_parts.push(format!("```{ext}\n{}\n```\n", text.trim_end()));
+                    } else {
+                        markdown_parts.push(format!(
+                            "> Attachment: `{filename}` ({} bytes) — unsupported inner format; content preserved as attachment.\n",
+                            content.len()
+                        ));
+                        assets.push(crate::domain::asset::Asset::new(&filename, content));
+                    }
+                    markdown_parts.push(String::new());
+                    attachments.push(filename);
+                }
             }
         }
 
@@ -82,12 +108,15 @@ impl Converter for ZipConverter {
             "source_format": "zip",
             "file_count": file_count,
             "converted_count": converted_count,
+            "attachments": attachments,
         });
 
-        Ok(
-            ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
-                .with_quality(ConversionQuality::LocalFull),
-        )
+        let mut result = ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
+            .with_quality(ConversionQuality::LocalFull);
+        for asset in assets {
+            result = result.with_asset(asset);
+        }
+        Ok(result)
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -207,12 +236,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn convert_zip_no_converter_registered() {
+    async fn convert_zip_no_converter_keeps_members() {
+        // No engine registered: text members degrade to fenced blocks and
+        // binary members to attachments — never dropped.
         let converter = ZipConverter::new(ConverterRegistry::new());
         let zip_data = create_zip_bytes(&[("data.txt", b"some text")]);
         let input = Input::bytes(zip_data, "archive.zip");
         let result = converter.convert(input).await.unwrap();
-        assert!(result.markdown.contains("no convertible files"));
+        assert!(
+            result.markdown.contains("data.txt"),
+            "member name must appear: {}",
+            result.markdown
+        );
+        assert!(
+            result.markdown.contains("some text"),
+            "member text must survive: {}",
+            result.markdown
+        );
+        assert_eq!(result.metadata["converted_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn convert_zip_binary_member_becomes_attachment() {
+        let converter = ZipConverter::new(ConverterRegistry::new());
+        let zip_data = create_zip_bytes(&[("blob.bin", &[0xFFu8, 0xFE, 0x00])]);
+        let input = Input::bytes(zip_data, "archive.zip");
+        let result = converter.convert(input).await.unwrap();
+        assert!(
+            result.markdown.contains("Attachment"),
+            "{}",
+            result.markdown
+        );
+        assert_eq!(result.assets.len(), 1);
+        assert_eq!(result.assets[0].filename, "blob.bin");
+        assert_eq!(result.assets[0].bytes, vec![0xFF, 0xFE, 0x00]);
     }
 
     #[test]

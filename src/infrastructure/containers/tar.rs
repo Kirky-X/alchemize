@@ -12,7 +12,7 @@ use crate::application::registry::ConverterRegistry;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::infrastructure::containers::{
-    check_entry_size, read_limited, ContainerBase, ContainerEntry, RecursiveContainer,
+    ContainerBase, ContainerEntry, RecursiveContainer, check_entry_size, read_limited,
 };
 
 /// View over raw tar bytes implementing the shared container skeleton.
@@ -65,7 +65,10 @@ impl Converter for TarConverter {
         "tar"
     }
 
-    async fn convert(&self, input: Input) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
+    async fn convert(
+        &self,
+        input: Input,
+    ) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
         let _depth = self.base.acquire_depth()?;
         let bytes = input
             .to_bytes()
@@ -115,7 +118,10 @@ impl Converter for TarGzConverter {
         "tar-gz"
     }
 
-    async fn convert(&self, input: Input) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
+    async fn convert(
+        &self,
+        input: Input,
+    ) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
         let _depth = self.base.acquire_depth()?;
         let bytes = input
             .to_bytes()
@@ -148,8 +154,8 @@ fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
         .entries()
         .map_err(|e| AlchemizeError::other(format!("failed to read tar archive: {e}")))?
     {
-        let mut entry = entry
-            .map_err(|e| AlchemizeError::other(format!("failed to read tar entry: {e}")))?;
+        let mut entry =
+            entry.map_err(|e| AlchemizeError::other(format!("failed to read tar entry: {e}")))?;
 
         // Only real file contents. Directories, symlinks, pax extended
         // headers (XHeader/XGlobalHeader) and GNU long-name markers are
@@ -176,7 +182,9 @@ fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
         entry
             .take(crate::infrastructure::containers::MAX_ENTRY_BYTES + 1)
             .read_to_end(&mut data)
-            .map_err(|e| AlchemizeError::other(format!("failed to read tar entry '{name}': {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(format!("failed to read tar entry '{name}': {e}"))
+            })?;
         check_entry_size(&name, data.len() as u64)?;
 
         out.push(ContainerEntry { name, bytes: data });
@@ -219,13 +227,17 @@ mod tests {
         dir_header.set_size(0);
         dir_header.set_mode(0o755);
         dir_header.set_cksum();
-        builder.append_data(&mut dir_header, "docs/", std::io::empty()).unwrap();
+        builder
+            .append_data(&mut dir_header, "docs/", std::io::empty())
+            .unwrap();
 
         let mut header = Header::new_gnu();
         let data = b"inside dir".as_slice();
         header.set_size(data.len() as u64);
         header.set_cksum();
-        builder.append_data(&mut header, "docs/note.txt", data).unwrap();
+        builder
+            .append_data(&mut header, "docs/note.txt", data)
+            .unwrap();
         builder.into_inner().unwrap()
     }
 
@@ -285,7 +297,10 @@ mod tests {
             .await
             .unwrap();
         // Pax extended headers are skipped; the real entry still converts.
-        assert!(result.markdown.contains(&long_name), "long name must survive");
+        assert!(
+            result.markdown.contains(&long_name),
+            "long name must survive"
+        );
         assert!(result.markdown.contains("long name content"));
     }
 

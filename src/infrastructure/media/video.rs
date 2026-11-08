@@ -493,8 +493,200 @@ mod tests {
         }
     }
 
+    struct StubVision(Option<&'static str>);
+
+    #[async_trait::async_trait]
+    impl crate::application::ports::VisionProvider for StubVision {
+        async fn describe(
+            &self,
+            _image_data: &[u8],
+            _detail: crate::domain::result::DetailLevel,
+        ) -> anyhow::Result<String> {
+            match self.0 {
+                Some(text) => Ok(text.to_string()),
+                None => Err(anyhow::anyhow!("vision provider down")),
+            }
+        }
+        async fn ocr(&self, _image_data: &[u8]) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+        fn name(&self) -> &'static str {
+            "stub-vision"
+        }
+    }
+
+    /// Restores `PATH` on drop so a panicking assertion cannot poison it.
+    struct PathRestore(Option<String>);
+
+    impl Drop for PathRestore {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(p) => unsafe { std::env::set_var("PATH", p) },
+                None => unsafe { std::env::remove_var("PATH") },
+            }
+        }
+    }
+
+    /// A fake `ffmpeg` that answers audio calls with a WAV payload and frame
+    /// calls (`-vframes`) with a JPEG payload. `frame_exit` overrides the exit
+    /// status for frame calls.
+    fn fake_ffmpeg(dir: &std::path::Path, frame_exit: Option<i32>) -> PathRestore {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&36u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&[1, 0, 1, 0]);
+        wav.extend_from_slice(&16000u32.to_le_bytes());
+        wav.extend_from_slice(&32000u32.to_le_bytes());
+        wav.extend_from_slice(&[2, 0, 16, 0]);
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&0u32.to_le_bytes());
+        std::fs::write(dir.join("wav.payload"), &wav).unwrap();
+        std::fs::write(dir.join("jpeg.payload"), b"\xff\xd8\xff\xe0fake-jpeg").unwrap();
+        let frame_branch = match frame_exit {
+            Some(code) => format!("exit {code}"),
+            None => format!("cat '{}'", dir.join("jpeg.payload").display()),
+        };
+        let script = format!(
+            "#!/bin/sh\n\
+             cat > /dev/null\n\
+             case \"$*\" in\n\
+               *-vframes*) {frame_branch} ;;\n\
+               *) cat '{}' ;;\n\
+             esac\n\
+             exit 0\n",
+            dir.join("wav.payload").display()
+        );
+        let fake = dir.join("ffmpeg");
+        std::fs::write(&fake, script).unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let saved = std::env::var("PATH").ok();
+        let mut paths = vec![dir.to_path_buf()];
+        if let Some(p) = &saved {
+            paths.extend(std::env::split_paths(p));
+        }
+        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+        PathRestore(saved)
+    }
+
+    #[test]
+    fn constructor_builders_keep_mode_and_providers() {
+        let converter = VideoConverter::new(VideoProcessingMode::Gpu)
+            .with_transcriber(std::sync::Arc::new(StubTranscriber("t")))
+            .with_vision_provider(std::sync::Arc::new(StubVision(Some("v"))));
+        assert_eq!(converter.mode, VideoProcessingMode::Gpu);
+        assert!(converter.transcribe.is_some());
+        assert!(converter.vision_provider.is_some());
+        assert_eq!(converter.name(), "video");
+    }
+
+    #[tokio::test]
+    async fn gpu_mode_describes_key_frames() {
+        let _serial = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _path = fake_ffmpeg(dir.path(), None);
+        let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::Gpu, true);
+        converter.transcribe = Some(std::sync::Arc::new(StubTranscriber("hello world")));
+        converter.vision_provider =
+            Some(std::sync::Arc::new(StubVision(Some("a person speaking"))));
+        // 3MB → estimated duration 30s → exactly one 30s frame interval.
+        let input = Input::bytes(vec![0u8; 3_000_000], "talk.mp4");
+        let result = converter.convert(input).await.unwrap();
+        assert!(result.markdown.contains("## Video Transcript"));
+        assert!(result.markdown.contains("hello world"));
+        assert!(
+            result.markdown.contains("## Key Frames"),
+            "{}",
+            result.markdown
+        );
+        assert!(
+            result.markdown.contains("Frame @ 0.0s: a person speaking"),
+            "{}",
+            result.markdown
+        );
+        assert_eq!(result.metadata["frame_analysis"], 1);
+        assert_eq!(result.metadata["transcribed"], true);
+        assert_eq!(result.quality, ConversionQuality::LocalFull);
+    }
+
+    #[tokio::test]
+    async fn frame_provider_failure_is_skipped_without_dropping_audio() {
+        let _serial = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _path = fake_ffmpeg(dir.path(), None);
+        let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::Gpu, true);
+        converter.transcribe = Some(std::sync::Arc::new(StubTranscriber("narration")));
+        // Vision provider errors: frame descriptions stay empty.
+        converter.vision_provider = Some(std::sync::Arc::new(StubVision(None)));
+        let input = Input::bytes(vec![0u8; 3_000_000], "talk.mp4");
+        let result = converter.convert(input).await.unwrap();
+        assert!(result.markdown.contains("narration"));
+        assert!(
+            !result.markdown.contains("## Key Frames"),
+            "{}",
+            result.markdown
+        );
+        assert_eq!(result.metadata["frame_analysis"], 0);
+    }
+
+    #[tokio::test]
+    async fn frame_extraction_failure_is_skipped() {
+        let _serial = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _path = fake_ffmpeg(dir.path(), Some(7));
+        let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::Gpu, true);
+        converter.transcribe = Some(std::sync::Arc::new(StubTranscriber("speech")));
+        converter.vision_provider = Some(std::sync::Arc::new(StubVision(Some("unused"))));
+        let input = Input::bytes(vec![0u8; 3_000_000], "talk.mp4");
+        let result = converter.convert(input).await.unwrap();
+        assert!(result.markdown.contains("speech"));
+        assert!(!result.markdown.contains("Key Frames"));
+        assert_eq!(result.metadata["frame_analysis"], 0);
+    }
+
+    #[tokio::test]
+    async fn empty_transcript_without_frames_reports_no_text() {
+        let _serial = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _path = fake_ffmpeg(dir.path(), None);
+        let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::Gpu, true);
+        converter.transcribe = Some(std::sync::Arc::new(StubTranscriber("   ")));
+        let input = Input::bytes(vec![0u8; 10_000], "silent.mp4");
+        let result = converter.convert(input).await.unwrap();
+        assert!(
+            result.markdown.contains("transcription produced no text"),
+            "{}",
+            result.markdown
+        );
+        // analyze_frames early-returns without a vision provider.
+        let frames = converter.analyze_frames(b"x", 120.0).await.unwrap();
+        assert!(frames.is_empty());
+    }
+
+    #[tokio::test]
+    async fn audio_extracted_without_transcriber_is_reported() {
+        let _serial = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _path = fake_ffmpeg(dir.path(), None);
+        let converter = converter_with_ffmpeg_flag(VideoProcessingMode::AudioOnly, true);
+        let input = Input::bytes(vec![0u8; 1024], "clip.mp4");
+        let result = converter.convert(input).await.unwrap();
+        assert!(
+            result.markdown.contains("no ASR provider configured"),
+            "{}",
+            result.markdown
+        );
+        assert_eq!(result.metadata["audio_extracted"], true);
+        assert_eq!(result.metadata["transcribed"], false);
+    }
+
     #[tokio::test]
     async fn ffmpeg_extraction_failure_degrades_to_metadata() {
+        let _serial = crate::test_support::env_lock();
         // ffmpeg_available forced true but the binary is absent on this host:
         // the spawn fails inside extract_audio and the converter degrades.
         let has_ffmpeg = !std::process::Command::new("ffmpeg")
@@ -517,6 +709,7 @@ mod tests {
 
     #[tokio::test]
     async fn gpu_mode_without_ffmpeg_still_degrades() {
+        let _serial = crate::test_support::env_lock();
         let has_ffmpeg = !std::process::Command::new("ffmpeg")
             .arg("-version")
             .stdout(std::process::Stdio::null())
@@ -535,6 +728,7 @@ mod tests {
 
     #[tokio::test]
     async fn ffmpeg_extraction_success_with_transcriber() {
+        let _serial = crate::test_support::env_lock();
         // Fake ffmpeg on PATH: emits a canned WAV; stub transcriber runs.
         let dir = tempfile::tempdir().unwrap();
         let wav: Vec<u8> = {
@@ -588,6 +782,7 @@ mod tests {
 
     #[tokio::test]
     async fn audioonly_with_provider_and_ffmpeg_missing_stubs_not_called() {
+        let _serial = crate::test_support::env_lock();
         let has_ffmpeg = !std::process::Command::new("ffmpeg")
             .arg("-version")
             .stdout(std::process::Stdio::null())

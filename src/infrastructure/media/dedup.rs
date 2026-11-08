@@ -6,7 +6,6 @@
 //! Uses perceptual hashing (pHash), entropy filtering, and pixel difference ratio
 //! to identify meaningful frames that should be sent to VisionProvider for analysis.
 
-
 /// Default Hamming distance threshold for perceptual hash comparison.
 /// Frames with distance below this threshold are considered duplicates.
 const DEFAULT_HASH_THRESHOLD: u32 = 10;
@@ -205,7 +204,6 @@ pub fn pixel_diff_ratio(current: &[u8], previous: &[u8], width: u32, height: u32
 
 // Tests
 
-
 /// Average perceptual hash: 8×8 grayscale cells, one bit per cell above the
 /// mean. Returns a 64-bit hash; Hamming distance compares two hashes.
 fn average_hash(frame: &[u8], width: u32, height: u32) -> u64 {
@@ -237,7 +235,8 @@ fn average_hash(frame: &[u8], width: u32, height: u32) -> u64 {
                     }
                 }
             }
-            cells[(cell_y * 8 + cell_x) as usize] = if count == 0 { 0.0 } else { sum / count as f64 };
+            cells[(cell_y * 8 + cell_x) as usize] =
+                if count == 0 { 0.0 } else { sum / count as f64 };
         }
     }
     let mean = cells.iter().sum::<f64>() / 64.0;

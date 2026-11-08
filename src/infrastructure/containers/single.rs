@@ -16,10 +16,10 @@ use async_trait::async_trait;
 use crate::application::ports::Converter;
 use crate::application::registry::ConverterRegistry;
 use crate::domain::error::AlchemizeError;
-use crate::domain::input::{detect_format, Input};
+use crate::domain::input::{Input, detect_format};
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 use crate::infrastructure::containers::{
-    fallback_entry, read_limited, ContainerBase, MAX_SINGLE_DECOMPRESSED_BYTES,
+    ContainerBase, MAX_SINGLE_DECOMPRESSED_BYTES, fallback_entry, read_limited,
 };
 
 /// Converts gzip-compressed single files (`.gz`).
@@ -104,11 +104,7 @@ fn xz_decompress(bytes: &[u8]) -> Result<Vec<u8>, AlchemizeError> {
 fn zst_decompress(bytes: &[u8]) -> Result<Vec<u8>, AlchemizeError> {
     let decoder = zstd::stream::read::Decoder::new(Cursor::new(bytes))
         .map_err(|e| AlchemizeError::other(format!("zst: failed to start decoder: {e}")))?;
-    read_limited(
-        decoder,
-        MAX_SINGLE_DECOMPRESSED_BYTES,
-        "zst",
-    )
+    read_limited(decoder, MAX_SINGLE_DECOMPRESSED_BYTES, "zst")
 }
 
 /// Strip a compression suffix from a filename (`archive.tar.gz` ->
@@ -181,7 +177,8 @@ async fn convert_single(
     // Use the magic-suggested name when one exists so the attachment carries
     // the real format extension (no image converter is registered here, but
     // the payload's type must not be lost).
-    let fallback_name = magic_suggested_name(&data, &inner_name).unwrap_or_else(|| inner_name.clone());
+    let fallback_name =
+        magic_suggested_name(&data, &inner_name).unwrap_or_else(|| inner_name.clone());
     let (markdown, asset) = fallback_entry(&fallback_name, &data);
     let mut metadata = serde_json::json!({
         "source_format": source_format,
@@ -192,9 +189,11 @@ async fn convert_single(
     });
     if let Some(asset) = asset {
         metadata["attachment_extracted"] = serde_json::Value::Bool(true);
-        return Ok(ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
-            .with_quality(ConversionQuality::LocalFull)
-            .with_asset(asset));
+        return Ok(
+            ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
+                .with_quality(ConversionQuality::LocalFull)
+                .with_asset(asset),
+        );
     }
     Ok(ConvertResult::with_metadata(
         markdown,
@@ -215,8 +214,12 @@ fn finish_inner(
         "converted": true,
         "attachments": [],
     });
-    ConvertResult::with_metadata(std::mem::take(&mut result.markdown), ContentType::Document, metadata)
-        .with_quality(ConversionQuality::LocalFull)
+    ConvertResult::with_metadata(
+        std::mem::take(&mut result.markdown),
+        ContentType::Document,
+        metadata,
+    )
+    .with_quality(ConversionQuality::LocalFull)
 }
 
 #[async_trait]
@@ -298,9 +301,18 @@ mod tests {
 
     #[test]
     fn supported_extensions_and_names() {
-        assert_eq!(GzConverter::new(ConverterRegistry::new()).supported_extensions(), &["gz"]);
-        assert_eq!(XzConverter::new(ConverterRegistry::new()).supported_extensions(), &["xz"]);
-        assert_eq!(ZstConverter::new(ConverterRegistry::new()).supported_extensions(), &["zst"]);
+        assert_eq!(
+            GzConverter::new(ConverterRegistry::new()).supported_extensions(),
+            &["gz"]
+        );
+        assert_eq!(
+            XzConverter::new(ConverterRegistry::new()).supported_extensions(),
+            &["xz"]
+        );
+        assert_eq!(
+            ZstConverter::new(ConverterRegistry::new()).supported_extensions(),
+            &["zst"]
+        );
         assert_eq!(GzConverter::new(ConverterRegistry::new()).name(), "gz");
         assert_eq!(XzConverter::new(ConverterRegistry::new()).name(), "xz");
         assert_eq!(ZstConverter::new(ConverterRegistry::new()).name(), "zst");
@@ -421,9 +433,11 @@ mod tests {
         // A tar.gz routes gz -> tar through the registry when both are wired.
         let mut registry = ConverterRegistry::new();
         registry.register(Box::new(TextConverter::new()));
-        registry.register(Box::new(crate::infrastructure::containers::TarConverter::with_arc(
-            Arc::new(ConverterRegistry::new()),
-        )));
+        registry.register(Box::new(
+            crate::infrastructure::containers::TarConverter::with_arc(Arc::new(
+                ConverterRegistry::new(),
+            )),
+        ));
 
         let mut builder = tar::Builder::new(Vec::new());
         let mut header = tar::Header::new_gnu();
@@ -451,8 +465,7 @@ mod tests {
         // stop at the 64MB limit with an explicit error.
         let converter = GzConverter::with_arc(registry());
         let chunk = vec![0u8; 1024 * 1024];
-        let mut encoder =
-            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(1));
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(1));
         for _ in 0..100 {
             encoder.write_all(&chunk).unwrap();
         }

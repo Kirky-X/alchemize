@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use async_trait::async_trait;
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 use crate::application::ports::{Availability, Converter};
 use crate::domain::asset::Asset;
@@ -68,7 +68,8 @@ impl Converter for PptxDeepConverter {
         let slide_count = parsed.slide_count;
         let notes_count = parsed.document.notes.len();
         let asset_count = parsed.document.assets.len();
-        let markdown = crate::infrastructure::document::gfm_render::render_markdown(&parsed.document);
+        let markdown =
+            crate::infrastructure::document::gfm_render::render_markdown(&parsed.document);
 
         let metadata = serde_json::json!({
             "source_format": "pptx",
@@ -192,7 +193,13 @@ pub fn parse(bytes: &[u8]) -> Result<ParsedPptx, AlchemizeError> {
     let mut refs: HashMap<usize, String> = HashMap::new();
     let mut collected: Vec<PptxAsset> = Vec::new();
     let mut seq = 0usize;
-    rewrite_image_refs(&mut blocks, &doc_assets, &mut refs, &mut collected, &mut seq);
+    rewrite_image_refs(
+        &mut blocks,
+        &doc_assets,
+        &mut refs,
+        &mut collected,
+        &mut seq,
+    );
 
     Ok(ParsedPptx {
         document: Document {
@@ -489,7 +496,10 @@ fn parse_slide(
                         } else if st.in_sp && !st.para_inlines.is_empty() {
                             let inlines = std::mem::take(&mut st.para_inlines);
                             if st.ph == Some(PhKind::Title) {
-                                blocks.push(Block::Heading { level: 1, content: inlines });
+                                blocks.push(Block::Heading {
+                                    level: 1,
+                                    content: inlines,
+                                });
                             } else {
                                 blocks.push(Block::Paragraph(inlines));
                             }
@@ -679,13 +689,7 @@ fn rewrite_image_refs(
                 for row in table.grid.iter_mut() {
                     for slot in row.iter_mut() {
                         if let CellSlot::Origin(cell) = slot {
-                            rewrite_image_refs(
-                                &mut cell.blocks,
-                                doc_assets,
-                                refs,
-                                collected,
-                                seq,
-                            );
+                            rewrite_image_refs(&mut cell.blocks, doc_assets, refs, collected, seq);
                         }
                     }
                 }
@@ -748,11 +752,11 @@ mod tests {
     use crate::domain::document::Cell;
 
     const PNG_1X1: &[u8] = &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
-        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
-        0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
-        0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
-        0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
 
     /// Build a minimal PPTX zip from (part name, bytes) pairs.
@@ -860,10 +864,11 @@ mod tests {
             )),
         )]);
         let doc = parse(&bytes).unwrap().document;
-        assert!(doc.blocks.iter().any(|b| matches!(
-            b,
-            Block::Heading { level: 1, .. }
-        )));
+        assert!(
+            doc.blocks
+                .iter()
+                .any(|b| matches!(b, Block::Heading { level: 1, .. }))
+        );
     }
 
     #[tokio::test]
@@ -968,7 +973,9 @@ mod tests {
         let bytes = pptx_zip(&[
             (
                 "ppt/slides/slide1.xml",
-                str(&slide(r#"<p:sp><p:txBody><a:p><a:r><a:t>Body</a:t></a:r></a:p></p:txBody></p:sp>"#)),
+                str(&slide(
+                    r#"<p:sp><p:txBody><a:p><a:r><a:t>Body</a:t></a:r></a:p></p:txBody></p:sp>"#,
+                )),
             ),
             (
                 "ppt/notesSlides/notesSlide1.xml",
@@ -1002,9 +1009,13 @@ mod tests {
                 ))),
             ));
         }
-        let refs: Vec<(&str, Vec<u8>)> = parts.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+        let refs: Vec<(&str, Vec<u8>)> =
+            parts.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
         let bytes = pptx_zip(&refs);
-        let result = PptxDeepConverter::new().convert(Input::bytes(bytes, "deck.pptx")).await.unwrap();
+        let result = PptxDeepConverter::new()
+            .convert(Input::bytes(bytes, "deck.pptx"))
+            .await
+            .unwrap();
         let md = &result.markdown;
         let p1 = md.find("# Slide 1").expect("slide 1 header");
         let p2 = md.find("# Slide 2").expect("slide 2 header");
@@ -1017,17 +1028,16 @@ mod tests {
 
     #[tokio::test]
     async fn empty_slides_still_get_headers() {
-        let bytes = pptx_zip(&[(
-            "ppt/slides/slide1.xml",
-            str(&slide("")),
-        )]);
+        let bytes = pptx_zip(&[("ppt/slides/slide1.xml", str(&slide("")))]);
         let parsed = parse(&bytes).unwrap();
         assert_eq!(parsed.slide_count, 1);
-        assert!(parsed
-            .document
-            .blocks
-            .iter()
-            .any(|b| matches!(b, Block::Heading { level: 1, .. })));
+        assert!(
+            parsed
+                .document
+                .blocks
+                .iter()
+                .any(|b| matches!(b, Block::Heading { level: 1, .. }))
+        );
     }
 
     #[tokio::test]
@@ -1038,8 +1048,8 @@ mod tests {
 
     #[tokio::test]
     async fn real_pptx_recall_and_metadata() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/real/real.pptx");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/real/real.pptx");
         let result = PptxDeepConverter::new()
             .convert(Input::Path(path))
             .await

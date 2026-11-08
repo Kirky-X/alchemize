@@ -14,3 +14,18 @@ pub use domain::input::{Input, InputFormat, detect_format};
 
 /// Crate version (mirrors Cargo.toml via workspace inheritance).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Test-only helpers shared by unit tests that touch process-global state.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::{Mutex, MutexGuard};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Serialize tests that read or write the process-global environment
+    /// (`PATH`): `set_var` affects every thread, so unsynchronized swaps make
+    /// unrelated tests observe a foreign `PATH`.
+    pub(crate) fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
