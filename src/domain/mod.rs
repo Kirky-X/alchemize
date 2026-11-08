@@ -4,6 +4,7 @@
 //! Domain layer — pure data types and rules, zero IO.
 
 pub mod asset;
+pub mod document;
 pub mod error;
 pub mod input;
 pub mod latex_validate;
