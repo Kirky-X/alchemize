@@ -177,7 +177,7 @@ alch formats
 | feature | 引入 | 说明 |
 | --- | --- | --- |
 | `mineru` | MinerU 云端 PDF 引擎（reqwest/limiteron） | 端点经 `ALCHEMIZE_MINERU_URL` 配置后才注册 |
-| `pdfium` | 本地 PDF 高保真引擎（pdfium-render） | 运行时探测动态库；缺失降级到 pdf-extract |
+| `pdfium` | 本地 PDF 高保真引擎（pdfium-render） | 运行时探测动态库；缺失降级到 pdf-extract。嵌入图提取走 lopdf 结构遍历（DCT/JPX 直通，样本重编码 PNG，不支持项显性计数） |
 | `libreoffice` | 旧版二进制 Office 引擎（外部 soffice） | doc/rtf→docx、ppt/pps/pot→pptx 后进深解析链；缺席自动降级 |
 | `containers` | 归档容器族（tar/tgz/gz/xz/zst/7z） | 递归转换，魔数检测内层格式 |
 | `data` | 结构化数据引擎（parquet/sqlite/bib） | parquet 流式 10 万行截断、sqlite 只读、biblatex 条目 |

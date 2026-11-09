@@ -16,6 +16,8 @@ pub mod latex_source;
 pub mod office;
 pub mod pandoc_generic;
 pub mod pdf;
+#[cfg(feature = "pdfium")]
+pub mod pdf_images;
 pub mod pdfium;
 pub mod pptx;
 pub mod shared;

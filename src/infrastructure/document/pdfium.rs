@@ -8,14 +8,15 @@
 //! with `LoadLibraryError(DlSym)`.
 //!
 //! Extraction: per-page characters with coordinates, regrouped into
-//! paragraphs by vertical gaps. Image raster export is not implemented yet
-//! (`raster export pending` marker below); `assets` stays empty for now.
+//! paragraphs by vertical gaps; embedded images come from the lopdf
+//! structure walk (`pdf_images`), referenced per page as `images/…` assets.
 //! Library probe order: `ALCHEMIZE_PDFIUM_PATH` → `~/.cache/alchemize/lib`
 //! → system library; missing → Unavailable with a fetch hint (no silent
 //! degradation, no network).
 
 #![cfg(feature = "pdfium")]
 
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -105,16 +106,18 @@ impl Converter for PdfiumConverter {
             .clone()
             .ok_or_else(|| AlchemizeError::Pdf("pdfium library unavailable".into()))?;
 
-        let result = tokio::task::spawn_blocking(move || extract(&library, &bytes))
+        let result = tokio::task::spawn_blocking(move || extract_all(&library, &bytes))
             .await
             .map_err(|e| AlchemizeError::other(format!("pdfium task panicked: {e}")))?;
 
-        let (markdown, assets, page_count) = result?;
+        let (markdown, assets, page_count, skip_reasons) = result?;
 
         let metadata = serde_json::json!({
             "source_format": "pdf",
             "page_count": page_count,
             "asset_count": assets.len(),
+            "images_skipped": skip_reasons.len(),
+            "images_skip_reasons": skip_reasons.iter().take(8).collect::<Vec<_>>(),
             "engine": "pdfium",
         });
         let mut out = ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
@@ -148,6 +151,46 @@ impl Converter for PdfiumConverter {
     }
 }
 
+/// One blocking task: lopdf image extraction (structure walk) + pdfium
+/// text extraction, assets named `images/{seq:04}-{sha8}.{ext}` with
+/// content dedup — same convention as the docx-deep converter.
+fn extract_all(
+    library: &std::path::Path,
+    bytes: &[u8],
+) -> Result<(String, Vec<Asset>, usize, Vec<String>), AlchemizeError> {
+    // Image extraction first: pure Rust, no pdfium involvement, and its
+    // lopdf failure is a skip reason rather than a conversion failure.
+    let extraction = crate::infrastructure::document::pdf_images::extract_page_images(bytes);
+    let mut assets: Vec<Asset> = Vec::new();
+    let mut by_sha: HashMap<String, String> = HashMap::new();
+    let mut page_refs: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+    let mut seq: usize = 0;
+    for (page, entry) in &extraction.positions {
+        let image = &extraction.entries[*entry];
+        let sha8 = sha8_hex(&image.bytes);
+        let reference = if let Some(existing) = by_sha.get(&sha8) {
+            existing.clone()
+        } else {
+            let r = format!("images/{seq:04}-{sha8}.{}", image.ext);
+            seq += 1;
+            by_sha.insert(sha8, r.clone());
+            assets.push(Asset::new(r.clone(), image.bytes.clone()));
+            r
+        };
+        page_refs.entry(*page).or_default().push(reference);
+    }
+
+    let (markdown, page_count) = extract(library, bytes, &page_refs)?;
+    Ok((markdown, assets, page_count, extraction.skipped))
+}
+
+/// Leading 8 hex chars of the SHA-256 digest (mirrors `Asset::sha8`).
+fn sha8_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    digest[..4].iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Line-extraction internals.
 struct Line {
     text: String,
@@ -160,7 +203,8 @@ struct Line {
 fn extract(
     library: &std::path::Path,
     bytes: &[u8],
-) -> Result<(String, Vec<Asset>, usize), AlchemizeError> {
+    page_images: &BTreeMap<u32, Vec<String>>,
+) -> Result<(String, usize), AlchemizeError> {
     use pdfium_render::prelude::*;
 
     let bindings = Pdfium::bind_to_library(library.display().to_string())
@@ -171,8 +215,6 @@ fn extract(
         .map_err(|e| AlchemizeError::Pdf(format!("pdfium open failed: {e:?}")))?;
 
     let page_count = doc.pages().len();
-    // Image raster export pending (see module docs): assets stays empty.
-    let assets = Vec::new();
     let mut markdown = String::new();
 
     for page in doc.pages().iter() {
@@ -267,12 +309,20 @@ fn extract(
         if lines.is_empty() {
             markdown.push_str("*(scanned page: no text layer — raster export pending)*\n");
         }
+
+        // Image references extracted from this page's XObjects, after the
+        // text block. `page_images` keys match pdfium's 0-based page index.
+        if let Some(refs) = page_images.get(&(page_index as u32)) {
+            for reference in refs {
+                markdown.push_str(&format!("![image]({reference})\n\n"));
+            }
+        }
     }
 
     if markdown.trim().is_empty() {
         markdown = "*PDF contains no extractable text.*\n".to_string();
     }
-    Ok((markdown, assets, page_count as usize))
+    Ok((markdown, page_count as usize))
 }
 
 #[cfg(test)]
@@ -285,7 +335,9 @@ mod tests {
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn env_guard() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     #[test]
@@ -341,5 +393,96 @@ mod tests {
         let result = conv.convert(Input::Path(path)).await.unwrap();
         assert!(result.markdown.chars().count() > 2000);
         assert!(result.markdown.contains("## Page 1"));
+        // Image pipeline wired: skip ledger always present (empty or not).
+        assert!(
+            result.metadata.get("images_skipped").is_some(),
+            "images_skipped metadata missing: {:?}",
+            result.metadata
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires pdfium library (ALCHEMIZE_PDFIUM_PATH or ~/.cache/alchemize/lib)"]
+    async fn image_pdf_produces_asset_and_reference() {
+        use lopdf::{Stream, dictionary};
+        let _env = env_guard();
+        // 4x4 JPEG via the image crate (png feature set includes jpeg).
+        let img = image::DynamicImage::ImageRgb8(image::ImageBuffer::from_fn(8, 8, |x, y| {
+            image::Rgb([(x as u8) * 30, (y as u8) * 30, 255u8])
+        }));
+        let mut jpg = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut jpg, image::ImageOutputFormat::Jpeg(90))
+            .unwrap();
+        let jpg = jpg.into_inner();
+
+        let mut doc = lopdf::Document::with_version("1.4");
+        let pages_id = doc.new_object_id();
+        let image_id = doc.add_object(lopdf::Object::Stream(Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Image",
+                "Width" => 8,
+                "Height" => 8,
+                "BitsPerComponent" => 8,
+                "ColorSpace" => "DeviceRGB",
+                "Filter" => lopdf::Object::Name(b"DCTDecode".to_vec()),
+            },
+            jpg.clone(),
+        )));
+        let resources_id = doc.add_object(dictionary! {
+            "XObject" => dictionary! { "Im0" => image_id },
+        });
+        let content_id = doc.add_object(Stream::new(dictionary! {}, b"q Q".to_vec()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+        });
+        doc.objects.insert(
+            pages_id,
+            lopdf::Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog_id);
+        let mut pdf = Vec::new();
+        doc.save_to(&mut pdf).unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("image.pdf");
+        std::fs::write(&path, &pdf).unwrap();
+
+        let conv = PdfiumConverter::new();
+        assert_eq!(conv.availability(), Availability::Available);
+        let result = conv.convert(Input::Path(path)).await.unwrap();
+        // Asset present, named per the shared images/{seq:04}-{sha8}.jpg
+        // convention, and referenced from the markdown body.
+        assert_eq!(result.assets.len(), 1, "one embedded image");
+        let asset = &result.assets[0];
+        assert!(
+            asset.filename.starts_with("images/0000-"),
+            "{}",
+            asset.filename
+        );
+        assert!(asset.filename.ends_with(".jpg"), "{}", asset.filename);
+        let sha8 = asset.sha8();
+        assert!(
+            asset.filename.contains(&sha8),
+            "filename {name} must embed sha8 {sha8}",
+            name = asset.filename
+        );
+        assert_eq!(asset.bytes[..2], [0xFF, 0xD8], "JPEG passthrough intact");
+        assert!(
+            result
+                .markdown
+                .contains(&format!("![image]({})", asset.filename)),
+            "markdown must reference the asset: {}",
+            result.markdown
+        );
+        assert_eq!(result.metadata["images_skipped"], 0);
     }
 }

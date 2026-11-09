@@ -177,7 +177,7 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | feature | Pulls in | Notes |
 | --- | --- | --- |
 | `mineru` | MinerU cloud PDF engine (reqwest/limiteron) | registered only after the endpoint is configured via `ALCHEMIZE_MINERU_URL` |
-| `pdfium` | local high-fidelity PDF engine (pdfium-render) | probes the dynamic library at runtime; falls back to pdf-extract |
+| `pdfium` | local high-fidelity PDF engine (pdfium-render) | probes the dynamic library at runtime; falls back to pdf-extract. Embedded images come from a lopdf structure walk (DCT/JPX passthrough, samples re-encoded to PNG, unsupported items counted explicitly) |
 | `libreoffice` | legacy binary Office engine (external soffice) | doc/rtf→docx and ppt/pps/pot→pptx, then the deep chain; degrades when absent |
 | `containers` | archive family (tar/tgz/gz/xz/zst/7z) | recursive conversion, magic-byte detection of the inner format |
 | `data` | structured data engines (parquet/sqlite/bib) | streaming parquet with a 100k-row cap, read-only sqlite, biblatex entries |

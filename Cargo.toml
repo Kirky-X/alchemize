@@ -1,7 +1,13 @@
 [workspace]
 resolver = "3"
 # third_party vendor 自成一体，不并入本工作区（避免多工作区根冲突）
-exclude = ["third_party/moli-html2md"]
+exclude = ["third_party/moli-html2md", "third_party/lopdf"]
+
+# lopdf vendor fork（third_party/lopdf/FORK.md）：流解压输出上限防解压炸弹。
+# pdf-extract 0.12.1 钉死 lopdf 0.42（无上限、无新版可升）；升级
+# lopdf ≥ 0.43 或 pdf-extract 接上限接口后移除本 patch。
+[patch.crates-io]
+lopdf = { path = "third_party/lopdf" }
 
 [workspace.package]
 version = "0.1.0"
@@ -53,8 +59,11 @@ cli = []
 mineru = ["dep:reqwest", "dep:limiteron", "dep:futures", "reqwest/multipart", "reqwest/stream"]
 # ASR：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
 asr = ["dep:vecboost", "dep:reqwest", "reqwest/multipart"]
-# pdfium 本地高保真 PDF 引擎（动态库运行时加载）
-pdfium = ["dep:pdfium-render"]
+# pdfium 本地高保真 PDF 引擎（动态库运行时加载）。图片提取走 lopdf 结构
+# 遍历（pdfium-render 0.5.9 安全层不暴露图片对象句柄）；image 用于样本→PNG
+# 重编码——image 已在依赖树内（pdfium-render 传递引用），零新增外部代码。
+# lopdf 为无条件依赖（炸弹防护标记 + 结构遍历共用 vendor fork），不在此声明。
+pdfium = ["dep:pdfium-render", "dep:image"]
 # LibreOffice headless 旧格式引擎（外部 soffice 二进制）
 libreoffice = []
 # 归档容器族（tar/tgz/gz/xz/zst/7z）
@@ -82,6 +91,9 @@ encoding_rs = { version = "0.8", default-features = false }
 htmd = { version = "0.5", default-features = false }
 aspasia = { version = "0.2", default-features = false }
 pdf-extract = { version = "0.12", default-features = false }
+# 直连 lopdf（[patch] 重定向到 third_party/lopdf 分叉）：转换后读取解压上限
+# 违规标记，防止 pdf-extract 吞掉 MemoryLimitExceeded 产出静默垃圾
+lopdf = { version = "0.42", default-features = false }
 quick-xml = { version = "0.42", default-features = false, features = ["serialize"] }
 rbook = { version = "0.7", default-features = false, features = ["threadsafe"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
@@ -109,6 +121,10 @@ url = { version = "2", default-features = false, features = ["std"], optional = 
 futures = { version = "0.3", default-features = false, features = ["std"], optional = true }
 # pdfium（Chrome PDF 引擎）绑定：运行时动态库加载，缺失降级
 pdfium-render = { version = "0.5", default-features = false, optional = true }
+# PDF 图片提取（feature pdfium）：结构遍历复用上方无条件 lopdf（vendor fork，
+# 见 [patch] 与 FORK.md）；样本→PNG 重编码用 image（pdfium-render 已传递引用，
+# 仅补显式声明）
+image = { version = "0.23", default-features = false, features = ["png", "jpeg"], optional = true }
 # 轮询退避原语：MinerU 三客户端共享 poll_delay 走 limiteron delay_for_attempt
 limiteron = { version = "0.3.0-rc.10", default-features = false, features = ["retry"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
@@ -136,6 +152,8 @@ http = { version = "1.5", default-features = false, features = ["std"] }
 proptest = { version = "1.0", default-features = false, features = ["std"] }
 tempfile = { version = "3", default-features = false, features = ["getrandom"] }
 tokio-test = { version = "0.4", default-features = false }
+# 炸弹 PDF 测试构造（lopdf 经 [patch] 解析到 third_party/lopdf 分叉，零新增供应链）
+flate2 = "1"
 
 [workspace.lints.rust]
 missing_docs = "allow"
