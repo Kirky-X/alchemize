@@ -9,8 +9,8 @@ pub mod eml;
 pub mod epub;
 pub mod gfm_render;
 pub mod html;
-#[cfg(feature = "moli")]
-pub mod html_moli;
+#[cfg(feature = "html-deep")]
+pub mod html_deep;
 pub mod ipynb;
 pub mod latex_source;
 pub mod office;

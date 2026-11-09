@@ -240,13 +240,13 @@ URL 校验拒绝的六类原因：`InvalidScheme`（非 HTTPS）、`LoopbackAddr
 - 模型探测：`ALCHEMIZE_TRANSCRIBE_MODELS` → 缺省 `~/.cache/alchemize/models/transcribe/`（布局 `qwen3-conv_frontend.onnx`、`qwen3-encoder.int8.onnx`、`qwen3-decoder.int8.onnx`、`silero_vad.onnx`、`tokenizer/`）；`ORT_DYLIB_PATH` 指向 onnxruntime 动态库。缺失时 provider 自述 `Unavailable` 并附获取指引，不自动联网。
 - 测试专用：`ALCHEMIZE_ASR_TEST_WAV`（集成测试输入路径）。
 
-### Moli（`moli` 特性）
+### HtmlDeep（`html-deep` 特性）
 
-- 装配产物：`html-moli` 引擎（exts html/htm，priority 15 压过 html/htmd）——吸收自 crawlrs 的 moli-html2md→htmd 转换链（`third_party/moli-html2md`，MIT OR Apache-2.0）。
-- 链语义：moli 主路径 →（主输出空且有可见文本）htmd 兜底（复用既有 html 引擎，含 math 保真）→ 双失败 `Err(Other)` 诚实上报；纯脚本/空壳页的空输出是正确抑制。
-- math 路由：含 `<math` 的输入整体直通既有 html 引擎（moli 会展平 LaTeX 数学；检测条件与 html.rs preprocess_math 触发条件一致）。
+- 装配产物：`html-deep` 引擎（exts html/htm，priority 15 压过 html/htmd）——本仓自研迭代状态机（`src/infrastructure/document/html_deep/engine/`，Apache-2.0）→ htmd 兜底转换链。
+- 链语义：自研引擎主路径 →（主输出空且有可见文本）htmd 兜底（复用既有 html 引擎，含 math 保真）→ 双失败 `Err(Other)` 诚实上报；纯脚本/空壳页的空输出是正确抑制。
+- math 路由：含 `<math` 标签的输入整体直通既有 html 引擎（引擎会将 MathML 净化为行内 HTML 而非 LaTeX；检测条件与 html.rs preprocess_math 触发条件一致）。
 - 可选语义：`base_url`（转换前链接绝对化，`#`/`mailto:`/`data:` 等前缀保留）与 `extract_main`（dom_smoothie 主内容提取，降级纯文本分支行首转义；失败/空诚实回退全页）。默认均关——保真优先。
-- 选项面：builder `with_moli(MoliEngineConfig{base_url, extract_main})`；CLI/MCP convert 参数 `--base-url` / `--extract-main`。
+- 选项面：builder `with_html_deep(HtmlDeepEngineConfig{base_url, extract_main})`；CLI/MCP convert 参数 `--base-url` / `--extract-main`。
 
 ### MCP（`mcp` 特性）
 

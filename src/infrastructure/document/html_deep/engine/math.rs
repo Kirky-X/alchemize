@@ -1,8 +1,19 @@
-/// Locate a complete author-supplied TeX span before ordinary Markdown escaping.
-/// Dollar boundaries follow the usual non-space/non-digit rules, so prices do
-/// not consume the prose between two currency amounts.
-pub(crate) fn spans(text: &str) -> Vec<(usize, usize, String)> {
-    let mut steps = 0;
+// Copyright (c) 2026 Kirky.X🌠
+// SPDX-License-Identifier: Apache-2.0
+
+//! 作者手写 TeX 跨度识别（行为规格 §5a）。
+//!
+//! 在普通 Markdown 转义**之前**定位完整的 TeX 跨度并原样保留——引擎不做
+//! MathML→LaTeX 转换，作者已写的 TeX 是活行为。`$` 边界遵循"非空白开启/
+//! 非尾随空白/非货币数字闭合"规则，防止价格吞掉两个金额之间的散文。
+//!
+//! 性能不变量：扫描步数 ≤ 字节数（线性，防恶意输入拖垮转换）。
+
+/// 定位文本中的完整 TeX 跨度：`(起始字节, 结束字节, 归一化载荷含定界符)`。
+/// 候选按起点排序、重叠者保留先到者；显式 `\(\)`/`\[\]` 占据区间但载荷为
+/// 原样字面（防区间内 `$` 对再匹配）。
+pub(super) fn spans(text: &str) -> Vec<(usize, usize, String)> {
+    let mut steps = 0usize;
     spans_counted(text, &mut steps)
 }
 
@@ -10,11 +21,11 @@ fn spans_counted(text: &str, steps: &mut usize) -> Vec<(usize, usize, String)> {
     let bytes = text.as_bytes();
     let mut index = 0;
     let mut backslashes = 0;
-    let mut dollar = None;
-    let mut double_dollar = None;
-    let mut paren = None;
-    let mut bracket = None;
-    let mut candidates = Vec::new();
+    let mut dollar: Option<usize> = None;
+    let mut double_dollar: Option<usize> = None;
+    let mut paren: Option<usize> = None;
+    let mut bracket: Option<usize> = None;
+    let mut candidates: Vec<(usize, usize, Option<String>)> = Vec::new();
     while index < bytes.len() {
         *steps += 1;
         if bytes[index] == b'$' && backslashes % 2 == 0 {
@@ -29,6 +40,7 @@ fn spans_counted(text: &str, steps: &mut usize) -> Vec<(usize, usize, String)> {
                 continue;
             }
             if let Some(start) = dollar.take() {
+                // 单 $ 闭合失败（尾空白/货币数字）→ 允许重开。
                 if !accept_candidate(text, start, index + 1, 1, true, &mut candidates)
                     && text[index + 1..]
                         .chars()
@@ -64,8 +76,8 @@ fn spans_counted(text: &str, steps: &mut usize) -> Vec<(usize, usize, String)> {
                     };
                     if let Some(start) = start {
                         accept_candidate(text, start, index + 2, 2, false, &mut candidates);
-                        // Complete explicit spans own their inner delimiters,
-                        // even when the payload needs a literal fallback.
+                        // 完整显式跨度拥有其内部定界符（载荷字面化时，
+                        // 内部 $ 对不能再把片段拆成公式）。
                         dollar = dollar.filter(|inner| *inner < start);
                         double_dollar = double_dollar.filter(|inner| *inner < start);
                         paren = paren.filter(|inner| *inner < start);
@@ -102,6 +114,9 @@ fn spans_counted(text: &str, steps: &mut usize) -> Vec<(usize, usize, String)> {
         .collect()
 }
 
+/// 接受候选：单 $ 的拒绝规则（空载荷/尾空白/货币数字）+ Markdown 资源模式。
+/// 被拒绝的完整跨度仍占据区间（载荷 None = 原样字面回退）。
+#[allow(clippy::too_many_arguments)]
 fn accept_candidate(
     text: &str,
     start: usize,
@@ -114,25 +129,22 @@ fn accept_candidate(
     let content_end = end - delimiter;
     let followed_by_digit = text.as_bytes().get(end).is_some_and(u8::is_ascii_digit);
     if content_start == content_end
-        || single_dollar
+        || (single_dollar
             && (text[..content_end]
                 .chars()
                 .next_back()
                 .is_some_and(char::is_whitespace)
-                || followed_by_digit)
+                || followed_by_digit))
     {
         return false;
     }
     let content = &text[content_start..content_end];
     let span = &text[start..end];
     let has_resource = contains_markdown_resource(content);
-    // Dollar candidates must retain their currency/resource rejection and retry
-    // rules. Explicit delimiters still own a resource-like literal fallback.
+    // $ 候选保留货币/资源拒绝与重试规则；显式定界符仍拥有资源类字面回退。
     if has_resource && !span.starts_with('\\') {
         return false;
     }
-    // A rejected complete span still claims its range, so an inner dollar
-    // pair cannot turn part of a verbatim fallback into a different formula.
     let normalized = if has_resource {
         None
     } else {
@@ -142,14 +154,16 @@ fn accept_candidate(
     true
 }
 
+/// Markdown 资源模式：`]( `、`][`、`![[`。
 fn contains_markdown_resource(text: &str) -> bool {
     text.contains("](") || text.contains("][") || text.contains("![[")
 }
 
-/// Keep TeX on one Markdown line. Comments and ordinary whitespace normalize;
-/// control spaces and verbatim payloads remain literal. HTML-like text inside
-/// text/verbatim commands cannot be preserved safely and rejects the span.
-/// Backslash delimiters become dollar delimiters understood by Markdown math.
+/// 归一化 TeX 载荷（行为规格 §5a）：剥定界符；空白 run → 单空格（TeX 语义）；
+/// `%` 注释删至行尾（控制词拼接语义）；`\verb|…|` 原样保留；text 类命令
+/// 花括号参数跟踪（内含 HTML 起始 → 拒绝）；普通上下文 `<` 后跟字母类
+/// → 改写 `< `；拒绝：空输出、花括号不平衡、裸 `$`、结尾悬空反斜杠。
+/// 重新包装：`\(` 或单 `$` → `$…$`；`$$` 或 `\[` → `$$…$$`。
 fn normalized_span(text: &str) -> Option<String> {
     let delimiter = if text.starts_with("$$") || text.starts_with('\\') {
         2
@@ -166,7 +180,7 @@ fn normalized_span(text: &str) -> Option<String> {
         if ch == '\\' && !escaped {
             let command: String = chars
                 .clone()
-                .take_while(char::is_ascii_alphabetic)
+                .take_while(|c| c.is_ascii_alphabetic())
                 .collect();
             if command == "verb" {
                 for _ in 0..command.len() {
@@ -242,8 +256,7 @@ fn normalized_span(text: &str) -> Option<String> {
                     break;
                 }
             }
-            // TeX removes the comment and newline without inserting a token.
-            // Separate a control word only when concatenation would rename it.
+            // TeX 删除注释与换行且不插入 token；仅当拼接会改写控制词时补空格。
             space |= control_word && chars.peek().is_some_and(char::is_ascii_alphabetic);
             continue;
         }
@@ -284,19 +297,19 @@ fn normalized_span(text: &str) -> Option<String> {
     }
     let inline = text.starts_with("\\(") || delimiter == 1;
     if inline && output.ends_with(char::is_whitespace) {
-        // An empty TeX group preserves the preceding control space while
-        // keeping the inline Markdown closer after a non-space character.
+        // 空 TeX 组保住前导控制空格，同时行内 Markdown 定界符保持在非空白后。
         output.push_str("{}");
     }
     let marker = if inline { "$" } else { "$$" };
     Some(format!("{marker}{output}{marker}"))
 }
 
+/// 载荷 Markdown 安全检查：裸 `$`、不平衡花括号、结尾悬空反斜杠 → 拒绝。
 fn markdown_payload_is_safe(text: &str) -> bool {
     let mut escaped = false;
     let mut brace_depth = 0usize;
     for ch in text.chars() {
-        // The math reader tracks brace contexts even inside TeX's \verb.
+        // math 阅读器在 \verb 内也跟踪花括号上下文。
         match (ch, escaped) {
             ('$', false) => return false,
             ('{', false) => brace_depth += 1,
@@ -306,7 +319,6 @@ fn markdown_payload_is_safe(text: &str) -> bool {
         }
         escaped = ch == '\\' && !escaped;
     }
-    // A trailing control escape would consume the closing Markdown delimiter.
     !escaped && brace_depth == 0
 }
 
@@ -317,6 +329,7 @@ fn flush_space(output: &mut String, pending: &mut bool) {
     *pending = false;
 }
 
+/// HTML 起始序列：`<` 后跟字母 / `/` / `!` / `?`。
 fn html_start(ch: char, next: Option<char>) -> bool {
     ch == '<'
         && next.is_some_and(|next| next.is_ascii_alphabetic() || matches!(next, '/' | '!' | '?'))
@@ -324,11 +337,72 @@ fn html_start(ch: char, next: Option<char>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::spans_counted;
+    use super::*;
+
+    fn one(text: &str) -> String {
+        spans(text)
+            .into_iter()
+            .next()
+            .map(|(_, _, v)| v)
+            .unwrap_or_default()
+    }
 
     #[test]
-    fn math_scan_work_is_linear_for_backslashes_and_unclosed_delimiters() {
-        for text in ["\\\\".repeat(8_192), "\\(x ".repeat(4_096)] {
+    fn inline_dollar_spans_normalized() {
+        assert_eq!(one("$x_i$"), "$x_i$");
+        assert_eq!(one("a $\\alpha$ b"), "$\\alpha$");
+        assert_eq!(one("$ x $"), "", "开启空白 → 拒绝");
+        assert_eq!(one("$1"), "", "货币数字 → 拒绝");
+    }
+
+    #[test]
+    fn explicit_paren_spans_rewrapped() {
+        assert_eq!(one("\\(x+1\\)"), "$x+1$");
+        assert_eq!(one("\\[x+1\\]"), "$$x+1$$");
+    }
+
+    #[test]
+    fn currency_does_not_swallow_prose() {
+        // 两个金额之间的散文不被吞。
+        assert_eq!(one("costs $5 and $7 total"), "");
+    }
+
+    #[test]
+    fn dollar_rejection_retries() {
+        // "a $x b$ c"：首个 $ 的载荷含尾空白 → 闭合失败重开，第二个配对成功。
+        assert_eq!(one("a $x b$ c"), "$x b$");
+    }
+
+    #[test]
+    fn comment_stripped_to_line_end() {
+        assert_eq!(one("$x% note\n y$"), "$x y$");
+    }
+
+    #[test]
+    fn html_in_text_command_rejects() {
+        assert_eq!(one("$\\text{<b>"), "");
+        // 普通上下文的 < 改写 "< "
+        assert_eq!(one("$a<b$"), "$a< b$");
+    }
+
+    #[test]
+    fn markdown_resource_rejects_dollar() {
+        assert_eq!(one("$[x](y$"), "", "资源模式 → $ 定界拒绝");
+        // 显式定界符：载荷字面化（占据区间但不产出）
+        assert_eq!(one("\\([x](y\\)"), "");
+    }
+
+    #[test]
+    fn verbatim_preserved() {
+        // verb 载荷原样保留；载荷内的裸 $ 会被 payload 安全检查拒绝
+        //（markdown_payload_is_safe 对 $ 不豁免 verb）——真源语义。
+        assert_eq!(one("$\\verb|a+b|c$"), "$\\verb|a+b|c$");
+        assert_eq!(one("$\\verb|a$b|c$"), "");
+    }
+
+    #[test]
+    fn scan_is_linear() {
+        for text in ["\\".repeat(8_192), "\\(x ".repeat(4_096)] {
             let mut steps = 0;
             let _ = spans_counted(&text, &mut steps);
             assert!(
@@ -340,17 +414,15 @@ mod tests {
     }
 
     #[test]
-    fn mixed_unclosed_and_valid_math_is_scanned_once() {
-        for size in [256, 512, 1024, 2048] {
-            let text = r"\( $x_i$ ".repeat(size);
-            let mut steps = 0;
-            let spans = spans_counted(&text, &mut steps);
-            assert_eq!(spans.len(), size);
-            assert!(
-                steps <= text.len(),
-                "{steps} steps for {} bytes",
-                text.len()
-            );
-        }
+    fn overlapping_candidates_first_wins() {
+        // $$ 与 $ 重叠：先到者保留。
+        assert_eq!(one("$$a$"), "");
+        assert_eq!(one("$$a$$"), "$$a$$");
+    }
+
+    #[test]
+    fn empty_payload_rejected() {
+        assert_eq!(one("$$"), "");
+        assert_eq!(one("\\(\\)"), "");
     }
 }

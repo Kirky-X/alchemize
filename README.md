@@ -141,7 +141,7 @@ alch formats
 | 演示文稿 | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `libreoffice`（仅旧二进制） |
 | 电子表格 | xlsx, xls, xlsb, ods | xlsx（calamine + numFmt 显示值） | — |
 | PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdfium` / `mineru` |
-| 网页 / 电子书 | html, htm / epub | html(htmd) → html-moli(15) / epub | `moli`（html-moli） |
+| 网页 / 电子书 | html, htm / epub | html(htmd) → html-deep(15) / epub | `html-deep`（html-deep） |
 | 纯文本 / 代码 | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 代码扩展 | text（围栏化） | — |
 | 表格文本 | csv, tsv, psv | csv（分隔符自探测） | — |
 | 标记语言 | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | — |
@@ -170,7 +170,7 @@ alch formats
 | --- | --- | --- |
 | 最小化 | `cargo build` | 纯本地转换，零外部服务依赖 |
 | 推荐 | `cargo build --features containers,data,eml,libreoffice` | + 归档/结构化数据/邮件/旧版 Office（soffice 存在时生效） |
-| 生产 | `cargo build --features full` | + MinerU 云端 PDF + 本地 ASR + html-moli |
+| 生产 | `cargo build --features full` | + MinerU 云端 PDF + 本地 ASR + html-deep |
 
 ### 📋 功能矩阵
 
@@ -184,8 +184,8 @@ alch formats
 | `eml` | 邮件引擎（mail-parser） | 头部/正文/附件清单 |
 | `asr` | vecboost 转录门面 + Whisper 兼容 API | Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
 | `mcp` | MCP 工具面（`alch-mcp` stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；CLI 封装（sdforge）恒在 |
-| `moli` | html-moli 引擎（crawlrs 吸收的 moli→htmd 转换链） | 主内容提取（`--extract-main`）与链接绝对化（`--base-url`）；含 LaTeX 数学的页面自动路由 htmd 保真 |
-| `full` | 以上全部（`mineru`+`asr`+`moli`+`containers`+`data`+`eml`+`libreoffice`） | |
+| `html-deep` | html-deep 自研引擎（迭代状态机 → htmd 兜底） | 主内容提取（`--extract-main`）与链接绝对化（`--base-url`）；含 LaTeX 数学的页面自动路由 htmd 保真 |
+| `full` | 以上全部（`mineru`+`asr`+`html-deep`+`containers`+`data`+`eml`+`libreoffice`） | |
 
 默认 `default = ["cli"]`（CLI 封装恒在）——feature 关闭的引擎根本不参与编译。
 

@@ -141,7 +141,7 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | Presentations | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `libreoffice` (legacy binary only) |
 | Spreadsheets | xlsx, xls, xlsb, ods | xlsx (calamine + numFmt display values) | — |
 | PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdfium` / `mineru` |
-| Web / e-book | html, htm / epub | html(htmd) → html-moli(15) / epub | `moli` (html-moli) |
+| Web / e-book | html, htm / epub | html(htmd) → html-deep(15) / epub | `html-deep` (html-deep) |
 | Plain text / code | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 code extensions | text (fenced) | — |
 | Tabular text | csv, tsv, psv | csv (delimiter sensing) | — |
 | Markup languages | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | — |
@@ -170,7 +170,7 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | --- | --- | --- |
 | Minimal | `cargo build` | pure local conversion, zero external services |
 | Recommended | `cargo build --features containers,data,eml,libreoffice` | + archives / structured data / e-mail / legacy Office (needs soffice) |
-| Production | `cargo build --features full` | + MinerU cloud PDF + local ASR + html-moli |
+| Production | `cargo build --features full` | + MinerU cloud PDF + local ASR + html-deep |
 
 ### 📋 Feature Matrix
 
@@ -184,8 +184,8 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | `eml` | e-mail engine (mail-parser) | headers / body / attachment list |
 | `asr` | vecboost transcription facade + Whisper-compatible API | Qwen3-ASR ONNX + silero VAD, path dependency on sibling crate vecboost |
 | `mcp` | MCP tool surface (`alch-mcp` stdio server) | convert/doctor/formats exposed as MCP tools; CLI wrapping (sdforge) always on |
-| `moli` | html-moli engine (moli→htmd chain absorbed from crawlrs) | main-content extraction (`--extract-main`) and link absolutization (`--base-url`); pages with LaTeX math auto-route to htmd for fidelity |
-| `full` | all of the above (`mineru`+`asr`+`moli`+`containers`+`data`+`eml`+`libreoffice`) | |
+| `html-deep` | html-deep engine (native iterative state machine → htmd fallback) | main-content extraction (`--extract-main`) and link absolutization (`--base-url`); pages with LaTeX math auto-route to htmd for fidelity |
+| `full` | all of the above (`mineru`+`asr`+`html-deep`+`containers`+`data`+`eml`+`libreoffice`) | |
 
 Default is `default = ["cli"]` (CLI wrapping always on) — engines behind disabled features are not compiled at all.
 

@@ -56,7 +56,7 @@ cargo build --features full
 | `anydoc` | office 全格式后端（firecrawl/anydoc, MIT） | priority 15，压过原生 office 解析 |
 | `asr` | vecboost 转录门面（Qwen3-ASR ONNX + silero VAD） | 需模型 bundle + `ORT_DYLIB_PATH` |
 | `mcp` | MCP 工具面（alch-mcp，rmcp stdio） | CLI 封装（sdforge cli）恒在 |
-| `moli` | html-moli 引擎（third_party/moli-html2md，crawlrs 吸收链） | scraper/ego-tree/dom_smoothie 同批可选 |
+| `html-deep` | html-deep 自研引擎（`document/html_deep/engine/`） | scraper/ego-tree/dom_smoothie/icu_properties 同批可选 |
 | `full` | 以上全部 | |
 
 ### 构建与测试

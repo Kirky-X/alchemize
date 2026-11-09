@@ -20,7 +20,7 @@ use alchemize::domain::error::AlchemizeError;
 use alchemize::domain::input::Input;
 
 /// 平移自原 main.rs：按环境变量与参数组装门面；base_url/extract_main 仅在
-/// moli feature 构建下生效（未编译时诚实告警，不静默吞选项）。
+/// html-deep feature 构建下生效（未编译时诚实告警，不静默吞选项）。
 fn build_alch(
     no_remote: bool,
     asset_mode: AssetMode,
@@ -32,18 +32,18 @@ fn build_alch(
         builder = builder.with_no_remote();
     }
     if base_url.is_some() || extract_main {
-        #[cfg(feature = "moli")]
+        #[cfg(feature = "html-deep")]
         {
-            builder = builder.with_moli(alchemize::MoliEngineConfig {
+            builder = builder.with_html_deep(alchemize::HtmlDeepEngineConfig {
                 base_url,
                 extract_main,
             });
         }
-        #[cfg(not(feature = "moli"))]
+        #[cfg(not(feature = "html-deep"))]
         {
             let _ = (&base_url, &extract_main);
             eprintln!(
-                "warning: --base-url/--extract-main require a build with --features moli; options ignored"
+                "warning: --base-url/--extract-main require a build with --features html-deep; options ignored"
             );
         }
     }

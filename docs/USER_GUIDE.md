@@ -88,7 +88,7 @@ alch formats
 | `html` / `epub` / `ipynb` | html/htm、epub、ipynb | 结构化文本解析 |
 | `docx` / `pptx` / `xlsx` | OOXML 族（+xls/ods） | 原生 XML + calamine |
 | `pdf` | pdf | pdf-extract 文本 + TOC 剔除/结构启发 |
-| `html-moli`（feature `moli`） | html/htm | moli→htmd 转换链（crawlrs 吸收）；`--extract-main` 主内容提取、`--base-url` 链接绝对化；含 `<math` 自动路由 htmd 保真 |
+| `html-deep`（feature `html-deep`） | html/htm | 自研迭代状态机 → htmd 兜底；`--extract-main` 主内容提取、`--base-url` 链接绝对化；含 `<math` 自动路由 htmd 保真 |
 | `anydoc`（feature） | office 全格式 + 旧版二进制 Office | priority 15 压过原生解析 |
 | `mineru`（feature+配置） | pdf | 云端高保真，链尾 |
 | `latex-source` | tex/latex | pandoc 探测，缺失时围栏兜底 |
@@ -169,7 +169,7 @@ srt/vtt/ass/ssa 原生解析（aspasia），输出时间码列表，不经 ffmpe
 
 图片视觉与音频转录都是端口：`with_vision_provider(Arc<dyn VisionProvider>)`、`with_transcribe_provider(Arc<dyn TranscribeProvider>)`。不注入时对应转换降级为元数据 markdown（含尺寸/时长/哈希），无内置云兜底。
 
-### 🧲 主内容提取与链接绝对化（feature `moli`）
+### 🧲 主内容提取与链接绝对化（feature `html-deep`）
 
 ```bash
 # 只转正文（readability 提取，去导航/页脚噪声；失败诚实回退全页）
@@ -179,7 +179,7 @@ alch convert saved-page.html --extract-main
 alch convert saved-page.html --base-url "https://origin.example/path/"
 ```
 
-引擎内部为 moli→htmd 转换链：moli 主路径输出空但有可见文本时自动落 htmd；含 `<math` 的页面自动路由既有 htmd 引擎保 LaTeX。
+引擎内部为自研状态机 → htmd 兜底链：引擎主路径输出空但有可见文本时自动落 htmd；含 `<math` 标签的页面自动路由既有 htmd 引擎保 LaTeX。
 
 **适用指引**（真实存档实测：Wikipedia 1MB 页 -71%、docs.rs 索引页 -89%、营销首页 -30%、法律文本页 -2%）：
 

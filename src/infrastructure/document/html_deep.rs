@@ -1,161 +1,25 @@
-// Copyright (c) 2025-2026 Kirky.X🌠
+// Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! `html-moli` 引擎 —— 吸收自 crawlrs 的 html→markdown 能力（feature `moli`）。
+//! `html-deep` 引擎 —— 自研 HTML→Markdown 转换链（feature `html-deep`）。
 //!
-//! 来源（crawlrs，Apache-2.0，本文件保留原版权年份区间）：
-//! - `src/domain/services/markdown/{converter_chain,moli_adapter,moli_converter}.rs`
-//!   —— moli 主 + htmd 兜底的转换链语义（空输出防呆、迭代式 DOM 遍历、诚实降级）
-//! - `src/workers/markdown_post_processor.rs` —— absoluteize_links 与
-//!   escape_leading_markdown_chars（逐函数移植）
-//! - 主内容提取：dom_smoothie（readability 移植，crates.io 依赖）
+//! 主路径为本仓自研迭代状态机引擎（`html_deep/engine`，Apache-2.0，行为
+//! 规格经差分验证，见 specmark 变更 `selfhost-html-engine`）；本文件是
+//! 转换器适配层：链接绝对化、主内容提取（dom_smoothie）、math 保真路由、
+//! 空输出防呆 → htmd 兜底的双失败诚实链。
 //!
-//! 与 crawlrs 的差异：
-//! - 兜底不是独立 htmd 服务，而是复用本仓 HtmlConverter（含 LaTeX 数学保真）；
-//! - 含数学特征（alttext）的输入整体路由 HtmlConverter——moli 会展平数学，
-//!   路由比兼容更诚实；
-//! - extract_main / base_url 为显式选项（保真优先的文档转换器，提取默认关）。
+//! 与引擎的分工：
+//! - 引擎只做"只读 DOM → Markdown"（不可失败、迭代遍历、无实体解码）；
+//! - 本层做可选预处理（`--base-url` 链接绝对化、`--extract-main` 主内容
+//!   提取 + 读屏器子树过滤）与降级链（提取失败/空输出诚实回退）。
 
-use moli_html2md::{Dom, NodeKind};
-use scraper::node::Node;
+mod engine;
 
 use super::html::HtmlConverter;
 use crate::application::ports::Converter as _;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
-
-/// `scraper::Html`（html5ever 树）→ `moli_html2md::Dom` 适配器
-/// （移植自 crawlrs moli_adapter.rs，测试随迁）。
-///
-/// 契约（上游 `Dom` trait，只读视图、不二次解码实体）：
-/// - `node_kind`：Document/Fragment → Document；Element → 小写局部名；Text → 已解码文本；
-///   注释/doctype/处理指令 → Other；**懒加载占位图 → Other**（见 `is_placeholder_img`）
-/// - `first_child` / `next_sibling`：ego_tree 直接映射（scraper 内部树，NodeId Copy）
-/// - `attribute`：大小写不敏感匹配（scraper 属性名已小写化，双保险）
-/// - `control_value` / `has_block_layout` / `has_text_boundary`：保留 trait 默认实现
-///   （None/false）——静态 HTML 无计算样式，接了就是假数据（诚实降级）
-pub struct ScraperDom<'a> {
-    doc: &'a scraper::Html,
-}
-
-impl<'a> ScraperDom<'a> {
-    pub fn new(doc: &'a scraper::Html) -> Self {
-        Self { doc }
-    }
-}
-
-/// 懒加载占位图判定（解析器级，ScraperDom 专属视图约定）。
-///
-/// 懒加载站点（BBC 等）的每个图片位先给一张禁用-JS 场景的灰色占位图
-/// （`hide-when-no-script` 类），JS 就绪后由浏览器隐藏并换上真图。静态转换
-/// 不执行 JS，两张 img 都会被遍历——把占位图判成 Other 让 moli 状态机
-/// 整体跳过（不产出、不进子树），等效于浏览器「有 JS 视图」。
-///
-/// 判据（URL 关键词，方案 A）：src 含 `placeholder` / `spacer`，或 data: URI
-/// 小图（≤64 字节的 base64 载荷约一张 1×1 像素）。各站占位图命名高度趋同，
-/// 误伤面可忽略；srcSet/src 为真图的节点不命中。
-fn is_placeholder_img(el: &scraper::node::Element) -> bool {
-    if el.name() != "img" {
-        return false;
-    }
-    let Some(src) = el.attr("src") else {
-        return false;
-    };
-    let lower = src.to_ascii_lowercase();
-    if lower.contains("placeholder") || lower.contains("spacer") {
-        return true;
-    }
-    // data:image/...;base64,<载荷>：1×1 透明 PNG/GIF 的 base64 载荷 ≤ 100 字符
-    lower.starts_with("data:image/")
-        && lower
-            .rsplit("base64,")
-            .next()
-            .map(|payload| payload.len() <= 100)
-            .unwrap_or(false)
-}
-
-impl Dom for ScraperDom<'_> {
-    type NodeId = ego_tree::NodeId;
-
-    fn node_kind(&self, node: Self::NodeId) -> NodeKind<'_> {
-        match self.doc.tree.get(node).map(|n| n.value()) {
-            Some(Node::Document) | Some(Node::Fragment) => NodeKind::Document,
-            // scraper 的 Element::name() 即 html5ever 归一化后的小写局部名
-            Some(Node::Element(el)) if is_placeholder_img(el) => NodeKind::Other,
-            Some(Node::Element(el)) => NodeKind::Element(el.name()),
-            // scraper 的 Text 节点在解析时已完成实体解码（StrTendril 明文）
-            Some(Node::Text(text)) => NodeKind::Text(text.text.as_ref()),
-            Some(Node::Comment(_))
-            | Some(Node::Doctype(_))
-            | Some(Node::ProcessingInstruction(_)) => NodeKind::Other,
-            // 无效 NodeId：按契约归 Other（不 panic——上游约定 invalid IDs 走 Other）
-            None => NodeKind::Other,
-        }
-    }
-
-    fn first_child(&self, node: Self::NodeId) -> Option<Self::NodeId> {
-        self.doc
-            .tree
-            .get(node)
-            .and_then(|n| n.first_child())
-            .map(|n| n.id())
-    }
-
-    fn next_sibling(&self, node: Self::NodeId) -> Option<Self::NodeId> {
-        self.doc
-            .tree
-            .get(node)
-            .and_then(|n| n.next_sibling())
-            .map(|n| n.id())
-    }
-
-    fn attribute(&self, node: Self::NodeId, name: &str) -> Option<&str> {
-        self.doc
-            .tree
-            .get(node)?
-            .value()
-            .as_element()?
-            .attrs()
-            .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v)
-    }
-}
-
-/// 输入 HTML 是否含可见文本（决定空输出是否异常、兜底是否该触发）。
-///
-/// 移植自 crawlrs converter_chain.rs：从 `<body>` 子树扫描（head 内 title 不算
-/// 可见正文），跳过 script/style/template/noscript；存在非空白 Text 即视为可见
-/// 内容。**显式栈迭代**：DOM 深度不得进入 Rust 调用栈——递归实现会在 2MiB 栈上
-/// 被万级嵌套（release 实测 20000 层）击穿并 abort 进程。
-fn has_visible_text(html: &str) -> bool {
-    let doc = scraper::Html::parse_document(html);
-    let root = doc.tree.root();
-    let body = root
-        .descendants()
-        .find(|n| matches!(n.value(), Node::Element(e) if e.name() == "body"));
-    let start = body.unwrap_or(root);
-    let mut stack = vec![start];
-    while let Some(node) = stack.pop() {
-        match node.value() {
-            Node::Text(t) => {
-                if !t.text.trim().is_empty() {
-                    return true;
-                }
-            }
-            Node::Element(el) => {
-                const SKIP: [&str; 4] = ["script", "style", "template", "noscript"];
-                if SKIP.contains(&el.name()) {
-                    continue;
-                }
-                stack.extend(node.children());
-            }
-            Node::Document | Node::Fragment => stack.extend(node.children()),
-            _ => {}
-        }
-    }
-    false
-}
 
 /// 读屏器隐藏文本的约定类名片段（小写匹配）。这些元素对人类不可见、仅供
 /// 辅助技术（如 BBC 的 `VisuallyHidden-styles__…` 哈希类），主内容提取前
@@ -181,12 +45,11 @@ fn strip_screen_reader_only(html: &str) -> String {
     let mut doc = scraper::Html::parse_document(html);
     let mut doomed = Vec::new();
     for node in doc.tree.nodes() {
-        if let Node::Element(el) = node.value() {
-            if let Some(class) = el.attr("class") {
-                if class.split_ascii_whitespace().any(is_screen_reader_class) {
-                    doomed.push(node.id());
-                }
-            }
+        if let scraper::node::Node::Element(el) = node.value()
+            && let Some(class) = el.attr("class")
+            && class.split_ascii_whitespace().any(is_screen_reader_class)
+        {
+            doomed.push(node.id());
         }
     }
     if doomed.is_empty() {
@@ -201,8 +64,7 @@ fn strip_screen_reader_only(html: &str) -> String {
     doc.html()
 }
 
-/// 把 HTML 中相对的 href/src 重写为基于 `base_url` 的绝对 URL
-/// （移植自 crawlrs markdown_post_processor.rs）。
+/// 把 HTML 中相对的 href/src 重写为基于 `base_url` 的绝对 URL。
 ///
 /// 锚点/协议相对/数据/邮件等非相对目标原样保留；base 解析失败时原样返回。
 fn absoluteize_links(html: &str, base_url: &str) -> String {
@@ -213,7 +75,7 @@ fn absoluteize_links(html: &str, base_url: &str) -> String {
         Err(e) => {
             // 诚实降级：base 非法时链接不改写，但操作者必须知道（否则会误以为
             // 链接已绝对化）。
-            tracing::warn!(%e, "html-moli: base_url is not a valid URL; links left unchanged");
+            tracing::warn!(%e, "html-deep: base_url is not a valid URL; links left unchanged");
             return html.to_string();
         }
     };
@@ -243,10 +105,20 @@ fn absoluteize_links(html: &str, base_url: &str) -> String {
         .into_owned()
 }
 
-/// 纯文本分支的最小 Markdown 转义——仅转义行首会误渲染为结构的字符
-/// （ATX 标题 #、引用 >、无序列表 - + *、有序列表 "1."）
-/// （移植自 crawlrs markdown_post_processor.rs，逐字保留）。
+/// 纯文本分支的最小转义——先做 HTML 实体化（`& < >`：dom_smoothie 的
+/// text_content 是已解码纯文本，字面 `<script>` 直出会在启用原生 HTML 的
+/// Markdown 渲染器中执行——安全审查 MEDIUM 修复），再转义行首会误渲染为
+/// 结构的字符（ATX 标题 #、引用 >、无序列表 - + *、有序列表 "1."）。
 fn escape_leading_markdown_chars(text: &str) -> String {
+    fn escape_html(ch: char, out: &mut String) {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            c => out.push(c),
+        }
+    }
+
     fn needs_escape(trimmed: &str) -> bool {
         if trimmed.starts_with('#') || trimmed.starts_with('>') {
             return true;
@@ -268,26 +140,70 @@ fn escape_leading_markdown_chars(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for line in text.split_inclusive('\n') {
         let leading = line.len() - line.trim_start().len();
-        if needs_escape(line.trim_start()) {
+        // 整行 HTML 实体化；行首结构标记中仅 `>` 会被实体化成惰性的
+        // `&gt;`（无需反斜杠），其余（#/-/+/=/数字.）仍需反斜杠前缀。
+        let first_visible = line[leading..].chars().next();
+        let prefix_backslash =
+            needs_escape(line.trim_start()) && first_visible.is_some_and(|c| c != '>');
+        if prefix_backslash {
             out.push_str(&line[..leading]);
             out.push('\\');
-            out.push_str(&line[leading..]);
         } else {
-            out.push_str(line);
+            out.push_str(&line[..leading]);
+        }
+        for ch in line[leading..].chars() {
+            escape_html(ch, &mut out);
         }
     }
     out
 }
 
-/// html-moli 引擎：moli-html2md 主 + HtmlConverter（htmd，含 math 保真）兜底
-/// 的转换链，可选主内容提取（dom_smoothie）与链接绝对化。
-pub struct HtmlMoliConverter {
+/// 输入 HTML 是否含可见文本（决定空输出是否异常、兜底是否该触发）。
+///
+/// 从 `<body>` 子树扫描（head 内 title 不算可见正文），跳过 script/style/
+/// template/noscript；存在非空白 Text 即视为可见内容。**显式栈迭代**：
+/// DOM 深度不得进入 Rust 调用栈——递归实现会在 2MiB 栈上被万级嵌套
+/// （release 实测 20000 层）击穿并 abort 进程。
+fn has_visible_text(html: &str) -> bool {
+    let doc = scraper::Html::parse_document(html);
+    let root = doc.tree.root();
+    let body = root
+        .descendants()
+        .find(|n| matches!(n.value(), scraper::node::Node::Element(e) if e.name() == "body"));
+    let start = body.unwrap_or(root);
+    let mut stack = vec![start];
+    while let Some(node) = stack.pop() {
+        match node.value() {
+            scraper::node::Node::Text(t) => {
+                if !t.text.trim().is_empty() {
+                    return true;
+                }
+            }
+            scraper::node::Node::Element(el) => {
+                const SKIP: [&str; 4] = ["script", "style", "template", "noscript"];
+                if SKIP.contains(&el.name()) {
+                    continue;
+                }
+                stack.extend(node.children());
+            }
+            scraper::node::Node::Document | scraper::node::Node::Fragment => {
+                stack.extend(node.children())
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// html-deep 引擎：自研引擎主 + HtmlConverter（htmd，含 math 保真）兜底的
+/// 转换链，可选主内容提取（dom_smoothie）与链接绝对化。
+pub struct HtmlDeepConverter {
     html: HtmlConverter,
     base_url: Option<String>,
     extract_main: bool,
 }
 
-impl HtmlMoliConverter {
+impl HtmlDeepConverter {
     /// `base_url`：提供时对输入 HTML 预处理链接绝对化；`extract_main`：开启时
     /// 先经 dom_smoothie 提取主内容（失败/空诚实回退全页）。
     pub fn new(base_url: Option<String>, extract_main: bool) -> Self {
@@ -298,10 +214,8 @@ impl HtmlMoliConverter {
         }
     }
 
-    /// dom_smoothie 主内容提取：产出纯文本（非空），失败返回 Err。
-    /// （移植自 crawlrs dom_smoothie_extractor 的调用形态。）
-    /// dom_smoothie 主内容提取：产出（清理后正文 HTML，纯文本）。两者任一非空
-    /// 即提取成功——HTML 分支可保段落/图片/链接结构，纯文本仅作其降级。
+    /// dom_smoothie 主内容提取：产出（清理后正文 HTML，纯文本）。两者任一
+    /// 非空即提取成功——HTML 分支可保段落/图片/链接结构，纯文本仅作其降级。
     fn extract_main_content(&self, html: &str) -> Result<(String, String), String> {
         let trimmed = html.trim();
         if trimmed.is_empty() {
@@ -321,17 +235,11 @@ impl HtmlMoliConverter {
         Ok((content_html, text))
     }
 
-    /// StructuredHtml 分支：清理后正文 HTML → moli 状态机转换（保留段落/
+    /// StructuredHtml 分支：清理后正文 HTML → 自研引擎转换（保留段落/
     /// 图片/链接结构）。同步段独立作用域（ego_tree 非 Send，不跨 await）。
     fn convert_structured_html(&self, content_html: &str) -> Option<String> {
         let doc = scraper::Html::parse_document(content_html.trim());
-        let root = doc.tree.root();
-        let dom = ScraperDom::new(&doc);
-        let converter = moli_html2md::Converter::new(moli_html2md::Options {
-            max_depth: usize::MAX,
-            ..Default::default()
-        });
-        let markdown = converter.convert(&dom, root.id());
+        let markdown = super::html_deep::engine::convert(&doc);
         if markdown.trim().is_empty() {
             None
         } else {
@@ -341,9 +249,9 @@ impl HtmlMoliConverter {
 }
 
 #[async_trait::async_trait]
-impl crate::application::ports::Converter for HtmlMoliConverter {
+impl crate::application::ports::Converter for HtmlDeepConverter {
     fn name(&self) -> &'static str {
-        "html-moli"
+        "html-deep"
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
@@ -354,9 +262,11 @@ impl crate::application::ports::Converter for HtmlMoliConverter {
         let html = String::from_utf8(bytes)
             .map_err(|e| AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}")))?;
 
-        // math 保真路由：moli 会展平 LaTeX 数学；检测条件与 html.rs
-        // preprocess_math 的触发条件（`<math` 标签）严格一致，保证「preprocess
-        // 会处理的输入必然路由到 math 保真路径」。
+        // math 保真路由：引擎会展平 `<math>`（MathML 净化为行内 HTML，非
+        // LaTeX）；检测条件与 html.rs preprocess_math 的触发条件（`<math`
+        // 标签）严格一致，保证「preprocess 会处理的输入必然路由到 math
+        // 保真路径」。（$..$ 文本无 `<math>` 标签，由引擎自身的 TeX 跨度
+        // 保留覆盖。）
         if html.contains("<math") {
             return self.html.convert(input).await;
         }
@@ -367,8 +277,8 @@ impl crate::application::ports::Converter for HtmlMoliConverter {
             _ => html,
         };
 
-        // 主内容提取（显式开启）：crawlrs MainContentSource 三分支同构——
-        // ① StructuredHtml：清理后正文 HTML → moli 转换（段落/图片/链接保留）；
+        // 主内容提取（显式开启）：三分支同构——
+        // ① StructuredHtml：清理后正文 HTML → 引擎转换（段落/图片/链接保留）；
         // ② PlainText 降级：text_content 行首转义直出（无结构）；
         // ③ 全页回退：提取失败/双产皆空时走完整转换链。
         // 提取前先删读屏器隐藏子树（对人类不可见的 "Site search" 类文本）；
@@ -393,29 +303,21 @@ impl crate::application::ports::Converter for HtmlMoliConverter {
                     }
                     // 双产皆空：诚实回退全页（不静默吞）。
                     tracing::warn!(
-                        "html-moli: extraction produced empty output, falling back to full page"
+                        "html-deep: extraction produced empty output, falling back to full page"
                     );
                 }
                 Err(reason) => {
-                    tracing::warn!(reason = %reason, "html-moli: main-content extraction failed, falling back to full page");
+                    tracing::warn!(reason = %reason, "html-deep: main-content extraction failed, falling back to full page");
                 }
             }
         }
 
-        // 全页转换：moli 主路径（html5ever 错误恢复解析，convert 本身不可失败）。
-        // 同步段独立作用域：scraper 的 ego_tree 为 Rc 树（非 Send），不得跨越
-        // 下方 htmd 兜底的 await 点——本块结束即 drop。
+        // 全页转换：自研引擎主路径（html5ever 错误恢复解析，convert 本身
+        // 不可失败）。同步段独立作用域：scraper 的 ego_tree 为 Rc 树
+        // （非 Send），不得跨越下方 htmd 兜底的 await 点——本块结束即 drop。
         let primary = {
             let doc = scraper::Html::parse_document(html.trim());
-            let root = doc.tree.root();
-            let dom = ScraperDom::new(&doc);
-            // max_depth 上限解除：moli 遍历是迭代式（无 Rust 栈风险），默认 1000
-            // 会静默丢弃深层子树（crawlrs 实测）。
-            let converter = moli_html2md::Converter::new(moli_html2md::Options {
-                max_depth: usize::MAX,
-                ..Default::default()
-            });
-            converter.convert(&dom, root.id())
+            super::html_deep::engine::convert(&doc)
         };
 
         self.finish_full_page(&html, input, primary).await
@@ -426,16 +328,16 @@ impl crate::application::ports::Converter for HtmlMoliConverter {
     }
 
     /// priority 15：压过既有 html/htmd 引擎（10）——
-    /// feature moli 构建下 moli 链是 html 的首选路径。
+    /// feature html-deep 构建下本链是 html 的首选路径。
     fn priority(&self) -> u8 {
         15
     }
 }
 
-impl HtmlMoliConverter {
+impl HtmlDeepConverter {
     /// 全页转换尾部：兜底决策（空输出防呆 → htmd 兜底 → 双失败诚实报错）
-    /// 与结果装配。`primary` 由调用方传入 moli 输出——独立成函数使兜底决策
-    /// 可注入空 primary 直接单测（moli 本身鲁棒，天然触发器罕见）。
+    /// 与结果装配。`primary` 由调用方传入引擎输出——独立成函数使兜底决策
+    /// 可注入空 primary 直接单测（引擎本身鲁棒，天然触发器罕见）。
     pub(crate) async fn finish_full_page(
         &self,
         html: &str,
@@ -473,7 +375,7 @@ impl HtmlMoliConverter {
 
         // 有可见文本而主输出空白：保真异常，htmd 兜底。
         tracing::warn!(
-            "html-moli: primary produced empty output with visible text, falling back to htmd"
+            "html-deep: primary produced empty output with visible text, falling back to htmd"
         );
         // 兜底路径的 HtmlConverter 对空输出恒注入占位文本（*HTML document
         // contains no extractable content.*）——「双空」的可观察终态即占位文本
@@ -488,12 +390,12 @@ impl HtmlMoliConverter {
     }
 }
 
-#[cfg(all(test, feature = "moli"))]
+#[cfg(all(test, feature = "html-deep"))]
 mod tests {
     use super::*;
 
-    fn engine() -> HtmlMoliConverter {
-        HtmlMoliConverter::new(None, false)
+    fn engine() -> HtmlDeepConverter {
+        HtmlDeepConverter::new(None, false)
     }
 
     fn page_input(html: &str) -> Input {
@@ -520,7 +422,7 @@ mod tests {
         assert_eq!(result.quality, ConversionQuality::LocalFallback);
     }
 
-    /// escape_leading_markdown_chars 确定性单测（逐字移植自 crawlrs）：
+    /// escape_leading_markdown_chars 确定性单测：
     /// 六类行首标记转义、行首空白保留、非行首不转义。
     #[test]
     fn escape_leading_verbatim_semantics() {
@@ -528,7 +430,7 @@ mod tests {
         assert_eq!(escape_leading_markdown_chars("42. answer"), "\\42. answer");
         assert_eq!(escape_leading_markdown_chars("1."), "\\1.");
         assert_eq!(escape_leading_markdown_chars("# head"), "\\# head");
-        assert_eq!(escape_leading_markdown_chars("> quote"), "\\> quote");
+        assert_eq!(escape_leading_markdown_chars("> quote"), "&gt; quote");
         assert_eq!(escape_leading_markdown_chars("- bullet"), "\\- bullet");
         assert_eq!(escape_leading_markdown_chars("+ plus"), "\\+ plus");
         assert_eq!(escape_leading_markdown_chars("* star"), "\\* star");
@@ -544,10 +446,17 @@ mod tests {
             "-1. negative"
         );
         assert_eq!(escape_leading_markdown_chars("plain"), "plain");
+        // HTML 实体化：已解码的裸标签不得直出（XSS 防护）
+        assert_eq!(
+            escape_leading_markdown_chars("<script>alert(1)</script>"),
+            "&lt;script&gt;alert(1)&lt;/script&gt;"
+        );
+        assert_eq!(escape_leading_markdown_chars("a&b"), "a&amp;b");
+        assert_eq!(escape_leading_markdown_chars("# <tag>"), "\\# &lt;tag&gt;");
     }
 
     /// 防呆负例：纯脚本页面主输出空 → 正确抑制，不触发兜底（无占位文本、
-    /// 质量仍为 LocalFull——这是 moli 路径的正常空输出）。
+    /// 质量仍为 LocalFull——这是引擎路径的正常空输出）。
     #[tokio::test]
     async fn script_only_page_suppresses_without_fallback() {
         let html = "<html><body><script>yo();</script></body></html>";
@@ -620,7 +529,7 @@ mod tests {
             <nav><span class="sr-only">Site search</span><a href="/">Home</a></nav>
             <article><h1>Title</h1><p>body words</p></article>
         </body></html>"#;
-        let extracted = HtmlMoliConverter::new(None, true)
+        let extracted = HtmlDeepConverter::new(None, true)
             .convert(page_input(html))
             .await
             .unwrap();
@@ -636,55 +545,8 @@ mod tests {
         );
     }
 
-    /// 懒加载占位图判定：URL 关键词与 data: 小图命中；真图与非 img 不命中。
-    #[test]
-    fn is_placeholder_img_judgement() {
-        fn el_from(html: &str) -> scraper::node::Element {
-            let doc = scraper::Html::parse_fragment(html);
-            // parse_fragment 会包出 html/body 包装元素——必须精确选 img，
-            // find_map 首个 Element 是包装节点。
-            let found = doc.tree.nodes().find_map(|n| match n.value() {
-                Node::Element(el) if el.name() == "img" => Some(el.clone()),
-                _ => None,
-            });
-            if found.is_none() {
-                eprintln!("PROBE el_from: no img in {html:?}");
-            }
-            found.expect("test helper: input must contain an <img>")
-        }
-        // BBC 灰色占位图（真页形态）
-        assert!(is_placeholder_img(&el_from(
-            r#"<img src="https://static.files.bbci.co.uk/bbcdotcom/web/x/grey-placeholder.png" aria-label="image unavailable"/>"#,
-        )));
-        // 通用 spacer
-        assert!(is_placeholder_img(&el_from(
-            r#"<img src="/assets/spacer.gif"/>"#,
-        )));
-        // 1×1 data: 透明图（懒加载占位另一常见形态）
-        assert!(is_placeholder_img(&el_from(
-            r#"<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"/>"#,
-        )));
-        // 真图：srcSet 站点的 src 是真 URL
-        assert!(!is_placeholder_img(&el_from(
-            r#"<img src="https://ichef.bbci.co.uk/news/480/cpsprodpb/x.jpg.webp" alt="real photo"/>"#,
-        )));
-        // 误伤面：非 img 元素与无 src 的 img 绝不命中（el_from 专找 img，
-        // div 负例需独立构造）。
-        let doc = scraper::Html::parse_fragment(r#"<div src="/x/spacer.gif"/>"#);
-        let div = doc
-            .tree
-            .nodes()
-            .find_map(|n| match n.value() {
-                Node::Element(el) => Some(el.clone()),
-                _ => None,
-            })
-            .unwrap();
-        assert!(!is_placeholder_img(&div), "non-img must never match");
-        assert!(!is_placeholder_img(&el_from(r#"<img alt="no src"/>"#)));
-    }
-
-    /// 解析器级端到端：全页路径下占位图也不产出（ScraperDom 视图层判定，
-    /// 两条 moli 路径——提取与全页——同时生效，无需各自过滤）。
+    /// 懒加载占位图判定已在引擎层（ScraperDom 视图约定随引擎吸收迁移）；
+    /// 此处验证解析器级端到端：全页路径下占位图也不产出。
     #[tokio::test]
     async fn placeholder_img_dropped_in_full_page_path() {
         let html = r#"<html><body>

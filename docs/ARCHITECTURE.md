@@ -47,7 +47,7 @@ flowchart TB
     end
     subgraph INFRA["infrastructure/"]
         ENG["engines.rs 引擎装配（feature → 引擎列表）"]
-        DOC["document/：text csv html epub docx pptx xlsx ipynb<br/>latex_source pdf anydoc anydoc_render zip<br/>shared（detect_encoding 等共享原语）"]
+        DOC["document/：text csv html-deep html epub docx pptx xlsx ipynb<br/>latex_source pdf anydoc anydoc_render zip<br/>shared（detect_encoding 等共享原语）"]
         MEDIA["media/：image audio video subtitle subtitle_converter<br/>timeline dedup asr（vecboost · whisper_api）"]
         REMOTE["remote/mineru/：client factory agent precision<br/>backoff http_limit validated_url types wrapper"]
         TOOLS["tools/：pandoc（外部二进制探测）"]
@@ -82,7 +82,7 @@ flowchart TB
 | `application/ports.rs` | 四个端口 trait + `Availability` + `Transcript`（VAD 段级转录，明确不含说话人归属）+ `which_program()` PATH 探测 |
 | `application/registry.rs` | 优先级降序注册、fallback 链尝试、attempts 记录、`metadata.converter` 注入 |
 | `application/builder.rs` | `AlchemizeBuilder` → `Alchemize` 门面（convert / convert_pref / availability / engines / asset_sink_for）；zip 门面特判 |
-| `infrastructure/document/` | text（纯文本 + ~45 扩展名代码围栏）、csv（分隔符自探测）、html、epub、docx/pptx/xlsx（原生 XML）、latex-source（pandoc 探测 + 围栏兜底）、pdf（pdf-extract + TOC 剔除/结构启发）、anydoc_render（自研 GFM 渲染器）、shared（detect_encoding：UTF-8 → CJK 优先探测 → lossy 兜底） |
+| `infrastructure/document/` | text（纯文本 + ~45 扩展名代码围栏）、csv（分隔符自探测）、html-deep（自研迭代状态机 → htmd 兜底，feature `html-deep`）、html、epub、docx/pptx/xlsx（原生 XML）、latex-source（pandoc 探测 + 围栏兜底）、pdf（lopdf + TOC 剔除/结构启发）、anydoc_render（自研 GFM 渲染器）、shared（detect_encoding：UTF-8 → CJK 优先探测 → lossy 兜底） |
 | `infrastructure/media/` | image / audio / video（ffmpeg 抽轨）/ subtitle（srt/vtt/ass/ssa 原生解析）/ timeline / dedup（视频帧去重） |
 | `infrastructure/remote/mineru/` | 云端 PDF 后端（见[特性门控模块](#特性门控模块)） |
 | `infrastructure/tools/` | pandoc 外部二进制探测（构建时缺席、运行时探测） |
@@ -94,6 +94,7 @@ flowchart TB
 | `anydoc` | `infrastructure/document/anydoc.rs` | office 全格式后端（firecrawl/anydoc, MIT），含旧版二进制 Office（doc/ppt/…）；priority 15 压过原生解析；图片按文档序经自研 `anydoc_render` 渲染 |
 | `mineru` | `infrastructure/remote/mineru/` | 云端 PDF：`client`/`factory`（按文件大小选 agent/precision 客户端）、`backoff`（limiteron 轮询退避）、`http_limit`（响应体积分级上限）、`validated_url`（SSRF 校验）、`wrapper`（Converter 适配，priority 5 链尾） |
 | `asr` | `infrastructure/media/asr/` | `vecboost.rs`（自研 transcribe 门面：Qwen3-ASR ONNX 三件套 + silero VAD，path 依赖兄弟仓）与 `whisper_api.rs`（Whisper 兼容云端后端，仅显式注入激活） |
+| `html-deep` | `infrastructure/document/html_deep/` | 自研迭代状态机（HTML→Markdown）+ htmd 兜底，priority 15 压过 html(10)；`--extract-main`/`--base-url` |
 
 feature 关闭的引擎根本不出现在 `engines.rs` 装配列表中；`mineru` 还需配置端点（`ALCHEMIZE_MINERU_URL` 或库 API `with_mineru`）才注册。
 
