@@ -27,6 +27,17 @@ const MAX_PAGES: u32 = 4096;
 /// Maximum parent hops when resolving inherited `/Resources`.
 const MAX_PARENT_HOPS: u8 = 16;
 
+/// Maximum image entries per document — the aggregate-memory budget the
+/// per-stream 64 MiB cap cannot provide. Mirrors the container family's
+/// total-bytes tier (`containers::MAX_TOTAL_BYTES`).
+const MAX_IMAGES: usize = 256;
+
+/// Maximum cumulative decompressed image bytes per document.
+const MAX_TOTAL_IMAGE_BYTES: usize = 256 * 1024 * 1024;
+
+/// Skip-ledger cap: keep the first 32 reasons, then count the overflow.
+const MAX_SKIP_REASONS: usize = 32;
+
 /// One distinct embedded image XObject.
 pub struct ImageEntry {
     /// Encoded bytes (JPEG / JP2 passthrough, or PNG re-encode).
@@ -69,15 +80,21 @@ pub fn extract_page_images(bytes: &[u8]) -> Extraction {
         positions: Vec::new(),
         skipped: Vec::new(),
         seen: HashMap::new(),
+        total_bytes: 0,
+        skip_overflow: 0,
     };
     for (page_no, id) in doc.get_pages() {
         if page_no > MAX_PAGES {
-            walker
-                .skipped
-                .push(format!("page tree truncated at {MAX_PAGES} pages"));
+            walker.push_skip(format!("page tree truncated at {MAX_PAGES} pages"));
             break;
         }
         walker.walk_page(page_no, id);
+    }
+    if walker.skip_overflow > 0 {
+        walker.skipped.push(format!(
+            "... and {} more skipped (ledger capped at {MAX_SKIP_REASONS})",
+            walker.skip_overflow
+        ));
     }
     Extraction {
         entries: walker.entries,
@@ -94,6 +111,10 @@ struct Walker<'a> {
     skipped: Vec<String>,
     /// XObject id → entry index; repeated references share one entry.
     seen: HashMap<ObjectId, usize>,
+    /// Cumulative decompressed bytes kept in `entries` (budget tracking).
+    total_bytes: usize,
+    /// Reasons beyond `MAX_SKIP_REASONS` (appended as one final entry).
+    skip_overflow: usize,
 }
 
 impl Walker<'_> {
@@ -108,7 +129,7 @@ impl Walker<'_> {
         let xobjects: Dictionary = match self.deref(xobj_obj).as_dict() {
             Ok(d) => d.clone(),
             Err(e) => {
-                self.skipped.push(format!(
+                self.push_skip(format!(
                     "page {}: /XObject not a dict ({e})",
                     page_index + 1
                 ));
@@ -117,17 +138,40 @@ impl Walker<'_> {
         };
 
         for (name, value) in xobjects.iter() {
+            if self.entries.len() >= MAX_IMAGES {
+                self.push_skip(format!(
+                    "image budget exhausted (>{} images), remaining skipped",
+                    MAX_IMAGES
+                ));
+                return;
+            }
+            // Non-Image XObjects (e.g. Form) are not images at all: not
+            // ledger material. Images nested inside Form XObjects are out
+            // of scope for this walk (documented limitation).
+            let is_image = self
+                .doc
+                .dereference(value)
+                .ok()
+                .and_then(|(_, o)| o.as_stream().ok())
+                .and_then(|s| s.dict.get(b"Subtype").ok())
+                .and_then(|o| self.doc.dereference(o).ok())
+                .and_then(|(_, o)| o.as_name().ok())
+                .map(|n| n == b"Image")
+                .unwrap_or(false);
+            if !is_image {
+                continue;
+            }
             let (id, obj) = match self.doc.dereference(value) {
                 Ok((Some(id), obj)) => (id, obj),
                 Ok((None, _)) => {
-                    self.skipped.push(format!(
+                    self.push_skip(format!(
                         "page {}: image {name:?} has no object id",
                         page_index + 1
                     ));
                     continue;
                 }
                 Err(e) => {
-                    self.skipped.push(format!(
+                    self.push_skip(format!(
                         "page {}: image {name:?} unresolved ({e})",
                         page_index + 1
                     ));
@@ -137,7 +181,7 @@ impl Walker<'_> {
             let stream = match obj.as_stream() {
                 Ok(s) => s,
                 Err(e) => {
-                    self.skipped.push(format!(
+                    self.push_skip(format!(
                         "page {}: image {name:?} not a stream ({e})",
                         page_index + 1
                     ));
@@ -150,18 +194,38 @@ impl Walker<'_> {
                 self.positions.push((page_index, idx));
                 continue;
             }
-            match decode_image(self.doc, stream, page_index, name) {
+            match decode_image(self.doc, stream) {
                 Ok(entry) => {
+                    if self.total_bytes + entry.bytes.len() > MAX_TOTAL_IMAGE_BYTES {
+                        self.push_skip(format!(
+                            "page {}: image {name:?}: total image budget exhausted",
+                            page_index + 1
+                        ));
+                        continue;
+                    }
+                    self.total_bytes += entry.bytes.len();
                     let idx = self.entries.len();
                     self.entries.push(entry);
                     self.seen.insert(id, idx);
                     self.positions.push((page_index, idx));
                 }
                 Err(reason) => {
-                    self.skipped
-                        .push(format!("page {}: image {name:?}: {reason}", page_index + 1));
+                    self.push_skip(format!(
+                        "page {}: image {name:?}: {reason}",
+                        page_index + 1
+                    ));
                 }
             }
+        }
+    }
+
+    /// Ledger push with the 32-reason cap; overflow is counted, then
+    /// summarized as one final entry by [`extract_page_images`].
+    fn push_skip(&mut self, reason: String) {
+        if self.skipped.len() < MAX_SKIP_REASONS {
+            self.skipped.push(reason);
+        } else {
+            self.skip_overflow += 1;
         }
     }
 
@@ -190,12 +254,7 @@ impl Walker<'_> {
 ///
 /// Free function so the `&mut self` walker never fights the `&Document`
 /// borrow that produced `stream`.
-fn decode_image(
-    doc: &Document,
-    stream: &lopdf::Stream,
-    _page_index: u32,
-    _name: &[u8],
-) -> Result<ImageEntry, String> {
+fn decode_image(doc: &Document, stream: &lopdf::Stream) -> Result<ImageEntry, String> {
     let dict = &stream.dict;
 
     let width = int_of(dict.get(b"Width").ok(), doc);
@@ -210,11 +269,10 @@ fn decode_image(
     }
 
     let filters = filter_names(dict, doc);
-    let raw = stream.content.clone();
     let samples: Vec<u8> = match filters.as_slice() {
-        [] => raw,
-        [f] if f == b"DCTDecode" => raw,
-        [f] if f == b"JPXDecode" => raw,
+        [] => stream.content.clone(),
+        [f] if f == b"DCTDecode" => stream.content.clone(),
+        [f] if f == b"JPXDecode" => stream.content.clone(),
         [f] if f == b"FlateDecode" => stream
             .decompressed_content()
             .map_err(|e| format!("flate decode failed: {e}"))?,
@@ -230,12 +288,21 @@ fn decode_image(
     };
 
     if matches!(filters.as_slice(), [f] if f == b"DCTDecode") {
+        // Passthrough must actually be a JPEG: reject mislabeled streams
+        // (arbitrary bytes must not land on disk as .jpg).
+        if !samples.starts_with(&[0xFF, 0xD8, 0xFF]) {
+            return Err("DCTDecode stream is not a JPEG (magic bytes missing)".into());
+        }
         return Ok(ImageEntry {
             ext: "jpg",
             bytes: samples,
         });
     }
     if matches!(filters.as_slice(), [f] if f == b"JPXDecode") {
+        // JP2 signature box: 00 00 00 0C 6A 50 20 20.
+        if !samples.starts_with(&[0x00, 0x00, 0x00, 0x0C, b'j', b'P', b' ', b' ']) {
+            return Err("JPXDecode stream is not JPEG 2000 (signature box missing)".into());
+        }
         return Ok(ImageEntry {
             ext: "jp2",
             bytes: samples,
@@ -254,7 +321,7 @@ fn decode_image(
             samples.len()
         ));
     }
-    let png = encode_png(&samples, width as u32, height as u32, channels)
+    let png = encode_png(samples, width as u32, height as u32, channels)
         .ok_or_else(|| "PNG encode failed".to_string())?;
     Ok(ImageEntry {
         ext: "png",
@@ -318,21 +385,13 @@ fn colorspace_channels(dict: &Dictionary, doc: &Document) -> Option<usize> {
 }
 
 /// Re-encode 8bpc samples as PNG (RGB 3ch or Gray 1ch).
-fn encode_png(samples: &[u8], width: u32, height: u32, channels: usize) -> Option<Vec<u8>> {
+fn encode_png(samples: Vec<u8>, width: u32, height: u32, channels: usize) -> Option<Vec<u8>> {
     let mut out = std::io::Cursor::new(Vec::new());
     let result = match channels {
-        3 => image::DynamicImage::ImageRgb8(image::ImageBuffer::from_raw(
-            width,
-            height,
-            samples.to_vec(),
-        )?)
-        .write_to(&mut out, image::ImageOutputFormat::Png),
-        1 => image::DynamicImage::ImageLuma8(image::ImageBuffer::from_raw(
-            width,
-            height,
-            samples.to_vec(),
-        )?)
-        .write_to(&mut out, image::ImageOutputFormat::Png),
+        3 => image::DynamicImage::ImageRgb8(image::ImageBuffer::from_raw(width, height, samples)?)
+            .write_to(&mut out, image::ImageOutputFormat::Png),
+        1 => image::DynamicImage::ImageLuma8(image::ImageBuffer::from_raw(width, height, samples)?)
+            .write_to(&mut out, image::ImageOutputFormat::Png),
         _ => return None,
     };
     result.ok()?;
@@ -498,6 +557,69 @@ mod tests {
         assert!(ex.entries.is_empty());
         assert!(
             ex.skipped[0].contains("lopdf parse failed"),
+            "{:?}",
+            ex.skipped
+        );
+    }
+
+    #[test]
+    fn image_budget_exhaustion_stops_with_reason() {
+        // 300 distinct 4x4 image XObjects on one page: the 256-entry
+        // aggregate budget must stop the walk with an explicit reason.
+        let mut doc = Document::with_version("1.4");
+        let pages_id = doc.new_object_id();
+        let payload = encoded_jpeg();
+        let mut xobj = lopdf::Dictionary::new();
+        for i in 0..300u32 {
+            let mut d = image_dict(Some("DCTDecode"), "DeviceRGB");
+            d.set("Name", format!("img{i}"));
+            xobj.set(format!("Im{i}"), Object::Reference(doc.add_object(Object::Stream(
+                Stream::new(d, payload.clone()),
+            ))));
+        }
+        let resources_id = doc.add_object(dictionary! { "XObject" => xobj });
+        let content_id = doc.add_object(Stream::new(dictionary! {}, b"q Q".to_vec()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog_id);
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+
+        let ex = extract_page_images(&buf);
+        assert_eq!(ex.entries.len(), 256, "budget caps entries");
+        assert!(
+            ex.skipped.iter().any(|r| r.contains("budget exhausted")),
+            "{:?}",
+            ex.skipped
+        );
+    }
+
+    #[test]
+    fn mislabeled_dct_stream_rejected_by_magic_bytes() {
+        // Arbitrary payload labeled DCTDecode must not land on disk as .jpg.
+        let pdf = fixture_pdf(
+            image_dict(Some("DCTDecode"), "DeviceRGB"),
+            b"<html>not a jpeg</html>".to_vec(),
+        );
+        let ex = extract_page_images(&pdf);
+        assert!(ex.entries.is_empty(), "no asset for mislabeled stream");
+        assert!(
+            ex.skipped
+                .iter()
+                .any(|r| r.contains("magic bytes missing")),
             "{:?}",
             ex.skipped
         );

@@ -497,7 +497,7 @@ mod tests {
         use flate2::write::ZlibEncoder;
         use std::io::Write;
 
-        let mut encoder = ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        let mut encoder = ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
         let block = vec![0_u8; 1024 * 1024];
         for _ in 0..100 {
             encoder.write_all(&block).unwrap();

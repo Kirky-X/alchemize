@@ -160,35 +160,43 @@ fn extract_all(
 ) -> Result<(String, Vec<Asset>, usize, Vec<String>), AlchemizeError> {
     // Image extraction first: pure Rust, no pdfium involvement, and its
     // lopdf failure is a skip reason rather than a conversion failure.
-    let extraction = crate::infrastructure::document::pdf_images::extract_page_images(bytes);
+    let mut extraction = crate::infrastructure::document::pdf_images::extract_page_images(bytes);
+    // One sha per entry (not per position): a large image referenced on
+    // many pages hashes exactly once. Naming goes through `Asset::sha8`
+    // so the hash and the `images/{seq:04}-{sha8}.{ext}` contract cannot
+    // drift apart.
     let mut assets: Vec<Asset> = Vec::new();
     let mut by_sha: HashMap<String, String> = HashMap::new();
-    let mut page_refs: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+    let mut entry_ref: Vec<String> = vec![String::new(); extraction.entries.len()];
     let mut seq: usize = 0;
-    for (page, entry) in &extraction.positions {
-        let image = &extraction.entries[*entry];
-        let sha8 = sha8_hex(&image.bytes);
+    for (idx, image) in extraction.entries.iter_mut().enumerate() {
+        let bytes = std::mem::take(&mut image.bytes);
+        let ext = image.ext;
+        let mut asset = Asset::new(String::new(), bytes);
+        let sha8 = asset.sha8();
         let reference = if let Some(existing) = by_sha.get(&sha8) {
             existing.clone()
         } else {
-            let r = format!("images/{seq:04}-{sha8}.{}", image.ext);
+            asset.filename = format!("images/{seq:04}-{sha8}.{ext}");
             seq += 1;
+            let r = asset.filename.clone();
             by_sha.insert(sha8, r.clone());
-            assets.push(Asset::new(r.clone(), image.bytes.clone()));
+            assets.push(asset);
             r
         };
-        page_refs.entry(*page).or_default().push(reference);
+        entry_ref[idx] = reference;
+    }
+    let mut page_refs: BTreeMap<u32, Vec<String>> = BTreeMap::new();
+    for (page, entry) in &extraction.positions {
+        if let Some(r) = entry_ref.get(*entry as usize)
+            && !r.is_empty()
+        {
+            page_refs.entry(*page).or_default().push(r.clone());
+        }
     }
 
     let (markdown, page_count) = extract(library, bytes, &page_refs)?;
     Ok((markdown, assets, page_count, extraction.skipped))
-}
-
-/// Leading 8 hex chars of the SHA-256 digest (mirrors `Asset::sha8`).
-fn sha8_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(bytes);
-    digest[..4].iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Line-extraction internals.
