@@ -1,19 +1,19 @@
 // Copyright (c) 2025-2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! html-moli 引擎测试（feature `moli`）：转换链兜底触发、空输出防呆、
-//! math 保真路由、主内容提取、链接绝对化。吸收自 crawlrs 能力的行为契约
-//! 见 specmark/specs/html-moli/spec.md。
+//! html-deep 引擎测试（feature `html-deep`）：转换链兜底触发、空输出防呆、
+//! math 保真路由、主内容提取、链接绝对化。引擎行为契约
+//! 见 specmark/specs/html-deep/spec.md。
 
-#![cfg(feature = "moli")]
+#![cfg(feature = "html-deep")]
 
-use alchemize::application::builder::{AlchemizeBuilder, AssetMode, MoliEngineConfig};
+use alchemize::application::builder::{AlchemizeBuilder, AssetMode, HtmlDeepEngineConfig};
 use alchemize::application::ports::Converter;
 use alchemize::domain::input::Input;
-use alchemize::infrastructure::document::html_moli::HtmlMoliConverter;
+use alchemize::infrastructure::document::html_deep::HtmlDeepConverter;
 
-fn engine(base_url: Option<String>, extract_main: bool) -> HtmlMoliConverter {
-    HtmlMoliConverter::new(base_url, extract_main)
+fn engine(base_url: Option<String>, extract_main: bool) -> HtmlDeepConverter {
+    HtmlDeepConverter::new(base_url, extract_main)
 }
 
 fn html_input(html: &str) -> Input {
@@ -35,11 +35,11 @@ async fn math_pages_route_to_htmd_engine() {
         <annotation encoding="application/x-tex">E=mc^2</annotation></math></p></body></html>"##;
 
     let legacy = alchemize::infrastructure::document::html::HtmlConverter::new();
-    let moli_engine = engine(None, false);
+    let deep_engine = engine(None, false);
     for page in [alttext_page, annotation_page] {
         let input = html_input(page);
         let want = legacy.convert(input.clone()).await.unwrap();
-        let got = moli_engine.convert(input).await.unwrap();
+        let got = deep_engine.convert(input).await.unwrap();
         assert_eq!(
             want.markdown, got.markdown,
             "math 页必须与既有 html 引擎输出一致: {page}"
@@ -60,12 +60,12 @@ async fn script_only_page_yields_empty_without_fallback() {
     );
 }
 
-/// 兜底正例：moli 空输出 + 有可见文本 → 触发 htmd 兜底（占位文本来自
+/// 兜底正例：引擎空输出 + 有可见文本 → 触发 htmd 兜底（占位文本来自
 /// 既有 html 引擎，证明走了兜底而非抑制）。
 #[tokio::test]
 async fn full_page_conversion_goes_through_primary_path() {
     // 兜底安全网（空输出防呆）为 pub(crate) 内部函数，其注入式单测在
-    // src/infrastructure/document/html_moli.rs 的 #[cfg(test)] 模块内。
+    // src/infrastructure/document/html_deep.rs 的 #[cfg(test)] 模块内。
     let html = r#"<html><body><p>real visible words</p></body></html>"#;
     let result = engine(None, false).convert(html_input(html)).await.unwrap();
     assert!(
@@ -122,7 +122,7 @@ async fn extract_main_drops_chrome_and_keeps_structure() {
     );
 }
 
-/// 提取失败诚实回退全页：dom_smoothie 无法产出正文时走 moli→htmd 链。
+/// 提取失败诚实回退全页：dom_smoothie 无法产出正文时走引擎→htmd 链。
 #[tokio::test]
 async fn extraction_failure_falls_back_to_full_page() {
     // 无 article/正文语义的稀疏页面：提取大概率失败/空 → 回退全页仍能
@@ -177,16 +177,16 @@ async fn base_url_absoluteizes_relative_links() {
     );
 }
 
-/// 注册面：with_moli 构建后引擎名 html-moli 可见于 engines()。
+/// 注册面：with_html_deep 构建后引擎名 html-deep 可见于 engines()。
 #[tokio::test]
 async fn engine_registered_via_builder() {
     let alch = AlchemizeBuilder::new()
         .with_asset_mode(AssetMode::Dir)
-        .with_moli(MoliEngineConfig::default())
+        .with_html_deep(HtmlDeepEngineConfig::default())
         .build();
     assert!(
-        alch.engines().contains(&"html-moli"),
-        "html-moli must register: {:?}",
+        alch.engines().contains(&"html-deep"),
+        "html-deep must register: {:?}",
         alch.engines()
     );
 }
