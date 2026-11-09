@@ -108,6 +108,9 @@ pub struct Alchemize {
     zip: Option<crate::infrastructure::document::ZipConverter>,
     asset_mode: AssetMode,
     no_remote: bool,
+    /// Input size ceiling enforced at the facade before any dispatch
+    /// (`with_max_file_size`; default 100 MB).
+    max_file_size: usize,
 }
 
 impl Alchemize {
@@ -122,6 +125,18 @@ impl Alchemize {
         input: &Input,
         prefer: Option<&str>,
     ) -> Result<ConvertResult, AlchemizeError> {
+        // Facade-level size ceiling: single point covering the registry
+        // dispatch and the zip branch (nested entries included). A `None`
+        // size (unreadable metadata) is not intercepted — the later read
+        // fails naturally.
+        if let Some(len) = input.len()
+            && len as usize > self.max_file_size
+        {
+            return Err(AlchemizeError::Other(format!(
+                "input size {len} bytes exceeds max_file_size {} bytes",
+                self.max_file_size
+            )));
+        }
         if matches!(input.extension().as_deref(), Some("zip") | Some("cbz")) {
             if let Some(ref zip) = self.zip {
                 use crate::application::ports::Converter as _;
@@ -283,7 +298,6 @@ impl AlchemizeBuilder {
             self.vision_provider.clone(),
             self.transcribe_provider.clone(),
             self.video_mode,
-            self.max_file_size,
             &self.moli,
         ) {
             registry.register(converter);
@@ -291,16 +305,20 @@ impl AlchemizeBuilder {
 
         // Shared registry: the facade and the zip converter (nested
         // conversion) use the same engine set; zip is not a member itself.
+        // Nested entries bypass the facade's size check (they hit the
+        // registry directly), so the ceiling travels with the converter.
         let registry = std::sync::Arc::new(registry);
         let zip = crate::infrastructure::document::ZipConverter::with_arc(std::sync::Arc::clone(
             &registry,
-        ));
+        ))
+        .with_max_entry_size(self.max_file_size);
 
         Alchemize {
             registry,
             zip: Some(zip),
             asset_mode: self.asset_mode,
             no_remote: self.no_remote,
+            max_file_size: self.max_file_size,
         }
     }
 }
@@ -365,5 +383,30 @@ mod tests {
             VideoProcessingMode::default(),
             VideoProcessingMode::AudioOnly
         );
+    }
+
+    #[tokio::test]
+    async fn max_file_size_rejects_oversized_bytes_input() {
+        let alch = AlchemizeBuilder::new().build();
+        let oversized = Input::bytes(vec![0u8; DEFAULT_MAX_FILE_SIZE + 1], "big.bin");
+        let err = alch.convert(&oversized).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("exceeds max_file_size"), "{msg}");
+        assert!(msg.contains(&DEFAULT_MAX_FILE_SIZE.to_string()), "{msg}");
+
+        // Just under the ceiling passes the facade check (text engine).
+        let ok = Input::bytes(b"hello".to_vec(), "ok.txt");
+        assert!(alch.convert(&ok).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn max_file_size_is_configurable() {
+        let alch = AlchemizeBuilder::new().with_max_file_size(10).build();
+        let input = Input::bytes(vec![0u8; 11], "big.bin");
+        assert!(alch.convert(&input).await.is_err());
+
+        let alch = AlchemizeBuilder::new().with_max_file_size(1 << 20).build();
+        let input = Input::bytes(vec![0u8; 11], "ok.txt");
+        assert!(alch.convert(&input).await.is_ok());
     }
 }

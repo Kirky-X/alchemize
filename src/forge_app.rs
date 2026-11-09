@@ -177,8 +177,18 @@ async fn convert(
             std::fs::write(&path, &result.markdown)
                 .map_err(|e| map_error(AlchemizeError::Other(format!("write failed: {e}"))))?;
             // Dir mode: write extracted assets at their converter-assigned
-            // names next to the output.
+            // names next to the output. The write boundary validates the
+            // converter-provided filename first: an illegal name is a hard
+            // error, not a silent rewrite (rewriting would desynchronize
+            // the markdown reference from the file on disk).
             for asset in &result.assets {
+                if let Err(reason) =
+                    alchemize::domain::asset::validate_asset_filename(&asset.filename)
+                {
+                    return Err(map_error(AlchemizeError::Other(format!(
+                        "asset filename rejected by write boundary: {reason}"
+                    ))));
+                }
                 let asset_path = path
                     .parent()
                     .unwrap_or(std::path::Path::new("."))

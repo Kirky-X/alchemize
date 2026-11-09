@@ -16,6 +16,8 @@ use crate::infrastructure::document::{CsvConverter, TextConverter};
 /// Assemble the default engine list from configuration and feature flags.
 ///
 /// - `mineru`: MinerU remote engines; `None` (or feature off) omits them.
+///   Input size enforcement lives at the facade (`Alchemize::convert_pref`),
+///   not per-converter.
 /// - `vision` / `transcribe`: optional providers; `None` degrades those
 ///   converters to metadata-only markdown.
 pub fn default_converters(
@@ -23,7 +25,6 @@ pub fn default_converters(
     vision: Option<Arc<dyn VisionProvider>>,
     transcribe: Option<Arc<dyn TranscribeProvider>>,
     video_mode: VideoProcessingMode,
-    _max_file_size: usize,
     moli: &Option<crate::application::builder::MoliEngineConfig>,
 ) -> Vec<Box<dyn Converter>> {
     let mut engines: Vec<Box<dyn Converter>> = Vec::new();
@@ -191,7 +192,6 @@ pub fn default_converters(
     // here (nested support wired when the registry is fully assembled — the
     // CLI layer constructs zip with a clone of the final registry).
     let _ = mineru; // wired by the MinerU migration task
-    let _ = _max_file_size;
     #[cfg(not(feature = "moli"))]
     let _ = moli;
     engines

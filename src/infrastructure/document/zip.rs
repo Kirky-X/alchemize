@@ -22,6 +22,11 @@ use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 /// metadata as skipped, never silently dropped from the record).
 pub struct ZipConverter {
     registry: Arc<ConverterRegistry>,
+    /// Nested-entry size ceiling in bytes (`None` = unbounded). Entries
+    /// over it are skipped with an explicit count — the zip counterpart of
+    /// the facade-level `max_file_size`, which nested conversion bypasses
+    /// (this converter calls the registry directly).
+    max_entry_size: Option<usize>,
 }
 
 impl ZipConverter {
@@ -29,12 +34,23 @@ impl ZipConverter {
     pub fn new(registry: ConverterRegistry) -> Self {
         Self {
             registry: Arc::new(registry),
+            max_entry_size: None,
         }
     }
 
     /// Create with an existing shared registry.
     pub fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            max_entry_size: None,
+        }
+    }
+
+    /// Set the nested-entry size ceiling (bytes). Over-ceiling entries are
+    /// skipped and counted, not converted.
+    pub fn with_max_entry_size(mut self, max: usize) -> Self {
+        self.max_entry_size = Some(max);
+        self
     }
 }
 
@@ -58,6 +74,7 @@ impl Converter for ZipConverter {
         let mut attachments: Vec<String> = Vec::new();
         let mut assets: Vec<crate::domain::asset::Asset> = Vec::new();
 
+        let mut skipped_oversize: usize = 0;
         for (filename, content) in extracted_files {
             let nested_input = Input::Bytes {
                 data: content.clone(),
@@ -65,6 +82,24 @@ impl Converter for ZipConverter {
                 mimetype: None,
                 extension: None,
             };
+
+            // Entry-level size ceiling: nested conversion calls the
+            // registry directly and would otherwise bypass the facade's
+            // max_file_size — enforce the same ceiling here.
+            if let Some(max) = self.max_entry_size
+                && content.len() > max
+            {
+                skipped_oversize += 1;
+                markdown_parts.push(format!("### {filename}\n"));
+                markdown_parts.push(format!(
+                    "> Skipped: {} bytes exceeds the nested-entry limit of {} bytes.\n",
+                    content.len(),
+                    max
+                ));
+                markdown_parts.push(String::new());
+                attachments.push(filename);
+                continue;
+            }
 
             match self.registry.convert(&nested_input).await {
                 Ok(result) => {
@@ -108,6 +143,7 @@ impl Converter for ZipConverter {
             "source_format": "zip",
             "file_count": file_count,
             "converted_count": converted_count,
+            "skipped_oversize": skipped_oversize,
             "attachments": attachments,
         });
 
@@ -198,6 +234,21 @@ mod tests {
         let input = Input::bytes(create_zip_bytes(&[]), "empty.zip");
         let result = converter.convert(input).await.unwrap();
         assert!(result.markdown.contains("no convertible files"));
+    }
+
+    #[tokio::test]
+    async fn oversize_nested_entry_skipped_with_count() {
+        let big = vec![0u8; 64];
+        let zip_data = create_zip_bytes(&[("big.txt", &big), ("ok.txt", b"tiny")]);
+        let converter = ZipConverter::with_arc(registry_with_text()).with_max_entry_size(16);
+        let result = converter
+            .convert(Input::bytes(zip_data, "t.zip"))
+            .await
+            .unwrap();
+        assert_eq!(result.metadata["skipped_oversize"], 1);
+        assert!(result.markdown.contains("exceeds the nested-entry limit"));
+        assert!(result.markdown.contains("tiny"), "within-limit entry still converts");
+        assert_eq!(result.metadata["converted_count"], 1);
     }
 
     #[tokio::test]

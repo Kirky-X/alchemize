@@ -661,15 +661,6 @@ fn collect_all_text(xml: &[u8]) -> String {
     out.trim().to_string()
 }
 
-/// Leading 8 hex chars of SHA-256 (mirrors `Asset::sha8`).
-fn sha8_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    digest[..4].iter().map(|b| format!("{b:02x}")).collect()
-}
-
 /// Rewrite `ImageSource::Asset(idx)` into sha8-named `images/…` references
 /// (the DOCX convention) and collect named assets in first-reference
 /// order. Identical bytes reuse the first reference.
@@ -726,7 +717,7 @@ fn rewrite_inlines(
             continue;
         };
         if !refs.contains_key(id) {
-            let sha8 = sha8_hex(&asset.bytes);
+            let sha8 = crate::domain::asset::sha8_hex(&asset.bytes);
             let ext = asset
                 .origin_part
                 .rsplit('.')

@@ -64,6 +64,19 @@ impl Input {
         }
     }
 
+    /// Return the input size in bytes without reading file contents.
+    ///
+    /// `Path` resolves through `fs::metadata`; `None` means the size could
+    /// not be determined (metadata error) — callers must not treat that as
+    /// zero, they let the later read fail naturally. `Bytes` always knows
+    /// its length.
+    pub fn len(&self) -> Option<u64> {
+        match self {
+            Input::Path(p) => std::fs::metadata(p).ok().map(|m| m.len()),
+            Input::Bytes { data, .. } => Some(data.len() as u64),
+        }
+    }
+
     /// Return the file extension (lowercase, without dot).
     ///
     /// Priority: explicit extension field > extension from filename.
@@ -575,6 +588,26 @@ mod tests {
     fn input_bytes_with_mimetype_constructor() {
         let input = Input::bytes_with_mimetype(vec![1, 2, 3], "data.pdf", "application/pdf");
         assert_eq!(input.mimetype(), Some("application/pdf"));
+    }
+
+    #[test]
+    fn input_len_bytes_and_missing_path() {
+        // Bytes variant: exact length, no IO involved.
+        let bytes = Input::bytes(vec![1, 2, 3], "x.txt");
+        assert_eq!(bytes.len(), Some(3));
+
+        // Missing path: None, not zero — callers must not intercept.
+        let missing = Input::Path(std::path::PathBuf::from("/nonexistent/input.bin"));
+        assert_eq!(missing.len(), None);
+    }
+
+    #[test]
+    fn input_len_path_reports_real_file_size() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("sized.txt");
+        std::fs::write(&path, vec![0u8; 1234]).unwrap();
+        let input = Input::Path(path);
+        assert_eq!(input.len(), Some(1234));
     }
 
     #[tokio::test]

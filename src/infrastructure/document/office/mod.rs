@@ -17,7 +17,7 @@ pub use odp::OdpConverter;
 pub use odt::OdtConverter;
 pub use pptx_deep::PptxDeepConverter;
 
-use crate::domain::asset::Asset;
+use crate::domain::asset::{Asset, AssetNamer};
 use crate::domain::document::{Block, CellSlot, Document, ImageSource, Inline};
 
 /// One raw media payload as parsed from a package part.
@@ -42,9 +42,7 @@ pub(crate) fn rewrite_image_assets(document: &mut Document, raw: &[RawMedia<'_>]
     struct Ctx<'a> {
         raw: &'a [RawMedia<'a>],
         by_idx: HashMap<usize, String>,
-        by_sha: HashMap<String, String>,
-        out: Vec<Asset>,
-        seq: usize,
+        namer: AssetNamer,
     }
 
     impl Ctx<'_> {
@@ -53,18 +51,8 @@ pub(crate) fn rewrite_image_assets(document: &mut Document, raw: &[RawMedia<'_>]
                 return Some(existing.clone());
             }
             let media = self.raw.get(idx)?;
-            let sha8 = sha8_hex(media.bytes);
-            let reference = if let Some(existing) = self.by_sha.get(&sha8) {
-                existing.clone()
-            } else {
-                let ext = asset_ext(media.part, media.media_type);
-                let reference = format!("images/{:04}-{sha8}.{ext}", self.seq);
-                self.seq += 1;
-                self.out
-                    .push(Asset::new(reference.clone(), media.bytes.to_vec()));
-                self.by_sha.insert(sha8, reference.clone());
-                reference
-            };
+            let ext = asset_ext(media.part, media.media_type);
+            let reference = self.namer.reference(media.bytes, &ext);
             self.by_idx.insert(idx, reference.clone());
             Some(reference)
         }
@@ -115,15 +103,13 @@ pub(crate) fn rewrite_image_assets(document: &mut Document, raw: &[RawMedia<'_>]
     let mut ctx = Ctx {
         raw,
         by_idx: HashMap::new(),
-        by_sha: HashMap::new(),
-        out: Vec::new(),
-        seq: 0,
+        namer: AssetNamer::new(),
     };
     walk_blocks(&mut document.blocks, &mut ctx);
     for note in &mut document.notes {
         walk_blocks(&mut note.blocks, &mut ctx);
     }
-    ctx.out
+    ctx.namer.into_assets()
 }
 
 /// File extension for an extracted asset: the part suffix when present,
@@ -143,15 +129,10 @@ fn asset_ext(part: &str, media_type: &str) -> String {
     }
 }
 
-/// Leading 8 hex chars of the SHA-256 digest.
-fn sha8_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(bytes);
-    digest[..4].iter().map(|b| format!("{b:02x}")).collect()
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::domain::asset::sha8_hex;
+
     use super::*;
     use crate::domain::document::{Cell, List, ListItem, Note, NoteKind, Style, Table, TableKind};
 

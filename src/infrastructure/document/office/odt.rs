@@ -21,7 +21,7 @@ use quick_xml::events::{BytesStart, Event};
 use super::docx::body::{guess_media_type, read_part};
 use super::docx::styles::RunProps;
 use crate::application::ports::{Availability, Converter};
-use crate::domain::asset::Asset;
+use crate::domain::asset::{Asset, AssetNamer};
 use crate::domain::document::{
     Block, Cell, CellSlot, Document, ImageSource, Inline, LinkTarget, List, ListItem, MarkerKind,
     Note, NoteKind, Style, Table, TableKind,
@@ -828,9 +828,7 @@ pub(crate) fn rewrite_asset_refs(doc: &mut Document, raw: &[RawOdfAsset]) -> Vec
     struct RwCtx<'a> {
         raw: &'a [RawOdfAsset],
         by_idx: HashMap<usize, String>,
-        by_sha: HashMap<String, String>,
-        out: Vec<Asset>,
-        seq: usize,
+        namer: AssetNamer,
     }
     impl RwCtx<'_> {
         fn ref_for(&mut self, idx: usize) -> Option<String> {
@@ -838,17 +836,8 @@ pub(crate) fn rewrite_asset_refs(doc: &mut Document, raw: &[RawOdfAsset]) -> Vec
                 return Some(r.clone());
             }
             let a = self.raw.get(idx)?;
-            let sha8 = sha8_hex(&a.bytes);
-            let reference = if let Some(existing) = self.by_sha.get(&sha8) {
-                existing.clone()
-            } else {
-                let ext = asset_ext(&a.part, &a.media_type);
-                let r = format!("images/{:04}-{sha8}.{ext}", self.seq);
-                self.seq += 1;
-                self.out.push(Asset::new(r.clone(), a.bytes.clone()));
-                self.by_sha.insert(sha8, r.clone());
-                r
-            };
+            let ext = asset_ext(&a.part, &a.media_type);
+            let reference = self.namer.reference(&a.bytes, &ext);
             self.by_idx.insert(idx, reference.clone());
             Some(reference)
         }
@@ -899,15 +888,13 @@ pub(crate) fn rewrite_asset_refs(doc: &mut Document, raw: &[RawOdfAsset]) -> Vec
     let mut ctx = RwCtx {
         raw,
         by_idx: HashMap::new(),
-        by_sha: HashMap::new(),
-        out: Vec::new(),
-        seq: 0,
+        namer: AssetNamer::new(),
     };
     for note in &mut doc.notes {
         walk_blocks(&mut note.blocks, &mut ctx);
     }
     walk_blocks(&mut doc.blocks, &mut ctx);
-    ctx.out
+    ctx.namer.into_assets()
 }
 
 /// Shared converter tail for ODT and ODP: rewrite asset refs, render, and
@@ -1063,13 +1050,6 @@ fn asset_ext(part: &str, media_type: &str) -> String {
     } else {
         sub.replace('+', "-")
     }
-}
-
-/// Leading 8 hex chars of the SHA-256 digest.
-fn sha8_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(bytes);
-    digest[..4].iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Resolve a style through its `style:parent-style-name` chain (root first,

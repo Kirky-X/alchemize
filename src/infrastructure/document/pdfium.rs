@@ -162,30 +162,16 @@ fn extract_all(
     // lopdf failure is a skip reason rather than a conversion failure.
     let mut extraction = crate::infrastructure::document::pdf_images::extract_page_images(bytes);
     // One sha per entry (not per position): a large image referenced on
-    // many pages hashes exactly once. Naming goes through `Asset::sha8`
-    // so the hash and the `images/{seq:04}-{sha8}.{ext}` contract cannot
-    // drift apart.
-    let mut assets: Vec<Asset> = Vec::new();
-    let mut by_sha: HashMap<String, String> = HashMap::new();
+    // many pages hashes exactly once. Naming goes through the shared
+    // AssetNamer — the hash and the `images/{seq:04}-{sha8}.{ext}`
+    // contract come from the same source and cannot drift.
+    let mut namer = crate::domain::asset::AssetNamer::new();
     let mut entry_ref: Vec<String> = vec![String::new(); extraction.entries.len()];
-    let mut seq: usize = 0;
     for (idx, image) in extraction.entries.iter_mut().enumerate() {
         let bytes = std::mem::take(&mut image.bytes);
-        let ext = image.ext;
-        let mut asset = Asset::new(String::new(), bytes);
-        let sha8 = asset.sha8();
-        let reference = if let Some(existing) = by_sha.get(&sha8) {
-            existing.clone()
-        } else {
-            asset.filename = format!("images/{seq:04}-{sha8}.{ext}");
-            seq += 1;
-            let r = asset.filename.clone();
-            by_sha.insert(sha8, r.clone());
-            assets.push(asset);
-            r
-        };
-        entry_ref[idx] = reference;
+        entry_ref[idx] = namer.reference_owned(bytes, image.ext);
     }
+    let assets = namer.into_assets();
     let mut page_refs: BTreeMap<u32, Vec<String>> = BTreeMap::new();
     for (page, entry) in &extraction.positions {
         if let Some(r) = entry_ref.get(*entry as usize)
