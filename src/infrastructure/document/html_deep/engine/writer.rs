@@ -295,9 +295,21 @@ impl Writer {
     /// 压入样式。返回 false = 拒入（同款已在期望栈、或链接内压链接），
     /// 子树照常遍历但不产标记。sup/sub 例外：总是入栈。
     pub(crate) fn push_style(&mut self, style: Style) -> bool {
-        // sup/sub 恒入栈，免做 O(深度) 查重扫描（深嵌套链的平方项来源）。
         let duplicate = match &style {
+            // sup/sub 恒入栈，免做 O(深度) 查重扫描（深嵌套链的平方项来源）。
             Style::Sup | Style::Sub => false,
+            // Link 免查重：serial 由 machine 单调计数器分配、永不复用，
+            // contains 永不命中（链接内压链接由下方 in_link 拦截）。
+            // debug_assert 机械保障 serial 单调前提——same_style 的
+            // serial 判同正确性依赖它；若未来改为 per-writer 计数器，
+            // 此断言在测试构建中立即触发。
+            Style::Link { serial, .. } => {
+                debug_assert!(
+                    *serial > self.last_link,
+                    "link serial must exceed all previously emitted serials"
+                );
+                false
+            }
             _ => self.desired.contains(&style),
         };
         if duplicate || (matches!(style, Style::Link { .. }) && self.in_link()) {
@@ -730,7 +742,8 @@ pub(crate) fn is_space(ch: char) -> bool {
 }
 
 /// 样式同一性（O(1)）：Link 只比 serial——serial 由全局计数器分配，同 serial
-/// 即同一次压入（dest/title 必相同），免去长 URL 逐字节比较。
+/// 即同一次压入（dest/title 必相同），免去长 URL 逐字节比较。serial 单调
+/// 不复用的前提由 `push_style` 的 debug_assert 机械保障。
 fn same_style(a: &Style, b: &Style) -> bool {
     match (a, b) {
         (Style::Link { serial: s1, .. }, Style::Link { serial: s2, .. }) => s1 == s2,
