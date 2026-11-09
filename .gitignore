@@ -1,4 +1,9 @@
 /target
 
+# third_party 独立 workspace 的构建产物与本地锁（vendor fixture 与源码入库，
+# fork 见 third_party/lopdf/FORK.md）
+third_party/lopdf/target
+third_party/lopdf/Cargo.lock
+
 # specmark 规格驱动工作目录（归档保留在本地，不入 git）
 specmark/

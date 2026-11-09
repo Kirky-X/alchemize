@@ -50,6 +50,7 @@ cargo update -d          # 更新漏洞通告数据库
 - specmark 规格目录不入库（gitignore），主 specs 作为本地规格真源。
 - CLI/MCP 封装框架 sdforge（MIT，crates.io 版本钉 0.5.0-rc.10）与 rmcp（`mcp` feature 独占）经 `cargo audit` 一并纳管。
 - html-moli 引擎（feature `moli`）依赖 third_party/moli-html2md（MIT OR Apache-2.0，vendor 自 lexmount/moli@2db52b4，随包携带上游双许可文本）、scraper 0.29、dom_smoothie 0.19；`--base-url` 仅在显式提供时改写链接。
+- lopdf vendor fork（`[patch.crates-io]` 重定向，third_party/lopdf，MIT 随包携带）：为 FlateDecode/LZWDecode 流解压加每流 64 MiB 输出上限并暴露线程本位违规标记，防解压炸弹；增量与退役条件见 `third_party/lopdf/FORK.md`。
 
 ## 🐛 漏洞报告流程
 
@@ -91,7 +92,7 @@ cargo update -d          # 更新漏洞通告数据库
 | 攻击面 | 解析器 | 对策 |
 | --- | --- | --- |
 | zip / docx / pptx / xlsx / epub（ZIP 容器） | `zip` crate（deflate） | 声明式依赖 + Cargo.lock 锁定；解析失败返回 `Zip`/`Xml` 结构化错误而非 panic |
-| pdf | `pdf-extract` | 解析失败返回 `Pdf` 错误；TOC 剔除与结构启发只影响产出质量 |
+| pdf | `pdf-extract`（内部 `lopdf` 经 vendor fork：`third_party/lopdf`） | 解析失败返回 `Pdf` 错误；TOC 剔除与结构启发只影响产出质量；FlateDecode/LZWDecode 流解压输出上限 64 MiB（parse 阶段 ObjStm/XRefStm 与内容流/ICC 流同点收口），超限显性拒绝，防解压炸弹；DecodeParms predictor 几何护栏 |
 | xml | `quick-xml` | 无外部实体解析路径 |
 | tex/latex | pandoc 子进程 | 仅 PATH 探测 + 参数化调用，无 shell 拼接；围栏兜底路径无子进程 |
 | 构造输入的资源消耗 | 各解析器 | zip 门面拒绝嵌套递归（无界深度）；响应读取内存有界 |

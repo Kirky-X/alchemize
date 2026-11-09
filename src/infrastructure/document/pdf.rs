@@ -3,6 +3,10 @@
 
 //! PDF to Markdown converter using pdf-extract, with paper-flavoured
 //! post-processing (TOC removal, artifact cleanup, structure heuristics).
+//!
+//! Stream decompression is bomb-protected by the vendored lopdf fork
+//! (`third_party/lopdf/FORK.md`): a FlateDecode/LZWDecode stream inflating
+//! past 64 MiB fails the conversion instead of exhausting memory.
 
 use async_trait::async_trait;
 
@@ -43,8 +47,17 @@ impl Converter for PdfConverter {
             .await
             .map_err(|e| AlchemizeError::other(format!("failed to read PDF input: {e}")))?;
 
+        // 清掉同线程上次转换的残留标记，抽取后据此显性拒绝——pdf-extract 会把
+        // 单流解压错误吞成原始压缩字节，炸弹不拒绝就会产出静默垃圾文本。
+        lopdf::reset_stream_decompression_limit_hit();
         let pages = pdf_extract::extract_text_from_mem_by_pages(&bytes)
             .map_err(|e| AlchemizeError::Pdf(format!("{e}")))?;
+        if lopdf::stream_decompression_limit_hit() {
+            return Err(AlchemizeError::Pdf(format!(
+                "PDF stream decompression limit exceeded ({} bytes/stream, bomb protection; see third_party/lopdf/FORK.md)",
+                lopdf::max_stream_decompressed_bytes()
+            )));
+        }
 
         let page_count = pages.len();
         let mut markdown = String::new();
@@ -425,5 +438,97 @@ mod tests {
         let input = Input::bytes(b"not a pdf".to_vec(), "broken.pdf");
         let result = converter.convert(input).await;
         assert!(result.is_err());
+    }
+
+    // -- decompression-bomb protection (vendored lopdf fork) -------------------
+
+    /// Build a minimal one-page PDF whose content stream carries `payload`
+    /// under the given /Filter name (no filter entry when `None`).
+    #[cfg(test)]
+    fn page_pdf(payload: Vec<u8>, filter: Option<&str>) -> Vec<u8> {
+        use lopdf::{Document, Object, Stream, dictionary};
+
+        let mut doc = Document::new();
+
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let mut content_dict = lopdf::Dictionary::new();
+        content_dict.set("Length", payload.len() as i64);
+        if let Some(f) = filter {
+            content_dict.set("Filter", f);
+        }
+        let content_id = doc.add_object(Object::Stream(Stream::new(content_dict, payload)));
+
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Contents" => Object::Reference(content_id),
+            "MediaBox" => vec![Object::Integer(0), Object::Integer(0), Object::Integer(612), Object::Integer(792)],
+            "Resources" => dictionary! {
+                "Font" => dictionary! { "F1" => Object::Reference(font_id) },
+            },
+        });
+        let pages_id = doc.add_object(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![Object::Reference(page_id)],
+            "Count" => 1_i64,
+        });
+        doc.get_object_mut(page_id)
+            .and_then(Object::as_dict_mut)
+            .expect("page dict")
+            .set("Parent", Object::Reference(pages_id));
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => Object::Reference(pages_id),
+        });
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).expect("serialize test pdf");
+        buf
+    }
+
+    /// ~100 MB of zeros compress to ~100 KB — a bomb-shaped content stream
+    /// must be rejected by the 64 MiB decompression cap, not inflate.
+    #[tokio::test]
+    async fn convert_rejects_flate_bomb() {
+        use flate2::write::ZlibEncoder;
+        use std::io::Write;
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        let block = vec![0_u8; 1024 * 1024];
+        for _ in 0..100 {
+            encoder.write_all(&block).unwrap();
+        }
+        let bomb = encoder.finish().unwrap();
+
+        let bytes = page_pdf(bomb, Some("FlateDecode"));
+        let result = PdfConverter::new()
+            .convert(Input::bytes(bytes, "bomb.pdf"))
+            .await;
+        let err = result.expect_err("flate bomb must be rejected, not inflated");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("decompression limit exceeded"),
+            "expected bomb-projection error, got: {msg}"
+        );
+    }
+
+    /// A small legitimate PDF converts unchanged — the cap must not trip.
+    #[tokio::test]
+    async fn convert_small_legit_pdf_unaffected() {
+        let content = b"BT /F1 12 Tf 72 700 Td (Hello Bomb Guard) Tj ET".to_vec();
+        let bytes = page_pdf(content, None);
+        let result = PdfConverter::new()
+            .convert(Input::bytes(bytes, "legit.pdf"))
+            .await
+            .expect("small legit pdf must still convert");
+        assert!(
+            result.markdown.contains("Hello Bomb Guard"),
+            "markdown: {}",
+            result.markdown
+        );
     }
 }
