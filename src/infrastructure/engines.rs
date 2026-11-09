@@ -25,7 +25,7 @@ pub fn default_converters(
     vision: Option<Arc<dyn VisionProvider>>,
     transcribe: Option<Arc<dyn TranscribeProvider>>,
     video_mode: VideoProcessingMode,
-    moli: &Option<crate::application::builder::MoliEngineConfig>,
+    html_deep: &Option<crate::application::builder::HtmlDeepEngineConfig>,
 ) -> Vec<Box<dyn Converter>> {
     let mut engines: Vec<Box<dyn Converter>> = Vec::new();
 
@@ -52,7 +52,7 @@ pub fn default_converters(
     ));
     // pdfium 本地高保真 PDF（spec R-self-002：PDF 链 priority 20 顶层）。
     // 动态库缺失时 availability=Unavailable，registry 跳过并记录原因，
-    // 落到下方 pdf-extract 档。
+    // 落到下方 lopdf extract_text 档。
     #[cfg(feature = "pdfium")]
     engines.push(Box::new(
         crate::infrastructure::document::PdfiumConverter::new(),
@@ -176,12 +176,12 @@ pub fn default_converters(
         engines.push(Box::new(crate::infrastructure::data::BibConverter::new()));
     }
 
-    // html-moli：crawlrs 吸收的 moli→htmd 转换链（feature moli 门控，
+    // html-deep：自研引擎主 + htmd 兜底转换链（feature html-deep 门控，
     // priority 15 压过 html/htmd 的 10；base_url/extract_main 显式选项）。
-    #[cfg(feature = "moli")]
-    if let Some(cfg) = moli {
+    #[cfg(feature = "html-deep")]
+    if let Some(cfg) = html_deep {
         engines.push(Box::new(
-            crate::infrastructure::document::html_moli::HtmlMoliConverter::new(
+            crate::infrastructure::document::html_deep::HtmlDeepConverter::new(
                 cfg.base_url.clone(),
                 cfg.extract_main,
             ),
@@ -192,7 +192,7 @@ pub fn default_converters(
     // here (nested support wired when the registry is fully assembled — the
     // CLI layer constructs zip with a clone of the final registry).
     let _ = mineru; // wired by the MinerU migration task
-    #[cfg(not(feature = "moli"))]
-    let _ = moli;
+    #[cfg(not(feature = "html-deep"))]
+    let _ = html_deep;
     engines
 }

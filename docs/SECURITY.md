@@ -41,6 +41,7 @@ cargo update -d          # 更新漏洞通告数据库
 | --- | --- | --- |
 | anydoc 0.2.4 传递依赖 zip 8.6.0 | cargo-audit 通告（RUSTSEC-2026-0367/0368/0369/0429） | 可达性分析=不可达（anydoc 仅用 new/len/by_name/index_for_name，四条 CVE 全在 extract 系列）；修复路线已分析（fork 换 zip 9.4 一行改动实证可行），待拍板实施 |
 | `with_max_file_size` 未被引擎装配消费 | 预留接口未生效 | 文档已标注「勿依赖」；MinerU precision 自带 200MB 上限 |
+| libsqlite3-sys 0.35 存量通告 RUSTSEC-2026-0459（C SQLite CVE-2026-119375，medium） | `data` feature 传递依赖，存量非新增 | cargo-audit 已核；升级 rusqlite 属独立依赖变更，随下一依赖批次处理 |
 | 仓库无 CI 与 git 钩子 | 门禁靠贡献者本地执行 | CONTRIBUTING 明确列出本地门禁清单 |
 
 ### 供应链与门禁
@@ -49,8 +50,8 @@ cargo update -d          # 更新漏洞通告数据库
 - 全部源文件带 `SPDX-License-Identifier: Apache-2.0` 两行头（59/59），license 扫描工具可机器识别文件级权属。
 - specmark 规格目录不入库（gitignore），主 specs 作为本地规格真源。
 - CLI/MCP 封装框架 sdforge（MIT，crates.io 版本钉 0.5.0-rc.10）与 rmcp（`mcp` feature 独占）经 `cargo audit` 一并纳管。
-- html-moli 引擎（feature `moli`）依赖 third_party/moli-html2md（MIT OR Apache-2.0，vendor 自 lexmount/moli@2db52b4，随包携带上游双许可文本）、scraper 0.29、dom_smoothie 0.19；`--base-url` 仅在显式提供时改写链接。
-- lopdf vendor fork（`[patch.crates-io]` 重定向，third_party/lopdf，MIT 随包携带）：为 FlateDecode/LZWDecode 流解压加每流 64 MiB 输出上限并暴露线程本位违规标记，防解压炸弹；增量与退役条件见 `third_party/lopdf/FORK.md`。
+- html-deep 引擎（feature `html-deep`）为本仓自研迭代状态机（Apache-2.0，差分验证对齐记录见仓库历史），依赖 scraper 0.29、dom_smoothie 0.19、icu_properties 2.3（均在依赖树内）；`--base-url` 仅在显式提供时改写链接。
+- lopdf 0.47（crates.io 直连，MIT）：解压炸弹防护在调用点显式设限——文档解析与逐页文本抽取每页/每流 64 MiB 上限（`LoadOptions::with_max_decompressed_size` + `extract_text_chunks_with_limit`）、图片流 `decompressed_content_with_limit` 64 MiB，另有 256 MiB 全文档累计文本预算（拒绝时峰值 ≈ 预算 + 单页 64 MiB）；超限以 `AlchemizeError::Pdf` 显性拒绝。炸弹类错误（`MemoryLimitExceeded`）由 lopdf 原生传播、无吞错路径；损坏流（非炸弹类解码错误）回退原始压缩字节产出乱码文本——数据完整性由产物质量层兜底，不构成内存风险。
 
 ## 🐛 漏洞报告流程
 
@@ -92,10 +93,10 @@ cargo update -d          # 更新漏洞通告数据库
 | 攻击面 | 解析器 | 对策 |
 | --- | --- | --- |
 | zip / docx / pptx / xlsx / epub（ZIP 容器） | `zip` crate（deflate） | 声明式依赖 + Cargo.lock 锁定；解析失败返回 `Zip`/`Xml` 结构化错误而非 panic |
-| pdf | `pdf-extract`（内部 `lopdf` 经 vendor fork：`third_party/lopdf`） | 解析失败返回 `Pdf` 错误；TOC 剔除与结构启发只影响产出质量；FlateDecode/LZWDecode 流解压输出上限 64 MiB（parse 阶段 ObjStm/XRefStm 与内容流/ICC 流同点收口），超限显性拒绝，防解压炸弹；DecodeParms predictor 几何护栏 |
+| pdf | `lopdf` 0.47（crates.io 直连；pdfium 档另见下行） | 解析失败返回 `Pdf` 错误；TOC 剔除与结构启发只影响产出质量；每页/每流解压上限 64 MiB + 256 MiB 全文档累计文本预算，超限显性拒绝，防解压炸弹；lopdf 原生传播解压错误（无吞错路径） |
 | xml | `quick-xml` | 无外部实体解析路径 |
 | tex/latex | pandoc 子进程 | 仅 PATH 探测 + 参数化调用，无 shell 拼接；围栏兜底路径无子进程 |
-| 构造输入的资源消耗 | 各解析器 | zip 门面拒绝嵌套递归（无界深度）；响应读取内存有界 |
+| 构造输入的资源消耗 | 各解析器 | zip 门面拒绝嵌套递归（无界深度）；HTML 引擎全程迭代遍历（DOM 深度不进调用栈）；响应读取内存有界 |
 
 ### SSRF 防护
 

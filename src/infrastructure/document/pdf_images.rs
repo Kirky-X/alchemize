@@ -5,9 +5,8 @@
 //!
 //! pdfium-render 0.5.9 seals page-object handles behind a `pub(crate)`
 //! trait, so image bytes cannot come from the pdfium binding. This module
-//! walks the PDF structure with lopdf — the bomb-hardened vendor fork this
-//! crate already uses via pdf-extract — and extracts embedded image
-//! XObjects:
+//! walks the PDF structure with lopdf (crates.io 0.47, call-site
+//! decompression limits) and extracts embedded image XObjects:
 //!
 //! - `DCTDecode` / `JPXDecode` streams pass through as-is (`jpg` / `jp2`);
 //! - plain or `FlateDecode` 8bpc gray/RGB samples are re-encoded to PNG;
@@ -19,7 +18,13 @@
 
 use std::collections::HashMap;
 
-use lopdf::{Dictionary, Document, Object, ObjectId};
+use lopdf::{Dictionary, Document, LoadOptions, Object, ObjectId};
+
+/// Per-stream decompression ceiling for untrusted image streams — aligns
+/// with the text tier's bound (`pdf::MAX_STREAM_DECOMPRESSED_BYTES`). 0.47's
+/// plain `decompressed_content` (no limit arg) is unbounded, so the FlateDecode path must
+/// go through the `_with_limit` variant explicitly.
+const IMAGE_STREAM_LIMIT: usize = 64 * 1024 * 1024;
 
 /// Maximum pages walked per document — runaway page trees fail loudly.
 const MAX_PAGES: u32 = 4096;
@@ -61,7 +66,11 @@ pub struct Extraction {
 
 /// Walk every page's `/XObject` resources and extract image streams.
 pub fn extract_page_images(bytes: &[u8]) -> Extraction {
-    let doc = match Document::load_mem(bytes) {
+    // 解析期 ObjStm/XRefStm 同样受 64 MiB 上限约束（裸 load_mem 无界）
+    let doc = match Document::load_mem_with_options(
+        bytes,
+        LoadOptions::with_max_decompressed_size(IMAGE_STREAM_LIMIT),
+    ) {
         Ok(doc) => doc,
         Err(e) => {
             // lopdf parse failure must not lose pdfium's text extraction:
@@ -210,10 +219,7 @@ impl Walker<'_> {
                     self.positions.push((page_index, idx));
                 }
                 Err(reason) => {
-                    self.push_skip(format!(
-                        "page {}: image {name:?}: {reason}",
-                        page_index + 1
-                    ));
+                    self.push_skip(format!("page {}: image {name:?}: {reason}", page_index + 1));
                 }
             }
         }
@@ -274,7 +280,7 @@ fn decode_image(doc: &Document, stream: &lopdf::Stream) -> Result<ImageEntry, St
         [f] if f == b"DCTDecode" => stream.content.clone(),
         [f] if f == b"JPXDecode" => stream.content.clone(),
         [f] if f == b"FlateDecode" => stream
-            .decompressed_content()
+            .decompressed_content_with_limit(IMAGE_STREAM_LIMIT)
             .map_err(|e| format!("flate decode failed: {e}"))?,
         other => {
             return Err(format!(
@@ -402,7 +408,7 @@ fn encode_png(samples: Vec<u8>, width: u32, height: u32, channels: usize) -> Opt
 mod tests {
     use super::*;
     use image::GenericImageView;
-    use lopdf::{Stream, dictionary};
+    use lopdf::{dictionary, Stream};
 
     /// Build a minimal valid PDF around one image XObject dict + payload.
     fn fixture_pdf(image_dict: Dictionary, payload: Vec<u8>) -> Vec<u8> {
@@ -489,7 +495,7 @@ mod tests {
     #[test]
     fn flate_samples_reencode_to_png() {
         // lopdf's own compress() produces the FlateDecode fixture, so this
-        // test exercises decompressed_content() without pulling flate2.
+        // test exercises the limit-bounded decode path without pulling flate2.
         let mut s = Stream::new(image_dict(None, "DeviceRGB"), (0..48u8).collect());
         s.compress().unwrap();
         let pdf = fixture_pdf(s.dict, s.content);
@@ -573,9 +579,10 @@ mod tests {
         for i in 0..300u32 {
             let mut d = image_dict(Some("DCTDecode"), "DeviceRGB");
             d.set("Name", format!("img{i}"));
-            xobj.set(format!("Im{i}"), Object::Reference(doc.add_object(Object::Stream(
-                Stream::new(d, payload.clone()),
-            ))));
+            xobj.set(
+                format!("Im{i}"),
+                Object::Reference(doc.add_object(Object::Stream(Stream::new(d, payload.clone())))),
+            );
         }
         let resources_id = doc.add_object(dictionary! { "XObject" => xobj });
         let content_id = doc.add_object(Stream::new(dictionary! {}, b"q Q".to_vec()));
@@ -617,9 +624,7 @@ mod tests {
         let ex = extract_page_images(&pdf);
         assert!(ex.entries.is_empty(), "no asset for mislabeled stream");
         assert!(
-            ex.skipped
-                .iter()
-                .any(|r| r.contains("magic bytes missing")),
+            ex.skipped.iter().any(|r| r.contains("magic bytes missing")),
             "{:?}",
             ex.skipped
         );

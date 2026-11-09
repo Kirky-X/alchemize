@@ -1,12 +1,15 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! PDF to Markdown converter using pdf-extract, with paper-flavoured
+//! PDF to Markdown converter (local fallback tier), with paper-flavoured
 //! post-processing (TOC removal, artifact cleanup, structure heuristics).
 //!
-//! Stream decompression is bomb-protected by the vendored lopdf fork
-//! (`third_party/lopdf/FORK.md`): a FlateDecode/LZWDecode stream inflating
-//! past 64 MiB fails the conversion instead of exhausting memory.
+//! Text extraction runs on lopdf 0.47's built-in per-page
+//! `extract_text_chunks_with_limit`. Decompression is bomb-protected by
+//! explicit call-site limits: per-page 64 MiB (`LoadOptions` at parse time +
+//! `_with_limit` at extraction) and a 256 MiB cumulative whole-document
+//! text budget — over-limit input fails the conversion instead of
+//! exhausting memory.
 
 use async_trait::async_trait;
 
@@ -14,6 +17,67 @@ use crate::application::ports::Converter;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
+
+/// Per-page decompression ceiling for untrusted PDFs — the per-page **total**
+/// across all content streams of one page (`extract_text_chunks_with_limit`
+/// semantics) and the per-stream bound at parse time (ObjStm/XRefStm) alike.
+/// Aligns with the container family's `MAX_ENTRY_BYTES` semantics and the
+/// image tier's `pdf_images::IMAGE_STREAM_LIMIT` — keep the two constants in
+/// sync. Tighter than lopdf 0.47's 256 MiB default.
+const MAX_STREAM_DECOMPRESSED_BYTES: usize = 64 * 1024 * 1024;
+
+/// Cumulative decompressed-text budget across the whole document — without
+/// it, many just-under-64-MiB pages stack to unbounded RSS (the image tier
+/// has the matching `MAX_TOTAL_IMAGE_BYTES`). Generous enough for dense
+/// real-world books; rejects bomb-shaped page farms.
+const MAX_TOTAL_TEXT_BYTES: usize = 256 * 1024 * 1024;
+
+/// Blocking extraction core: parse + per-page text with explicit bomb limits.
+///
+/// lopdf 0.47 propagates *bomb* decompression errors natively
+/// (`MemoryLimitExceeded`), so no thread-local marker is needed: any
+/// over-limit page rejects the whole conversion. Note the cumulative budget
+/// is checked after each page join, so peak RSS at rejection is roughly
+/// budget + one page (≤ 256 MiB + 64 MiB) — unlike the image tier, which
+/// pre-checks before materializing. Non-bomb decode errors fall back to raw
+/// compressed bytes inside lopdf (garbage text, bounded by the same limits);
+/// data integrity is a quality concern, not a memory one.
+fn extract_pages(bytes: &[u8]) -> Result<Vec<String>, AlchemizeError> {
+    let doc = lopdf::Document::load_mem_with_options(
+        bytes,
+        lopdf::LoadOptions::with_max_decompressed_size(MAX_STREAM_DECOMPRESSED_BYTES),
+    )
+    .map_err(|e| AlchemizeError::Pdf(format!("{e}")))?;
+
+    let page_numbers: Vec<u32> = doc.get_pages().keys().copied().collect();
+    let mut pages: Vec<String> = Vec::with_capacity(page_numbers.len());
+    let mut total_text: usize = 0;
+    for page_no in page_numbers {
+        let text = doc
+            // 非 _with_limit 变体硬编码 256 MiB 默认上限、不吃 LoadOptions——
+            // 显式传入才与解析期同一 64 MiB 界一致
+            .extract_text_chunks_with_limit(&[page_no], MAX_STREAM_DECOMPRESSED_BYTES)
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| match e {
+                lopdf::Error::Decompress(lopdf::DecompressError::MemoryLimitExceeded { .. }) => {
+                    AlchemizeError::Pdf(format!(
+                        "PDF page decompression limit exceeded ({MAX_STREAM_DECOMPRESSED_BYTES} bytes/page, bomb protection; lopdf built-in limits)"
+                    ))
+                }
+                other => AlchemizeError::Pdf(format!("{other}")),
+            })?
+            .join("");
+        total_text += text.len();
+        if total_text > MAX_TOTAL_TEXT_BYTES {
+            return Err(AlchemizeError::Pdf(format!(
+                "PDF cumulative text budget exceeded ({MAX_TOTAL_TEXT_BYTES} bytes total, bomb protection; page-farm DoS guard)"
+            )));
+        }
+        pages.push(text);
+    }
+    Ok(pages)
+}
 
 /// Converts PDF files to markdown by extracting text per page.
 ///
@@ -47,17 +111,11 @@ impl Converter for PdfConverter {
             .await
             .map_err(|e| AlchemizeError::other(format!("failed to read PDF input: {e}")))?;
 
-        // 清掉同线程上次转换的残留标记，抽取后据此显性拒绝——pdf-extract 会把
-        // 单流解压错误吞成原始压缩字节，炸弹不拒绝就会产出静默垃圾文本。
-        lopdf::reset_stream_decompression_limit_hit();
-        let pages = pdf_extract::extract_text_from_mem_by_pages(&bytes)
-            .map_err(|e| AlchemizeError::Pdf(format!("{e}")))?;
-        if lopdf::stream_decompression_limit_hit() {
-            return Err(AlchemizeError::Pdf(format!(
-                "PDF stream decompression limit exceeded ({} bytes/stream, bomb protection; see third_party/lopdf/FORK.md)",
-                lopdf::max_stream_decompressed_bytes()
-            )));
-        }
+        // 同步解析/抽取是 CPU 密集段，与其他转换器（pdfium/odt/pptx_deep）一
+        // 致包 spawn_blocking，避免钉死 async worker；panic 由 JoinError 显性化。
+        let pages = tokio::task::spawn_blocking(move || extract_pages(&bytes))
+            .await
+            .map_err(|e| AlchemizeError::other(format!("pdf extraction task failed: {e}")))??;
 
         let page_count = pages.len();
         let mut markdown = String::new();
@@ -440,7 +498,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // -- decompression-bomb protection (vendored lopdf fork) -------------------
+    // -- decompression-bomb protection (lopdf 0.47 call-site limits) ----------
 
     /// Build a minimal one-page PDF whose content stream carries `payload`
     /// under the given /Filter name (no filter entry when `None`).
@@ -511,8 +569,73 @@ mod tests {
         let err = result.expect_err("flate bomb must be rejected, not inflated");
         let msg = err.to_string();
         assert!(
-            msg.contains("decompression limit exceeded"),
-            "expected bomb-projection error, got: {msg}"
+            msg.contains("decompression limit exceeded") && msg.contains("bomb protection"),
+            "expected both bomb-guard anchors, got: {msg}"
+        );
+    }
+
+    /// Six pages of ~50 MiB of literal text each: every page stays under the
+    /// 64 MiB per-page cap (raw, no decompression involved), but the running
+    /// total crosses the 256 MiB cumulative TEXT budget — the page-farm DoS
+    /// guard must reject before the last page.
+    #[tokio::test]
+    async fn convert_rejects_cumulative_text_budget() {
+        use lopdf::{dictionary, Object, Stream};
+
+        let mut content = Vec::with_capacity(50 * 1024 * 1024 + 32);
+        content.extend_from_slice(b"BT /F1 12 Tf 72 700 Td (");
+        content.extend(std::iter::repeat_n(b'a', 50 * 1024 * 1024));
+        content.extend_from_slice(b") Tj ET");
+
+        let mut doc = lopdf::Document::new();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let mut page_ids = Vec::new();
+        for _ in 0..6 {
+            let mut content_dict = lopdf::Dictionary::new();
+            content_dict.set("Length", content.len() as i64);
+            let content_id =
+                doc.add_object(Object::Stream(Stream::new(content_dict, content.clone())));
+            page_ids.push(doc.add_object(dictionary! {
+                "Type" => "Page",
+                "Contents" => Object::Reference(content_id),
+                "MediaBox" => vec![Object::Integer(0), Object::Integer(0), Object::Integer(612), Object::Integer(792)],
+                "Resources" => dictionary! {
+                    "Font" => dictionary! { "F1" => Object::Reference(font_id) },
+                },
+            }));
+        }
+        let pages_id = doc.add_object(dictionary! {
+            "Type" => "Pages",
+            "Kids" => page_ids.into_iter().map(Object::Reference).collect::<Vec<Object>>(),
+            "Count" => 6_i64,
+        });
+        for id in doc.objects.keys().cloned().collect::<Vec<_>>() {
+            if let Ok(d) = doc.get_object_mut(id).and_then(Object::as_dict_mut) {
+                if d.get(b"Type").and_then(Object::as_name).ok() == Some(b"Page".as_slice()) {
+                    d.set("Parent", Object::Reference(pages_id));
+                }
+            }
+        }
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => Object::Reference(pages_id),
+        });
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).expect("serialize multi-page pdf");
+
+        let result = PdfConverter::new()
+            .convert(Input::bytes(buf, "pagefarm.pdf"))
+            .await;
+        let err = result.expect_err("cumulative page-farm budget must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("cumulative text budget exceeded") && msg.contains("bomb protection"),
+            "expected cumulative-budget guard error, got: {msg}"
         );
     }
 
