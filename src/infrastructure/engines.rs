@@ -49,6 +49,13 @@ pub fn default_converters(
     engines.push(Box::new(
         crate::infrastructure::document::DocxConverter::new(),
     ));
+    // pdfium 本地高保真 PDF（spec R-self-002：PDF 链 priority 20 顶层）。
+    // 动态库缺失时 availability=Unavailable，registry 跳过并记录原因，
+    // 落到下方 pdf-extract 档。
+    #[cfg(feature = "pdfium")]
+    engines.push(Box::new(
+        crate::infrastructure::document::PdfiumConverter::new(),
+    ));
     // PDF local fallback tier.
     engines.push(Box::new(
         crate::infrastructure::document::PdfConverter::new(),

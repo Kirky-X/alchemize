@@ -2,8 +2,14 @@
 //! pdfium local PDF engine (feature `pdfium`) — Chrome's PDF library via
 //! pdfium-render, loaded dynamically at runtime.
 //!
+//! Binary compatibility: pdfium-render 0.5.x binds `FPDFFont_GetFontName`,
+//! which pdfium builds after ~chromium/7000 no longer export — use a
+//! 2023-era binaries release (e.g. chromium/6309) or the bind step fails
+//! with `LoadLibraryError(DlSym)`.
+//!
 //! Extraction: per-page characters with coordinates, regrouped into
-//! paragraphs by vertical gaps; embedded page images exported as assets.
+//! paragraphs by vertical gaps. Image raster export is not implemented yet
+//! (`raster export pending` marker below); `assets` stays empty for now.
 //! Library probe order: `ALCHEMIZE_PDFIUM_PATH` → `~/.cache/alchemize/lib`
 //! → system library; missing → Unavailable with a fetch hint (no silent
 //! degradation, no network).
@@ -165,7 +171,8 @@ fn extract(
         .map_err(|e| AlchemizeError::Pdf(format!("pdfium open failed: {e:?}")))?;
 
     let page_count = doc.pages().len();
-    let mut assets = Vec::new();
+    // Image raster export pending (see module docs): assets stays empty.
+    let assets = Vec::new();
     let mut markdown = String::new();
 
     for page in doc.pages().iter() {
@@ -272,8 +279,19 @@ fn extract(
 mod tests {
     use super::*;
 
+    /// Serializes env-var mutation: parallel tests share the process
+    /// environment, so the missing-library tests flipping
+    /// ALCHEMIZE_PDFIUM_PATH would race with the real-library probe.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn missing_library_reports_unavailable_with_hint() {
+        let _env = env_guard();
+        let saved = std::env::var(ENV_PDFIUM_PATH).ok();
         unsafe { std::env::set_var(ENV_PDFIUM_PATH, "/nonexistent/libpdfium.dylib") };
         let conv = PdfiumConverter::new();
         match conv.availability() {
@@ -283,7 +301,16 @@ mod tests {
             }
             Availability::Available => panic!("must be unavailable"),
         }
-        unsafe { std::env::remove_var(ENV_PDFIUM_PATH) };
+        restore_env(saved);
+    }
+
+    /// Restore ALCHEMIZE_PDFIUM_PATH to its pre-test value: sibling tests
+    /// (real-library probe) rely on the harness-provided environment.
+    fn restore_env(saved: Option<String>) {
+        match saved {
+            Some(v) => unsafe { std::env::set_var(ENV_PDFIUM_PATH, v) },
+            None => unsafe { std::env::remove_var(ENV_PDFIUM_PATH) },
+        }
     }
 
     #[test]
@@ -293,17 +320,20 @@ mod tests {
 
     #[tokio::test]
     async fn convert_without_library_errors_cleanly() {
+        let _env = env_guard();
+        let saved = std::env::var(ENV_PDFIUM_PATH).ok();
         unsafe { std::env::set_var(ENV_PDFIUM_PATH, "/nonexistent/libpdfium.dylib") };
         let conv = PdfiumConverter::new();
         let input = Input::bytes(b"%PDF-1.4 fake".to_vec(), "x.pdf");
         let result = conv.convert(input).await;
         assert!(result.is_err());
-        unsafe { std::env::remove_var(ENV_PDFIUM_PATH) };
+        restore_env(saved);
     }
 
     #[tokio::test]
     #[ignore = "requires pdfium library (ALCHEMIZE_PDFIUM_PATH or ~/.cache/alchemize/lib)"]
     async fn real_pdf_extracts_text() {
+        let _env = env_guard();
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/real/real.pdf");
         let conv = PdfiumConverter::new();

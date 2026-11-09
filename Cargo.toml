@@ -67,7 +67,7 @@ eml = ["dep:mail-parser"]
 mcp = ["sdforge/mcp"]
 # html-moli 引擎：crawlrs 吸收的 moli→htmd 转换链 + 主内容提取（third_party vendor）
 moli = ["dep:moli-html2md", "dep:scraper", "dep:dom_smoothie", "dep:ego_tree", "dep:regex", "dep:url"]
-full = ["mineru", "asr", "moli", "containers", "data", "eml", "libreoffice"]
+full = ["mineru", "asr", "moli", "containers", "data", "eml", "libreoffice", "pdfium"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
