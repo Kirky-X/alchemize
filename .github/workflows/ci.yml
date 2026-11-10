@@ -53,7 +53,7 @@ jobs:
       # diff coverage：只对相对基线分支新增/修改的行设阈值——新代码 0 覆盖也能拉高全局覆盖率的盲区由这层堵住
       # （SKILL.md 核心原则 4 + references/coverage-standards.md「diff coverage」段的落地）
       # uvx 跑 diff-cover（setup-uv 自带缓存，避免 pipx 每次 CI 冷安装）
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
       - name: Diff coverage (changed lines ≥ 90%)
         env:
           # env 间接传递：${{ }} 直接插值进 run: 是 Actions 脚本注入面（分支名可含 shell 元字符）
