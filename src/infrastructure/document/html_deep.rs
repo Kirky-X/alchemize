@@ -16,7 +16,6 @@
 mod engine;
 
 use super::html::HtmlConverter;
-use crate::application::ports::Converter as _;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
@@ -262,19 +261,73 @@ impl crate::application::ports::Converter for HtmlDeepConverter {
         let html = String::from_utf8(bytes)
             .map_err(|e| AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}")))?;
 
+        self.convert_html(&html)
+    }
+
+    /// 链上唯一 await 是 `to_bytes`（Bytes 变体即 clone）——全链同步能力
+    /// 成立；同步核见 [`HtmlDeepConverter::convert_html`]。
+    fn is_sync_capable(&self) -> bool {
+        true
+    }
+
+    fn convert_sync(&self, input: &Input) -> Result<ConvertResult, AlchemizeError> {
+        match input {
+            Input::Bytes { data, .. } => {
+                let html = String::from_utf8(data.clone()).map_err(|e| {
+                    AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}"))
+                })?;
+                self.convert_html(&html)
+            }
+            Input::Path(_) => Err(AlchemizeError::NotSyncCapable(
+                "path input requires the async port; the sync port serves in-memory Input::Bytes only"
+                    .into(),
+            )),
+        }
+    }
+
+    fn supported_extensions(&self) -> &[&str] {
+        &["html", "htm"]
+    }
+
+    /// priority 15：压过既有 html/htmd 引擎（10）——
+    /// feature html-deep 构建下本链是 html 的首选路径。
+    fn priority(&self) -> u8 {
+        15
+    }
+}
+
+impl HtmlDeepConverter {
+    /// 全同步转换链：math 保真路由 → 链接绝对化 → 主内容提取（可选）→
+    /// 全页引擎转换 → 兜底决策。async `convert` 与同步口 `convert_sync`
+    /// 在 UTF-8 解码后都委托到这里——两端口共享同一函数体，输出逐字节
+    /// 相同由构造保证。
+    pub(crate) fn convert_html(&self, html: &str) -> Result<ConvertResult, AlchemizeError> {
         // math 保真路由：引擎会展平 `<math>`（MathML 净化为行内 HTML，非
         // LaTeX）；检测条件与 html.rs preprocess_math 的触发条件（`<math`
         // 标签）严格一致，保证「preprocess 会处理的输入必然路由到 math
         // 保真路径」。（$..$ 文本无 `<math>` 标签，由引擎自身的 TeX 跨度
         // 保留覆盖。）
         if html.contains("<math") {
-            return self.html.convert(input).await;
+            return self.html.convert_str(html);
         }
 
         // 链接绝对化：仅在显式提供 base_url 时改写（缺省不动任何链接）。
-        let html = match &self.base_url {
-            Some(base) if !base.is_empty() => absoluteize_links(&html, base),
-            _ => html,
+        // 兜底输入源在改写**之前**固定下来：旧 async 实现把原始 Input 传给
+        // htmd 兜底（原始解码串），base_url 存在时兜底输出相对链接、
+        // original_size 计原始长度——零行为变化要求这里逐字节对齐（架构
+        // 审查 HIGH 修复）。
+        //
+        // Cow 避免无 base_url 默认路径的全输入拷贝：旧实现该分支是 String
+        // move（零拷贝），共享核吃 &str 后若物化 owned String 会给两个端口
+        // 各加一次 O(n) memcpy（性能审查 HIGH 修复）——Cow::Borrowed 保住
+        // 零拷贝，Deref 到 &str 的下游用法（parse/len/finish_full_page）
+        // 不变。
+        let fallback_source = html;
+        let html: std::borrow::Cow<'_, str> = match &self.base_url {
+            Some(base) if !base.is_empty() => {
+                std::borrow::Cow::Owned(absoluteize_links(html, base))
+            }
+            _ => std::borrow::Cow::Borrowed(html),
         };
 
         // 主内容提取（显式开启）：三分支同构——
@@ -313,36 +366,28 @@ impl crate::application::ports::Converter for HtmlDeepConverter {
         }
 
         // 全页转换：自研引擎主路径（html5ever 错误恢复解析，convert 本身
-        // 不可失败）。同步段独立作用域：scraper 的 ego_tree 为 Rc 树
-        // （非 Send），不得跨越下方 htmd 兜底的 await 点——本块结束即 drop。
+        // 不可失败）。整条链是纯同步函数——scraper 的 ego_tree（Rc 树，
+        // 非 Send）只活在本函数帧内，不进入任何 async 上下文。
         let primary = {
             let doc = scraper::Html::parse_document(html.trim());
             super::html_deep::engine::convert(&doc)
         };
 
-        self.finish_full_page(&html, input, primary).await
+        self.finish_full_page(&html, primary, fallback_source)
     }
 
-    fn supported_extensions(&self) -> &[&str] {
-        &["html", "htm"]
-    }
-
-    /// priority 15：压过既有 html/htmd 引擎（10）——
-    /// feature html-deep 构建下本链是 html 的首选路径。
-    fn priority(&self) -> u8 {
-        15
-    }
-}
-
-impl HtmlDeepConverter {
     /// 全页转换尾部：兜底决策（空输出防呆 → htmd 兜底 → 双失败诚实报错）
     /// 与结果装配。`primary` 由调用方传入引擎输出——独立成函数使兜底决策
-    /// 可注入空 primary 直接单测（引擎本身鲁棒，天然触发器罕见）。
-    pub(crate) async fn finish_full_page(
+    /// 可注入空 primary 直接单测（引擎本身鲁棒，天然触发器罕见）。同步
+    /// 函数：htmd 兜底走 [`HtmlConverter::convert_str`]。`fallback_source`
+    /// 是绝对化**之前**的原始解码串——旧 async 实现的兜底输入即原始串，
+    /// 零行为变化要求兜底输出与其逐字节一致；`html`（可能已改写）仅用于
+    /// `original_size` 元数据与可见性判定，与旧实现相同。
+    pub(crate) fn finish_full_page(
         &self,
         html: &str,
-        input: Input,
         primary: String,
+        fallback_source: &str,
     ) -> Result<ConvertResult, AlchemizeError> {
         if !primary.trim().is_empty() {
             let markdown = primary.trim().to_string() + "\n";
@@ -380,7 +425,7 @@ impl HtmlDeepConverter {
         // 兜底路径的 HtmlConverter 对空输出恒注入占位文本（*HTML document
         // contains no extractable content.*）——「双空」的可观察终态即占位文本
         // （LocalFallback 如实降标），不存在返回空串的路径。
-        let fallback = self.html.convert(input).await?;
+        let fallback = self.html.convert_str(fallback_source)?;
         Ok(ConvertResult::with_metadata(
             fallback.markdown,
             ContentType::Document,
@@ -393,6 +438,7 @@ impl HtmlDeepConverter {
 #[cfg(all(test, feature = "html-deep"))]
 mod tests {
     use super::*;
+    use crate::application::ports::Converter as _;
 
     fn engine() -> HtmlDeepConverter {
         HtmlDeepConverter::new(None, false)
@@ -408,18 +454,40 @@ mod tests {
     }
 
     /// 兜底正例：主输出空 + 有可见文本 → htmd 兜底（占位文本来自既有
-    /// html 引擎）且质量如实标注 LocalFallback。
-    #[tokio::test]
-    async fn fallback_triggers_on_empty_primary_with_visible_text() {
+    /// html 引擎）且质量如实标注 LocalFallback。同步化后为纯同步单测。
+    #[test]
+    fn fallback_triggers_on_empty_primary_with_visible_text() {
         let html = "<html><body><p>real visible words</p></body></html>";
         let result = engine()
-            .finish_full_page(html, page_input(html), String::new())
-            .await
+            .finish_full_page(html, String::new(), html)
             .unwrap();
         // 兜底触发后走 htmd 正常转换（占位文本仅在 htmd 也输出空时出现）；
         // 质量必须如实降标 LocalFallback——不得冒充 LocalFull。
         assert_eq!(result.markdown, "real visible words\n");
         assert_eq!(result.quality, ConversionQuality::LocalFallback);
+    }
+
+    /// 兜底输入源回归锚点（架构审查 HIGH 修复）：base_url 存在时 htmd 兜底
+    /// 转换的是 absoluteize **之前**的原始解码串——旧 async 行为。兜底输出
+    /// 必须保持相对链接（未被改写），`original_size` 计原始长度。
+    #[test]
+    fn fallback_with_base_url_uses_pre_absoluteize_source() {
+        let html = r##"<html><body><a href="page.html">doc</a></body></html>"##;
+        let engine = HtmlDeepConverter::new(Some("https://example.com/docs/".to_string()), false);
+        let result = engine.finish_full_page(html, String::new(), html).unwrap();
+        assert!(
+            result.markdown.contains("(page.html)"),
+            "fallback must see the pre-absoluteize string: {:?}",
+            result.markdown
+        );
+        assert!(
+            !result
+                .markdown
+                .contains("https://example.com/docs/page.html"),
+            "fallback output must not be absoluteized: {:?}",
+            result.markdown
+        );
+        assert_eq!(result.metadata["original_size"], html.len());
     }
 
     /// escape_leading_markdown_chars 确定性单测：
@@ -456,13 +524,12 @@ mod tests {
     }
 
     /// 防呆负例：纯脚本页面主输出空 → 正确抑制，不触发兜底（无占位文本、
-    /// 质量仍为 LocalFull——这是引擎路径的正常空输出）。
-    #[tokio::test]
-    async fn script_only_page_suppresses_without_fallback() {
+    /// 质量仍为 LocalFull——这是引擎路径的正常空输出）。同步化后为纯同步单测。
+    #[test]
+    fn script_only_page_suppresses_without_fallback() {
         let html = "<html><body><script>yo();</script></body></html>";
         let result = engine()
-            .finish_full_page(html, page_input(html), String::new())
-            .await
+            .finish_full_page(html, String::new(), html)
             .unwrap();
         assert!(
             !result.markdown.contains("no extractable content"),
@@ -566,6 +633,74 @@ mod tests {
             result.markdown.contains("(https://cdn.example/photo.jpg)"),
             "real image must survive: {:?}",
             result.markdown
+        );
+    }
+
+    // -- 同步口 ---------------------------------------------------------------
+
+    /// 两端口共享 convert_html 函数体：math 路由、extract_main、全页、
+    /// 脚本抑制四类语料上 async 与 sync 输出逐字节相等。
+    #[tokio::test]
+    async fn sync_port_matches_async_output_byte_for_byte() {
+        let corpora: [(&str, bool); 4] = [
+            // math 保真路由（htmd 路径）
+            (
+                r#"<html><body><p>Given <math alttext="\alpha+\beta" display="inline"><mi>α</mi></math> we get</p><math alttext="c^2 = a^2 + b^2" display="block"><mi>c</mi></math></body></html>"#,
+                false,
+            ),
+            // extract_main 主路径（读屏器过滤 + 引擎转换）
+            (
+                r#"<html><body><nav><span class="sr-only">Site search</span><a href="/">Home</a></nav><article><h1>Title</h1><p>body words</p></article></body></html>"#,
+                true,
+            ),
+            // 全页主路径
+            (
+                r#"<html><body><h1>Page</h1><p>words with <a href="/rel">relative link</a></p></body></html>"#,
+                false,
+            ),
+            // 脚本抑制路径（空输出不触发兜底）
+            ("<html><body><script>yo();</script></body></html>", false),
+        ];
+        for (html, extract_main) in corpora {
+            let engine = HtmlDeepConverter::new(None, extract_main);
+            let input = page_input(html);
+            let async_out = engine.convert(input.clone()).await.unwrap();
+            let sync_out = engine.convert_sync(&input).unwrap();
+            assert_eq!(async_out.markdown, sync_out.markdown, "corpus: {html}");
+            assert_eq!(async_out.quality, sync_out.quality, "corpus: {html}");
+            assert_eq!(async_out.metadata, sync_out.metadata, "corpus: {html}");
+        }
+    }
+
+    /// base_url 链接绝对化路径同样两端口一致。
+    #[tokio::test]
+    async fn sync_matches_async_with_base_url() {
+        let html =
+            r#"<html><body><a href="page.html">doc</a><img src="img/pic.png"/></body></html>"#;
+        let engine = HtmlDeepConverter::new(Some("https://example.com/docs/".to_string()), false);
+        let input = page_input(html);
+        let async_out = engine.convert(input.clone()).await.unwrap();
+        let sync_out = engine.convert_sync(&input).unwrap();
+        assert_eq!(async_out.markdown, sync_out.markdown);
+        assert_eq!(async_out.metadata, sync_out.metadata);
+        assert!(
+            async_out
+                .markdown
+                .contains("(https://example.com/docs/page.html)"),
+            "absoluteization must have run: {:?}",
+            async_out.markdown
+        );
+    }
+
+    /// Path 输入在同步口显式拒绝（实现层防御，facade 已先行守卫）。
+    #[test]
+    fn convert_sync_rejects_path_input() {
+        let err = engine()
+            .convert_sync(&Input::Path("/absent/page.html".into()))
+            .unwrap_err();
+        assert!(
+            matches!(err, AlchemizeError::NotSyncCapable(_)),
+            "expected NotSyncCapable, got {err:?}"
         );
     }
 }

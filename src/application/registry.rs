@@ -182,6 +182,156 @@ impl ConverterRegistry {
         Err(AlchemizeError::AllBackendsFailed { ext, attempts })
     }
 
+    /// Synchronous twin of [`convert_pref`](Self::convert_pref) for the sync
+    /// facade ([`Alchemize::convert_sync`]).
+    ///
+    /// Deliberately self-contained rather than sharing candidate assembly
+    /// with the async path: touching `convert_pref` would forfeit the
+    /// "async path is untouched" verification anchor. The ~30-line overlap
+    /// (prefer reordering, availability skip, attempts) is a documented
+    /// trade-off, not an oversight.
+    ///
+    /// Semantics mirrored from the async dispatch, with one filter change:
+    /// candidates must additionally be [`is_sync_capable`](Converter::is_sync_capable).
+    ///
+    /// The `DepthLimitExceeded` branch is mirrored defensively for structural
+    /// parity with the async twin: no current sync-capable engine wraps
+    /// container dispatch (containers are never sync-capable), so it cannot
+    /// fire today — the mirror turns that into an enforceable invariant
+    /// instead of an honor-system assumption.
+    ///
+    /// Empty candidate set distinguishes two refusals: the format has
+    /// engines but none sync-capable → `NotSyncCapable` (engines listed);
+    /// the format has no engine at all → `UnsupportedFormat`.
+    ///
+    /// Troubleshooting note: an engine that declares
+    /// [`is_sync_capable`](Converter::is_sync_capable) `= true` without
+    /// overriding `convert_sync` fails closed here as an `AllBackendsFailed`
+    /// attempt carrying the default `NotSyncCapable` message — not as the
+    /// empty-candidate `NotSyncCapable` refusal.
+    pub fn convert_pref_sync(
+        &self,
+        input: &Input,
+        prefer: Option<&str>,
+    ) -> Result<ConvertResult, AlchemizeError> {
+        let candidates: Vec<&dyn Converter> = self
+            .converters
+            .iter()
+            .map(|c| c.as_ref())
+            .filter(|c| c.can_convert(input))
+            .filter(|c| c.is_sync_capable())
+            .filter(|c| !(self.no_remote && c.is_remote()))
+            .collect();
+
+        if candidates.is_empty() {
+            let ext = input.extension().unwrap_or_else(|| "<none>".to_string());
+            let async_capable: Vec<&str> = self
+                .converters
+                .iter()
+                .map(|c| c.as_ref())
+                .filter(|c| c.can_convert(input))
+                .filter(|c| !(self.no_remote && c.is_remote()))
+                .map(|c| c.name())
+                .collect();
+            if async_capable.is_empty() {
+                return Err(AlchemizeError::UnsupportedFormat(ext));
+            }
+            return Err(AlchemizeError::NotSyncCapable(format!(
+                "no sync-capable engine for '{ext}' (async-only engines: {})",
+                async_capable.join(", ")
+            )));
+        }
+
+        let mut candidates = candidates;
+        if let Some(pref) = prefer {
+            let pref_lc = pref.to_ascii_lowercase();
+            let idx = candidates
+                .iter()
+                .position(|c| c.name().to_ascii_lowercase() == pref_lc)
+                .or_else(|| {
+                    candidates
+                        .iter()
+                        .position(|c| c.name().to_ascii_lowercase().starts_with(&pref_lc))
+                });
+            if let Some(idx) = idx {
+                let preferred = candidates.remove(idx);
+                candidates.insert(0, preferred);
+            }
+        }
+
+        let mut attempts: Vec<(String, String)> = Vec::new();
+        // Depth rejection is control-flow, not a "backend failed" detail —
+        // same contract as the async twin (see its comment). Unreachable
+        // today: no sync-capable engine wraps container dispatch, but the
+        // mirror keeps that an enforceable invariant, not an assumption.
+        let mut depth_limit: Option<u32> = None;
+        for (i, converter) in candidates.iter().enumerate() {
+            if let Availability::Unavailable { reason } = converter.availability() {
+                debug!(
+                    engine = converter.name(),
+                    reason = %reason,
+                    "skipping unavailable converter (sync)"
+                );
+                attempts.push((
+                    converter.name().to_string(),
+                    format!("unavailable: {reason}"),
+                ));
+                continue;
+            }
+            debug!(
+                attempt = i + 1,
+                total = candidates.len(),
+                engine = converter.name(),
+                "trying converter (sync)"
+            );
+            match converter.convert_sync(input) {
+                Ok(mut result) => {
+                    // Same provenance contract as the async dispatch: the
+                    // engine that actually produced the result must be
+                    // observable; a null/missing `converter` key counts as
+                    // missing, and non-object metadata is replaced.
+                    if result
+                        .metadata
+                        .get("converter")
+                        .is_none_or(|value| value.is_null())
+                    {
+                        if !result.metadata.is_object() {
+                            result.metadata = serde_json::json!({});
+                        }
+                        if let Some(obj) = result.metadata.as_object_mut() {
+                            obj.insert(
+                                "converter".to_string(),
+                                serde_json::Value::String(converter.name().to_string()),
+                            );
+                        }
+                    }
+                    return Ok(result);
+                }
+                Err(e) => {
+                    if let AlchemizeError::DepthLimitExceeded { limit } = &e {
+                        depth_limit.get_or_insert(*limit);
+                    }
+                    // Log the variant label only: converter messages may embed
+                    // remote response bodies or internal endpoints (mirrors
+                    // the async twin's failure logging).
+                    warn!(
+                        error_kind = e.kind(),
+                        attempt = i + 1,
+                        engine = converter.name(),
+                        "converter failed, trying next (sync)"
+                    );
+                    attempts.push((converter.name().to_string(), e.to_string()));
+                }
+            }
+        }
+
+        if let Some(limit) = depth_limit {
+            return Err(AlchemizeError::DepthLimitExceeded { limit });
+        }
+        let ext = input.extension().unwrap_or_else(|| "<none>".to_string());
+        Err(AlchemizeError::AllBackendsFailed { ext, attempts })
+    }
+
     /// Return the number of registered converters.
     pub fn len(&self) -> usize {
         self.converters.len()
@@ -517,6 +667,144 @@ mod tests {
         let input = Input::bytes(vec![], "t.pdf");
         let result = registry.convert(&input).await.unwrap();
         assert_eq!(result.markdown, "local");
+    }
+
+    /// 同步分发测试的可能力 stub：`sync` 开关模拟「声明 / 未声明同步能力」，
+    /// `available` 开关模拟 availability 探针结果。
+    struct SyncStub {
+        extensions: &'static [&'static str],
+        markdown: &'static str,
+        name: &'static str,
+        sync: bool,
+        available: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl Converter for SyncStub {
+        async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+            unreachable!("async path not exercised in sync dispatch tests")
+        }
+        fn supported_extensions(&self) -> &[&str] {
+            self.extensions
+        }
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn is_sync_capable(&self) -> bool {
+            self.sync
+        }
+        fn convert_sync(&self, _input: &Input) -> Result<ConvertResult, AlchemizeError> {
+            Ok(ConvertResult::from_markdown(
+                self.markdown,
+                ContentType::Document,
+            ))
+        }
+        fn availability(&self) -> Availability {
+            if self.available {
+                Availability::Available
+            } else {
+                Availability::Unavailable {
+                    reason: "probe failed".into(),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn convert_pref_sync_converts_and_records_provenance() {
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(SyncStub {
+            extensions: &["html"],
+            markdown: "synced",
+            name: "sync-engine",
+            sync: true,
+            available: true,
+        }));
+        let input = Input::bytes(vec![], "t.html");
+        let result = registry.convert_pref_sync(&input, None).unwrap();
+        assert_eq!(result.markdown, "synced");
+        assert_eq!(result.metadata["converter"], "sync-engine");
+    }
+
+    /// 「格式有引擎但全部纯异步」必须显式拒绝并点名引擎——不得静默换成
+    /// 其他引擎，也不得冒充 UnsupportedFormat。
+    #[test]
+    fn convert_pref_sync_rejects_async_only_format_explicitly() {
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(SyncStub {
+            extensions: &["pdf"],
+            markdown: "",
+            name: "pdf-async",
+            sync: false,
+            available: true,
+        }));
+        let input = Input::bytes(vec![], "t.pdf");
+        let err = registry.convert_pref_sync(&input, None).unwrap_err();
+        assert!(
+            matches!(err, AlchemizeError::NotSyncCapable(_)),
+            "expected NotSyncCapable, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("no sync-capable engine"), "{msg}");
+        assert!(
+            msg.contains("pdf-async"),
+            "engine names must surface: {msg}"
+        );
+    }
+
+    #[test]
+    fn convert_pref_sync_unknown_extension_is_unsupported_format() {
+        let registry = ConverterRegistry::new();
+        let input = Input::bytes(vec![], "t.xyz");
+        let err = registry.convert_pref_sync(&input, None).unwrap_err();
+        assert!(matches!(err, AlchemizeError::UnsupportedFormat(_)));
+    }
+
+    #[test]
+    fn convert_pref_sync_skips_unavailable_and_reports_attempts() {
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(SyncStub {
+            extensions: &["html"],
+            markdown: "never",
+            name: "down-engine",
+            sync: true,
+            available: false,
+        }));
+        let input = Input::bytes(vec![], "t.html");
+        let err = registry.convert_pref_sync(&input, None).unwrap_err();
+        match err {
+            AlchemizeError::AllBackendsFailed { ext, attempts } => {
+                assert_eq!(ext, "html");
+                assert_eq!(attempts.len(), 1);
+                assert_eq!(attempts[0].0, "down-engine");
+                assert!(attempts[0].1.contains("unavailable"));
+            }
+            other => panic!("expected AllBackendsFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn convert_pref_sync_prefers_named_engine() {
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(SyncStub {
+            extensions: &["html"],
+            markdown: "aaa-out",
+            name: "aaa",
+            sync: true,
+            available: true,
+        }));
+        registry.register(Box::new(SyncStub {
+            extensions: &["html"],
+            markdown: "zzz-out",
+            name: "zzz",
+            sync: true,
+            available: true,
+        }));
+        let input = Input::bytes(vec![], "t.html");
+        let default = registry.convert_pref_sync(&input, None).unwrap();
+        assert_eq!(default.markdown, "aaa-out");
+        let preferred = registry.convert_pref_sync(&input, Some("zzz")).unwrap();
+        assert_eq!(preferred.markdown, "zzz-out");
     }
 
     #[test]

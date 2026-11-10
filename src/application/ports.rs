@@ -84,6 +84,45 @@ pub trait Converter: Send + Sync {
     fn is_remote(&self) -> bool {
         false
     }
+
+    /// Whether this converter's whole chain can run synchronously on
+    /// in-memory bytes (`Input::Bytes`).
+    ///
+    /// The declaration is the engine's own — the registry never keeps a
+    /// parallel sync-capable list (that would drift). Only engines whose
+    /// full chain is free of real awaits (no file I/O, no HTTP, no external
+    /// processes) may return `true`; the sync port
+    /// ([`Alchemize::convert_sync`](crate::application::builder::Alchemize::convert_sync))
+    /// serves only such engines. Default: `false` (async-only).
+    ///
+    /// # Contract
+    /// - Returning `true` requires overriding `convert_sync` with a real
+    ///   sync chain — otherwise the sync port fails closed with the default
+    ///   `NotSyncCapable` error (no panic, no `block_on`).
+    /// - A sync-capable engine must not wrap container dispatch
+    ///   (`DepthLimitExceeded` is unreachable on the sync chain by design —
+    ///   see `ConverterRegistry::convert_pref_sync`).
+    fn is_sync_capable(&self) -> bool {
+        false
+    }
+
+    /// Synchronous conversion of an in-memory input.
+    ///
+    /// Contract: `input` must be `Input::Bytes` — the sync facade guards
+    /// this, and implementations must defensively reject `Input::Path` with
+    /// [`AlchemizeError::NotSyncCapable`] (never read the filesystem here).
+    /// Default: `NotSyncCapable` naming the engine — engines without a sync
+    /// chain need zero changes to keep compiling.
+    ///
+    /// # Blocking
+    /// Implementations do CPU-bound conversion work on the caller's thread;
+    /// on an async worker, prefer `spawn_blocking` for large inputs.
+    fn convert_sync(&self, _input: &Input) -> Result<ConvertResult, AlchemizeError> {
+        Err(AlchemizeError::NotSyncCapable(format!(
+            "engine '{}' has no synchronous path",
+            self.name()
+        )))
+    }
 }
 
 /// Vision provider port — image description and OCR.
@@ -242,6 +281,40 @@ mod tests {
             assert!(which_program("ls"));
         }
         assert!(!which_program("definitely-not-a-real-program-xyz"));
+    }
+
+    /// 未同步化的引擎零改动可用：默认能力声明为 false，默认 convert_sync
+    /// 显式拒绝且消息携带引擎名（不 panic、不 block_on）。
+    #[test]
+    fn sync_capability_defaults_reject_explicitly() {
+        struct AsyncOnly;
+        #[async_trait::async_trait]
+        impl Converter for AsyncOnly {
+            async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+                unreachable!("async path not exercised by this test")
+            }
+            fn supported_extensions(&self) -> &[&str] {
+                &["pdf"]
+            }
+            fn name(&self) -> &'static str {
+                "async-only"
+            }
+        }
+
+        let conv = AsyncOnly;
+        assert!(!conv.is_sync_capable());
+        let input = Input::bytes(b"<html></html>".to_vec(), "t.html");
+        let err = conv.convert_sync(&input).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("synchronous conversion not available"),
+            "explicit rejection, not silent: {msg}"
+        );
+        assert!(
+            msg.contains("async-only"),
+            "engine name must surface: {msg}"
+        );
+        assert_eq!(err.kind(), "not_sync_capable");
     }
 
     #[test]

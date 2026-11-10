@@ -27,6 +27,46 @@ impl HtmlConverter {
             converter: HtmlToMarkdown::new(),
         }
     }
+
+    /// Synchronous core of the conversion: everything after UTF-8 decoding
+    /// (style/script strip → math preprocessing → htmd → placeholder
+    /// restore → result assembly). The async port delegates here after
+    /// `to_bytes`, so both ports share one body and their outputs are
+    /// byte-identical by construction.
+    pub(crate) fn convert_str(&self, html: &str) -> Result<ConvertResult, AlchemizeError> {
+        // Real-world HTML carries <style>/<script> whose text would leak
+        // into the body; strip them before any other processing.
+        let html = strip_style_and_script(html);
+
+        // LaTeXML-style math must survive as LaTeX: extract before htmd
+        // would flatten the element tree, and restore after — htmd escapes
+        // backslashes inside `$…$`, so the LaTeX travels as a placeholder.
+        let (preprocessed, fragments) = preprocess_math(&html);
+
+        let markdown = self
+            .converter
+            .convert(&preprocessed)
+            .map_err(|e| AlchemizeError::other(format!("HTML conversion failed: {e}")))?;
+
+        let markdown = restore_math(&markdown, &fragments);
+
+        let markdown = if markdown.trim().is_empty() {
+            "*HTML document contains no extractable content.*\n".to_string()
+        } else {
+            markdown.trim().to_string() + "\n"
+        };
+
+        let metadata = serde_json::json!({
+            "source_format": "html",
+            "original_size": html.len(),
+            "output_size": markdown.len(),
+        });
+
+        Ok(
+            ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
+                .with_quality(ConversionQuality::LocalFull),
+        )
+    }
 }
 
 impl Default for HtmlConverter {
@@ -197,38 +237,27 @@ impl Converter for HtmlConverter {
         let html = String::from_utf8(bytes)
             .map_err(|e| AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}")))?;
 
-        // Real-world HTML carries <style>/<script> whose text would leak
-        // into the body; strip them before any other processing.
-        let html = strip_style_and_script(&html);
+        self.convert_str(&html)
+    }
 
-        // LaTeXML-style math must survive as LaTeX: extract before htmd
-        // would flatten the element tree, and restore after — htmd escapes
-        // backslashes inside `$…$`, so the LaTeX travels as a placeholder.
-        let (preprocessed, fragments) = preprocess_math(&html);
+    /// 链上唯一 await 是 `to_bytes`（Bytes 变体即 clone）——全链同步能力成立。
+    fn is_sync_capable(&self) -> bool {
+        true
+    }
 
-        let markdown = self
-            .converter
-            .convert(&preprocessed)
-            .map_err(|e| AlchemizeError::other(format!("HTML conversion failed: {e}")))?;
-
-        let markdown = restore_math(&markdown, &fragments);
-
-        let markdown = if markdown.trim().is_empty() {
-            "*HTML document contains no extractable content.*\n".to_string()
-        } else {
-            markdown.trim().to_string() + "\n"
-        };
-
-        let metadata = serde_json::json!({
-            "source_format": "html",
-            "original_size": html.len(),
-            "output_size": markdown.len(),
-        });
-
-        Ok(
-            ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
-                .with_quality(ConversionQuality::LocalFull),
-        )
+    fn convert_sync(&self, input: &Input) -> Result<ConvertResult, AlchemizeError> {
+        match input {
+            Input::Bytes { data, .. } => {
+                let html = String::from_utf8(data.clone()).map_err(|e| {
+                    AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}"))
+                })?;
+                self.convert_str(&html)
+            }
+            Input::Path(_) => Err(AlchemizeError::NotSyncCapable(
+                "path input requires the async port; the sync port serves in-memory Input::Bytes only"
+                    .into(),
+            )),
+        }
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -390,6 +419,35 @@ mod tests {
             result.markdown.contains("$$c^2 = a^2 + b^2$$"),
             "md: {}",
             result.markdown
+        );
+    }
+
+    // -- 同步口 ---------------------------------------------------------------
+
+    /// 两个端口共用同一 convert_str 函数体：含 style/script/math/链接/表格
+    /// 的语料上，async 与 sync 输出（markdown+quality+metadata）逐字节相等。
+    #[tokio::test]
+    async fn sync_port_matches_async_output_byte_for_byte() {
+        let converter = HtmlConverter::new();
+        let html = r##"<html><head><style>:root{--x:red}</style></head><body><p>Given <math alttext="\alpha+\beta" display="inline"><mi>α</mi></math> we get</p><math alttext="c^2 = a^2 + b^2" display="block"><mi>c</mi></math><script>alert(1)</script><a href="#anchor">link</a><table><tr><td>cell</td></tr></table></body></html>"##;
+        let input = Input::bytes(html.as_bytes().to_vec(), "paper.html");
+        let async_out = converter.convert(input.clone()).await.unwrap();
+        let sync_out = converter.convert_sync(&input).unwrap();
+        assert_eq!(async_out.markdown, sync_out.markdown);
+        assert_eq!(async_out.quality, sync_out.quality);
+        assert_eq!(async_out.metadata, sync_out.metadata);
+    }
+
+    /// Path 输入在同步口显式拒绝（facade 已先行守卫，此处为实现层防御）。
+    #[test]
+    fn convert_sync_rejects_path_input() {
+        let converter = HtmlConverter::new();
+        let err = converter
+            .convert_sync(&Input::Path("/absent/page.html".into()))
+            .unwrap_err();
+        assert!(
+            matches!(err, AlchemizeError::NotSyncCapable(_)),
+            "expected NotSyncCapable, got {err:?}"
         );
     }
 }

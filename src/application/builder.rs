@@ -152,6 +152,52 @@ impl Alchemize {
         self.registry.convert_pref(input, prefer).await
     }
 
+    /// Convert an in-memory input synchronously.
+    ///
+    /// The generic sync port: serves only formats whose selected engines
+    /// declare [`Converter::is_sync_capable`](crate::application::ports::Converter::is_sync_capable).
+    /// Guarded refusals (never silent, never `block_on`):
+    /// - `Input::Path` → `NotSyncCapable` (the sync port serves in-memory
+    ///   bytes only; path inputs go through the async port);
+    /// - `zip`/`cbz` extensions → `NotSyncCapable` (nested dispatch is an
+    ///   async structure);
+    /// - no sync-capable engine for the format → `NotSyncCapable` naming
+    ///   the async-only engines;
+    /// - size ceiling enforced before dispatch, same as [`Self::convert_pref`].
+    ///
+    /// Guard priority differs from the async port by design: category-based
+    /// refusals (path input, zip/cbz) run before the size check, so a
+    /// zip/cbz input over the ceiling reports `NotSyncCapable` rather than
+    /// the size error. The async port has no category refusals, so its
+    /// order is size → zip.
+    ///
+    /// # Blocking
+    /// This is CPU-bound work (DOM parsing + conversion, inputs up to
+    /// `max_file_size`). Calling it on an async worker thread blocks that
+    /// worker for the whole conversion — for large inputs, call it from a
+    /// dedicated thread (e.g. inside `spawn_blocking`).
+    pub fn convert_sync(&self, input: &Input) -> Result<ConvertResult, AlchemizeError> {
+        if matches!(input, Input::Path(_)) {
+            return Err(AlchemizeError::NotSyncCapable(
+                "path input requires the async port; the sync port serves in-memory Input::Bytes only".into(),
+            ));
+        }
+        if matches!(input.extension().as_deref(), Some("zip") | Some("cbz")) {
+            return Err(AlchemizeError::NotSyncCapable(
+                "zip/cbz requires nested async dispatch; use the async port".into(),
+            ));
+        }
+        if let Some(len) = input.len()
+            && len as usize > self.max_file_size
+        {
+            return Err(AlchemizeError::Other(format!(
+                "input size {len} bytes exceeds max_file_size {} bytes",
+                self.max_file_size
+            )));
+        }
+        self.registry.convert_pref_sync(input, None)
+    }
+
     /// Aggregate engine availability for diagnostics.
     pub fn availability(
         &self,
@@ -426,5 +472,117 @@ mod tests {
         let alch = AlchemizeBuilder::new().with_max_file_size(1 << 20).build();
         let input = Input::bytes(vec![0u8; 11], "ok.txt");
         assert!(alch.convert(&input).await.is_ok());
+    }
+
+    // -- sync port ------------------------------------------------------------
+
+    /// 同步口正例：内存 Bytes 输入走同步分发（默认构建下 html 引擎声明了
+    /// 同步能力）。
+    #[test]
+    fn convert_sync_converts_in_memory_html() {
+        let alch = AlchemizeBuilder::new().build();
+        let input = Input::bytes("<h1>Sync</h1>".as_bytes().to_vec(), "t.html");
+        let result = alch.convert_sync(&input).unwrap();
+        assert!(result.markdown.contains("Sync"), "{:?}", result.markdown);
+    }
+
+    /// Path 输入必须显式拒绝且不触碰文件系统：路径不存在却返回
+    /// NotSyncCapable（而非 FileRead），证明守卫先于任何 I/O。
+    #[test]
+    fn convert_sync_rejects_path_input_without_filesystem_access() {
+        let alch = AlchemizeBuilder::new().build();
+        let input = Input::Path(std::path::PathBuf::from("/definitely/absent/x.html"));
+        let err = alch.convert_sync(&input).unwrap_err();
+        assert!(
+            matches!(err, AlchemizeError::NotSyncCapable(_)),
+            "expected NotSyncCapable, got {err:?}"
+        );
+    }
+
+    /// 有引擎（pdf/pdfium）但无同步能力的格式：显式拒绝并点名引擎，
+    /// 不得静默降级。断言 "pdf" 子串同时覆盖默认态（pdf）与全量态
+    /// （pdfium）两种注册面。
+    #[test]
+    fn convert_sync_rejects_async_only_format_naming_engines() {
+        let alch = AlchemizeBuilder::new().build();
+        let input = Input::bytes(vec![0u8; 16], "t.pdf");
+        let err = alch.convert_sync(&input).unwrap_err();
+        assert!(
+            matches!(err, AlchemizeError::NotSyncCapable(_)),
+            "expected NotSyncCapable, got {err:?}"
+        );
+        assert!(err.to_string().contains("pdf"), "{err}");
+    }
+
+    /// zip/cbz 的嵌套分发是异步结构：同步口显式拒绝。
+    #[test]
+    fn convert_sync_rejects_zip_extension() {
+        let alch = AlchemizeBuilder::new().build();
+        let input = Input::bytes(vec![0u8; 4], "x.zip");
+        let err = alch.convert_sync(&input).unwrap_err();
+        assert!(matches!(err, AlchemizeError::NotSyncCapable(_)));
+    }
+
+    /// 大小上限守卫先于同步分发，消息含实际大小与上限两数值（与 async 同文案）。
+    #[test]
+    fn convert_sync_enforces_size_ceiling_before_dispatch() {
+        let alch = AlchemizeBuilder::new().with_max_file_size(10).build();
+        let input = Input::bytes(vec![0u8; 11], "big.html");
+        let err = alch.convert_sync(&input).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("exceeds max_file_size"), "{msg}");
+        assert!(msg.contains("11"), "{msg}");
+        assert!(msg.contains("10"), "{msg}");
+    }
+
+    // -- facade 级 async/sync 零行为变化差分 ----------------------------------
+
+    /// 差分语料：基础结构 / 表格链接 / style+script / math。断言 facade 两个
+    /// 端口的输出（markdown+quality+metadata，含 converter 溯源）逐字节相等。
+    #[tokio::test]
+    async fn facade_sync_matches_async_byte_for_byte() {
+        let corpora = [
+            "<h1>Title</h1><p>Hello <em>world</em></p>",
+            "<table><tr><th>h</th></tr><tr><td>c1</td></tr></table><a href=\"/rel\">rel</a>",
+            "<html><head><style>:root{--x:red}</style><script>alert(1)</script></head><body><p>prose</p></body></html>",
+            "<p>Given <math alttext=\"\\alpha+\\beta\" display=\"inline\"><mi>α</mi></math> and <math alttext=\"E=mc^2\" display=\"block\"><mi>E</mi></math></p>",
+        ];
+        let alch = AlchemizeBuilder::new().build();
+        for html in corpora {
+            let input = Input::bytes(html.as_bytes().to_vec(), "page.html");
+            let async_out = alch.convert(&input).await.unwrap();
+            let sync_out = alch.convert_sync(&input).unwrap();
+            assert_eq!(async_out.markdown, sync_out.markdown, "corpus: {html}");
+            assert_eq!(async_out.quality, sync_out.quality, "corpus: {html}");
+            assert_eq!(async_out.metadata, sync_out.metadata, "corpus: {html}");
+        }
+    }
+
+    /// html-deep feature 下同样逐字节相等，且两端口溯源均为 html-deep 引擎
+    /// （math 路由语料的兜底 htmd 输出也以顶层转换器名义入库）。
+    #[cfg(feature = "html-deep")]
+    #[tokio::test]
+    async fn facade_sync_matches_async_byte_for_byte_html_deep() {
+        let corpora = [
+            "<h1>Title</h1><p>Hello <em>world</em></p>",
+            "<p>Given <math alttext=\"\\alpha+\\beta\" display=\"inline\"><mi>α</mi></math></p>",
+            "<html><body><script>yo();</script></body></html>",
+        ];
+        let alch = AlchemizeBuilder::new()
+            .with_html_deep(HtmlDeepEngineConfig::default())
+            .build();
+        for html in corpora {
+            let input = Input::bytes(html.as_bytes().to_vec(), "page.html");
+            let async_out = alch.convert(&input).await.unwrap();
+            let sync_out = alch.convert_sync(&input).unwrap();
+            assert_eq!(async_out.markdown, sync_out.markdown, "corpus: {html}");
+            assert_eq!(async_out.quality, sync_out.quality, "corpus: {html}");
+            assert_eq!(async_out.metadata, sync_out.metadata, "corpus: {html}");
+            assert_eq!(
+                async_out.metadata["converter"], "html-deep",
+                "provenance must name the deep engine: {:?}",
+                async_out.metadata
+            );
+        }
     }
 }

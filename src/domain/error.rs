@@ -85,6 +85,11 @@ pub enum AlchemizeError {
     /// A generic error from a converter implementation.
     #[error("{0}")]
     Other(String),
+
+    /// The synchronous conversion port cannot serve this request (path
+    /// input, or no sync-capable engine for the format).
+    #[error("synchronous conversion not available: {0}")]
+    NotSyncCapable(String),
 }
 
 /// Security violation types for URL validation.
@@ -146,6 +151,7 @@ impl AlchemizeError {
             Self::SecurityViolation { .. } => "security_violation",
             Self::ResponseTooLarge { .. } => "response_too_large",
             Self::Other(_) => "other",
+            Self::NotSyncCapable(_) => "not_sync_capable",
         }
     }
 }
@@ -158,6 +164,18 @@ mod tests {
     fn error_display_unsupported_format() {
         let err = AlchemizeError::UnsupportedFormat("xyz".to_string());
         assert!(err.to_string().contains("unsupported format"));
+    }
+
+    #[test]
+    fn error_display_not_sync_capable_carries_reason_and_kind() {
+        let err = AlchemizeError::NotSyncCapable("path input".to_string());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("synchronous conversion not available"),
+            "display must name the port: {msg}"
+        );
+        assert!(msg.contains("path input"), "reason must surface: {msg}");
+        assert_eq!(err.kind(), "not_sync_capable");
     }
 
     #[test]
