@@ -73,7 +73,7 @@ impl Converter for HeicConverter {
                     let asset = Asset::new("images/0000-heic.png", png);
                     return Ok(ConvertResult::with_metadata(
                         markdown,
-                        ContentType::Document,
+                        ContentType::Image,
                         metadata,
                     )
                     .with_quality(ConversionQuality::LocalFull)
@@ -93,7 +93,7 @@ impl Converter for HeicConverter {
                     });
                     return Ok(ConvertResult::with_metadata(
                         markdown,
-                        ContentType::Document,
+                        ContentType::Image,
                         metadata,
                     )
                     .with_quality(ConversionQuality::LocalFallback));
@@ -112,7 +112,7 @@ impl Converter for HeicConverter {
             "decoder": "absent",
         });
         Ok(
-            ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
+            ConvertResult::with_metadata(markdown, ContentType::Image, metadata)
                 .with_quality(ConversionQuality::LocalFallback),
         )
     }

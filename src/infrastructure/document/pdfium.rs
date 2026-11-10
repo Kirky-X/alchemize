@@ -16,7 +16,7 @@
 
 #![cfg(feature = "pdfium")]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 

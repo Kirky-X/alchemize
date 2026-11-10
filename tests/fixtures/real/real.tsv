@@ -1,0 +1,16 @@
+repo	slug	default_branch	issues_open	prs_open	dependabot	codescan	secretscan	ci	ci_detail	release	archived	visibility	last_push	dirty	ahead	behind	checked_at
+CalNexus	Kirky-X/CalNexus	main	0	7	0	0	0	failure	Security Audit	v0.2.0-rc.2	false	public	2026-11-06T01:21:20Z	0	0	0	2026-11-10T22:44:28+0800
+CodeNexus	Kirky-X/CodeNexus	main	0	1	0	0	0	success	-	v0.3.12	false	public	2026-11-06T01:21:28Z	12	0	0	2026-11-10T22:44:28+0800
+NebulaId	Kirky-X/NebulaId	main	0	6	0	0	0	success	-	v0.2.0	false	public	2026-11-09T10:35:30Z	0	0	0	2026-11-10T22:44:28+0800
+alchemize	Kirky-X/alchemize	main	0	0	ERR(403)	na	0	none	-	none	false	public	2026-11-05T19:48:38Z	13	62	0	2026-11-10T22:44:28+0800
+confers	Kirky-X/confers	main	0	5	0	0	0	ERR(502)	-	v0.5.1	false	public	2026-11-09T10:29:11Z	0	0	0	2026-11-10T22:44:28+0800
+crawlrs-pinned	Kirky-X/crawlrs	main	0	0	0	0	0	running	-	v0.2.0	false	public	2026-11-10T14:40:42Z	0	0	0	2026-11-10T22:44:28+0800
+dbnexus	Kirky-X/dbnexus	main	0	5	0	0	0	failure	CI	v0.5.1	false	public	2026-11-09T10:56:45Z	0	1	0	2026-11-10T22:44:28+0800
+fluxweir	Kirky-X/fluxweir	main	0	0	0	0	na	success	-	v0.1.1	false	public	2026-11-09T17:09:36Z	0	0	0	2026-11-10T22:44:28+0800
+garrison	Kirky-X/garrison	main	0	4	0	0	0	failure	Fuzz Weekly,CI	v0.8.1	false	public	2026-11-10T04:35:09Z	0	0	0	2026-11-10T22:44:28+0800
+inklog	Kirky-X/inklog	main	0	3	0	0	0	success	-	v0.2.0	false	public	2026-11-09T10:58:54Z	0	0	0	2026-11-10T22:44:28+0800
+limiteron	Kirky-X/limiteron	main	0	1	0	0	0	success	-	v0.2.10	false	public	2026-11-09T10:48:47Z	0	0	0	2026-11-10T22:44:28+0800
+oxcache	Kirky-X/oxcache	main	4	2	0	0	0	failure	Security and Dependency Check,CI	v0.4.3	false	public	2026-11-09T11:03:42Z	0	0	0	2026-11-10T22:44:28+0800
+sdforge	Kirky-X/sdforge	main	0	2	0	0	0	success	-	v0.4.6	false	public	2026-11-09T11:00:26Z	0	0	0	2026-11-10T22:44:28+0800
+trait-kit	Kirky-X/trait-kit	main	0	2	0	0	0	success	-	v0.4.1	false	public	2026-11-09T10:38:57Z	0	0	0	2026-11-10T22:44:28+0800
+vecboost	Kirky-X/vecboost	main	0	3	0	0	0	failure	Scenario Tests	v0.2.1	false	public	2026-11-09T01:55:16Z	0	0	0	2026-11-10T22:44:28+0800

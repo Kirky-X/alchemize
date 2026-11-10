@@ -2,8 +2,6 @@
 
 //! Apache Parquet converter — schema + rows rendered as a markdown table (T024).
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use parquet::file::reader::{FileReader, SerializedFileReader};
@@ -192,6 +190,7 @@ mod tests {
     use parquet::data_type::{BoolType, ByteArrayType, DoubleType, Int32Type, Int64Type};
     use parquet::file::writer::SerializedFileWriter;
     use parquet::schema::types;
+    use std::sync::Arc;
 
     /// Build a real parquet file in memory: id INT32, score DOUBLE,
     /// name BYTE_ARRAY, flag BOOLEAN, ts INT64.

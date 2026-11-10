@@ -6,8 +6,13 @@
 //! Every fixture under `tests/fixtures/real/` is a genuine file harvested
 //! from this machine or the sibling projects (macOS system documentation,
 //! etyma wordlists, vecboost sources/assets) — not a hand-assembled minimal
-//! archive. Assertions check *real content* (specific words/structures from
-//! the source), not just non-emptiness.
+//! archive. Four types with no local real file (epub/ipynb/webp/ogg) come
+//! from canonical public sources instead: Project Gutenberg eBook #11, the
+//! PythonDataScienceHandbook notebooks, Google's WebP gallery, and MDN's
+//! webaudio-examples. `real.flac` is a CoreAudio `afconvert` transcode of
+//! the real WAV asset (the OS's own lossless encoder). Assertions check
+//! *real content* (specific words/structures from the source), not just
+//! non-emptiness.
 
 use alchemize::application::builder::AlchemizeBuilder;
 use alchemize::domain::input::Input;
@@ -271,6 +276,255 @@ async fn real_mp4_degraded_or_extracted() {
     assert_eq!(result.content_type, alchemize::domain::ContentType::Video);
 }
 
+// -- PPTX (real design-deck slide capture, local harvest) --------------------
+
+#[tokio::test]
+async fn real_pptx_extracts_design_deck_slides() {
+    let (md, _) = convert("real.pptx").await;
+    assert!(
+        md.contains("Slide 1"),
+        "slide marker missing: {}",
+        &md[..md.len().min(300)]
+    );
+    assert!(md.contains("Brand kit"), "slide title missing");
+    assert!(md.contains("vercel.com"), "slide URL missing");
+    assert!(md.chars().count() > 200, "pptx body too short");
+}
+
+// -- ODT (real ODF text document, local harvest) -----------------------------
+
+#[tokio::test]
+async fn real_odt_extracts_styled_prose() {
+    let (md, _) = convert("real.odt").await;
+    assert!(md.contains("Quarterly Review"), "heading missing");
+    assert!(md.contains("**bold run**"), "bold span missing");
+    assert!(
+        md.contains("[web link](https://example.com/report)"),
+        "hyperlink missing"
+    );
+    assert!(md.chars().count() > 100, "odt body too short");
+}
+
+// -- ODP (real ODF presentation, local harvest) ------------------------------
+
+#[tokio::test]
+async fn real_odp_extracts_slides_and_assets() {
+    let (md, _) = convert("real.odp").await;
+    assert!(md.contains("Slide 1"), "slide marker missing");
+    assert!(md.contains("Slide one headline"), "slide title missing");
+    assert!(md.contains("![]("), "image asset missing");
+    assert!(md.chars().count() > 100, "odp body too short");
+}
+
+// -- HEIC (real photo from this machine; OS sips decode) ---------------------
+
+#[tokio::test]
+async fn real_heic_decodes_to_png_via_os() {
+    let path = real("real.heic");
+    let alch = AlchemizeBuilder::new().build();
+    let result = alch.convert(&Input::Path(path)).await.expect("heic must convert");
+    assert!(
+        result.markdown.contains("![real.heic](images/"),
+        "decoded asset reference missing: {}",
+        result.markdown
+    );
+    assert!(result.markdown.contains("512×512"), "dimensions missing");
+    assert_eq!(result.content_type, alchemize::domain::ContentType::Image);
+}
+
+// -- GIF/JPEG/WebP (real bitmaps; metadata degrade without vision) -----------
+
+#[tokio::test]
+async fn real_image_family_degrades_without_vision() {
+    let cases = [
+        ("real.gif", 520),     // WRF tools asset (sibling project janvi)
+        ("real.jpg", 17480),   // macOS desktop-picture thumbnail
+        ("real.webp", 30320),  // Google WebP gallery official sample (VP8 550×368)
+    ];
+    let alch = AlchemizeBuilder::new().build();
+    for (name, bytes) in cases {
+        let result = alch
+            .convert(&Input::Path(real(name)))
+            .await
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(
+            result.markdown.contains(name) && result.markdown.contains("byte"),
+            "{name}: metadata markdown expected: {}",
+            result.markdown
+        );
+        assert_eq!(result.metadata["byte_count"], bytes, "{name}");
+        assert_eq!(result.content_type, alchemize::domain::ContentType::Image);
+    }
+}
+
+// -- MP3/OGG/FLAC (real audio; metadata degrade without ASR) -----------------
+
+#[tokio::test]
+async fn real_audio_family_degrades_without_asr() {
+    let cases = [
+        ("real.mp3", 244590),  // iMovie sound effect "Bubbles"
+        ("real.ogg", 678516),  // MDN webaudio-examples Xiph.Org Vorbis sample
+        ("real.flac", 180411), // CoreAudio afconvert FLAC of real.wav
+    ];
+    let alch = AlchemizeBuilder::new().build();
+    for (name, bytes) in cases {
+        let result = alch
+            .convert(&Input::Path(real(name)))
+            .await
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(
+            result.markdown.contains(name),
+            "{name}: metadata markdown expected: {}",
+            result.markdown
+        );
+        assert_eq!(result.metadata["byte_count"], bytes, "{name}");
+        assert_eq!(result.content_type, alchemize::domain::ContentType::Audio);
+    }
+}
+
+// -- Container-header sanity for the harvested audio trio --------------------
+
+#[test]
+fn real_mp3_ogg_flac_headers_are_genuine() {
+    let mp3 = std::fs::read(real("real.mp3")).unwrap();
+    assert_eq!(&mp3[0..3], b"ID3", "mp3 must start with an ID3 tag");
+    let ogg = std::fs::read(real("real.ogg")).unwrap();
+    assert_eq!(&ogg[0..4], b"OggS", "ogg must start with the OggS capture pattern");
+    assert!(
+        ogg.windows(7).any(|w| w == b"\x01vorbis"),
+        "first Vorbis identification header missing"
+    );
+    let flac = std::fs::read(real("real.flac")).unwrap();
+    assert_eq!(&flac[0..4], b"fLaC", "flac must start with the fLaC magic");
+}
+
+// -- CSV (real crawlrs moli bench results) -----------------------------------
+
+#[tokio::test]
+async fn real_csv_converts_to_markdown_table() {
+    let (md, _) = convert("real.csv").await;
+    assert!(
+        md.starts_with("| kind | engine | site | run | ok | ms | html_len |"),
+        "header row missing or wrong: {}",
+        &md[..md.len().min(200)]
+    );
+    // All 80 data rows of the source survive the table conversion.
+    let rows = md.lines().filter(|l| l.starts_with("| row |")).count();
+    assert_eq!(rows, 80, "expected all 80 data rows, got {rows}");
+    assert!(md.contains("https://github.com"), "real site values missing");
+}
+
+// -- TSV (real repo status ledger from .github; public-repo rows only —
+//    the 5 private-repo rows were filtered out before committing) ----------
+
+#[tokio::test]
+async fn real_tsv_converts_to_markdown_table() {
+    let (md, _) = convert("real.tsv").await;
+    assert!(md.contains("| repo | slug | default_branch |"), "header missing");
+    assert!(md.contains("| CalNexus | Kirky-X/CalNexus |"), "first row missing");
+    assert!(md.contains("Kirky-X/alchemize"), "own repo row missing");
+    let rows = md
+        .lines()
+        .filter(|l| l.starts_with("| ") && !l.starts_with("| repo |") && !l.starts_with("|---"))
+        .count();
+    assert_eq!(rows, 15, "expected all 15 public-repo rows, got {rows}");
+}
+
+// -- EPUB (Project Gutenberg eBook #11, Alice's Adventures in Wonderland) ----
+
+#[tokio::test]
+async fn real_epub_extracts_carroll_chapters() {
+    let (md, _) = convert("real.epub").await;
+    assert!(md.chars().count() > 2000, "epub body too short");
+    assert!(md.contains("Alice"), "protagonist missing");
+    assert!(md.contains("Lewis Carroll"), "author metadata missing");
+    assert!(md.contains("Chapter"), "chapter structure missing");
+}
+
+// -- IPYNB (real PythonDataScienceHandbook notebook) -------------------------
+
+#[tokio::test]
+async fn real_ipynb_renders_markdown_and_code_cells() {
+    let (md, _) = convert("real.ipynb").await;
+    assert!(
+        md.contains("Getting Started in IPython and Jupyter"),
+        "markdown cell content missing: {}",
+        &md[..md.len().min(300)]
+    );
+    assert!(md.contains("```ipython"), "code cell fence missing");
+    assert!(md.contains("Launching the Jupyter Notebook"), "section missing");
+    assert!(md.chars().count() > 1000, "ipynb body too short");
+}
+
+// -- ZIP (real kueiku-v0.1.16 skill package from ~/Downloads) ----------------
+
+#[tokio::test]
+async fn real_zip_members_convert_through_facade() {
+    let path = real("real.zip");
+    assert!(path.is_file(), "real fixture missing: {}", path.display());
+    let alch = AlchemizeBuilder::new().build();
+    let result = alch
+        .convert(&Input::Path(path))
+        .await
+        .expect("zip conversion must not error");
+    let converted = result.metadata["converted_count"].as_u64().unwrap_or(0);
+    let file_count = result.metadata["file_count"].as_u64().unwrap_or(0);
+    assert_eq!(
+        file_count, 27,
+        "kueiku package has 27 members: {}",
+        result.markdown
+    );
+    // Every member with a known extension dispatches; the single
+    // extensionless member (kueiku/LICENSE) has no format detection and
+    // falls back to an inline-text attachment. That is the documented
+    // contract for unknown members, not a regression.
+    assert_eq!(
+        converted, 26,
+        "expected 27 members, 26 converted (attachments: {:?}): {}",
+        result.metadata["attachments"],
+        result.markdown
+    );
+    assert_eq!(
+        result.metadata["attachments"],
+        serde_json::json!(["kueiku/LICENSE"]),
+        "the extensionless member must be the only attachment"
+    );
+    assert!(result.markdown.contains("kueiku/LICENSE"), "{}", result.markdown);
+    assert!(result.markdown.contains("MIT License"), "{}", result.markdown);
+}
+
+// -- data feature: parquet/sqlite/bib (structured-data engines) --------------
+
+#[cfg(feature = "data")]
+#[tokio::test]
+async fn real_parquet_converts_sensor_table() {
+    let (md, _) = convert("real.parquet").await;
+    assert!(
+        md.contains("| id | name | value | active | ts_ms |"),
+        "schema header missing: {}",
+        &md[..md.len().min(200)]
+    );
+    assert!(md.contains("sensor-001"), "real rows missing");
+}
+
+#[cfg(feature = "data")]
+#[tokio::test]
+async fn real_sqlite_reports_schema_and_rows() {
+    let (md, _) = convert("real.sqlite").await;
+    assert!(md.contains("### meta"), "table section missing");
+    assert!(md.contains("Sample rows"), "sample rows missing");
+    assert!(md.contains("schema_version"), "real row values missing");
+}
+
+#[cfg(feature = "data")]
+#[tokio::test]
+async fn real_bib_converts_reference_entries() {
+    let (md, _) = convert("real.bib").await;
+    assert!(md.contains("knuth1974"), "entry key missing");
+    assert!(md.contains("Computer Programming as an Art"), "entry title missing");
+    assert!(md.contains("Attention Is All You Need"), "later entry missing");
+}
+
 // -- detect_format on real archives (ZIP header-name scanner) -----------------
 
 #[test]
@@ -283,6 +537,17 @@ fn detect_format_reads_real_archives_from_header_names() {
         // ODF family collapses to Odt (the format carries odt/ods/odp).
         ("real.odt", InputFormat::Odt),
         ("real.odp", InputFormat::Odt),
+        ("real.epub", InputFormat::Epub),
+        ("real.csv", InputFormat::Csv),
+        ("real.tsv", InputFormat::Csv),
+        ("real.ipynb", InputFormat::Ipynb),
+        ("real.zip", InputFormat::Zip),
+        ("real.gif", InputFormat::Gif),
+        ("real.jpg", InputFormat::Jpeg),
+        ("real.webp", InputFormat::Webp),
+        ("real.mp3", InputFormat::Mp3),
+        ("real.ogg", InputFormat::Ogg),
+        ("real.flac", InputFormat::Flac),
     ];
     for (name, expected) in cases {
         let bytes = std::fs::read(real(name)).unwrap();
