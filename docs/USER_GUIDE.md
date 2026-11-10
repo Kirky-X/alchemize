@@ -113,6 +113,20 @@ alch formats
 | `ALCHEMIZE_TRANSCRIBE_MODELS` | 转录模型 bundle 目录（缺省探测 `~/.cache/alchemize/models/transcribe/`） |
 | `ORT_DYLIB_PATH` | onnxruntime 动态库路径 |
 | `ALCHEMIZE_ASR_TEST_WAV` | 仅集成测试使用 |
+| `ALCHEMIZE_LOG` | 日志级别 `off`/`error`/`warn`/`info`/`debug`/`trace`（默认 `off` 静默）；设级后全部级别只写 stderr |
+
+### 📜 日志
+
+CLI/MCP 的日志前端由 inklog 装配，唯一开关是 `ALCHEMIZE_LOG`：
+
+```bash
+ALCHEMIZE_LOG=debug alch convert paper.pdf > paper.md   # 日志全在 stderr，stdout 管道纯净
+```
+
+- 默认（未设或 `off`）：不装配任何 subscriber，输出形态与无日志版本逐字节一致。
+- 设级后：`error` 到 `trace` 全部级别（含 `info`/`debug`）只写 stderr，stdout 只承载转换产物。
+- 非法值：stderr 打一行提示后按 `off` 继续，不静默吞错。
+- 同一开关对 `alch-mcp` 生效；MCP 的 stdout 承载 JSON-RPC，日志同样只走 stderr。
 
 ### 📥 MinerU 端点
 

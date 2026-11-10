@@ -99,6 +99,11 @@ thiserror = { version = "2.0", default-features = false }
 tempfile = { version = "3", default-features = false, features = ["getrandom"] }
 tokio = { version = "1.0", default-features = false, features = ["rt", "rt-multi-thread", "macros", "fs", "process", "io-util", "time", "sync"] }
 tracing = { version = "0.1", default-features = false }
+# CLI 日志前端：全仓 tracing 埋点（warn/debug/info）的消费者。默认不装配
+# （ALCHEMIZE_LOG 未设/off 时零开销，stdout/stderr 形态与 cli-output spec
+# 钉死的契约逐字节一致）；设级后全部级别强制走 stderr，stdout 管道纯净性
+# 不破。default-features = false 裁掉 i18n/cache（oxcache）依赖树。
+inklog = { version = "0.3.0-rc.12", default-features = false }
 zip = { version = "9.3", default-features = false, features = ["deflate"] }
 
 # CLI/MCP 封装框架：#[forge] 端点 → CliBuilder + rmcp stdio（MSRV 1.97.1 的来源）

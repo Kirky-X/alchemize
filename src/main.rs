@@ -21,6 +21,9 @@ use sdforge::core::ApiError;
 #[path = "forge_app.rs"]
 mod forge_app;
 
+#[path = "logging.rs"]
+mod logging;
+
 /// 契约恢复层：sdforge 生成的参数面与本仓 CLI 契约之间的差异在此归一。
 ///
 /// 规则（按 token 序处理）：
@@ -105,12 +108,30 @@ fn main() {
         .build()
         .expect("tokio runtime");
 
+    // 日志前端：ALCHEMIZE_LOG 显式设级才装配（默认 off，契约零扰动）。
+    // 装配失败降级为无日志继续，不中断转换主流程。
+    let mut logger = match runtime.block_on(logging::init_from_env()) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("alch: logging init failed: {e}");
+            None
+        }
+    };
+
     let argv = normalize_argv(std::env::args().collect());
     let cmd = CliBuilder::new().with_name("alch").build();
     let matches = cmd.try_get_matches_from(argv).unwrap_or_else(|e| e.exit());
     let format = OutputFormat::from_matches(&matches);
 
-    match runtime.block_on(sdforge::cli::dispatch(&matches, None)) {
+    let dispatched = runtime.block_on(sdforge::cli::dispatch(&matches, None));
+    // exit 不跑 Drop：排水须在 process::exit 之前（尾部日志冲刷）
+    if let Some(l) = logger.take()
+        && let Err(e) = l.shutdown()
+    {
+        eprintln!("alch: log shutdown failed: {e}");
+    }
+
+    match dispatched {
         Ok((_, value)) => {
             // `Value::Null` 是「handler 已自行输出」哨兵（写文件路径，
             // 摘要走 stderr）；其余按 --format 契约渲染。stdout 写入对
