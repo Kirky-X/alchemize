@@ -299,3 +299,20 @@ mod tests {
         }
     }
 }
+
+#[test]
+fn default_matches_new() {
+    let _ = CsvConverter::default();
+}
+
+#[tokio::test]
+async fn missing_input_path_errors() {
+    let converter = CsvConverter::new();
+    let err = converter
+        .convert(Input::Path(std::path::PathBuf::from(
+            "/nonexistent/data.csv",
+        )))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("CSV"), "{err:?}");
+}

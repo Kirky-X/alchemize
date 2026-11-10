@@ -1975,4 +1975,191 @@ mod tests {
             "asset filename: {name}"
         );
     }
+
+    #[tokio::test]
+    async fn inline_and_note_branches_render() {
+        let content = "<office:document-content><office:body><office:text>\
+            <text:p>before<text:tab/>mid<text:line-break/>after</text:p>\
+            <text:p>note<office:annotation><text:p>comment</text:p></office:annotation> tail</text:p>\
+            <text:list><text:list-header><text:p>header item</text:p></text:list-header>\
+            <text:list-item><text:p>outer</text:p>\
+            <text:list><text:list-item><text:p>inner</text:p></text:list-item></text:list>\
+            </text:list-item></text:list>\
+            </office:text></office:body></office:document-content>";
+        let result = convert(odt_with(content)).await;
+        // Tab is a literal \t; line-break is a GFM hard break (two spaces).
+        assert!(result.markdown.contains("before\tmid"), "tab: {result:?}");
+        assert!(
+            result.markdown.contains("mid  \nafter"),
+            "line-break: {result:?}"
+        );
+        assert!(
+            result.markdown.contains("comment"),
+            "annotation: {result:?}"
+        );
+        assert!(
+            result.markdown.contains("header item"),
+            "list-header: {result:?}"
+        );
+        assert!(result.markdown.contains("inner"), "nested list: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn footnote_and_endnote_bodies_render() {
+        let content = "<office:document-content><office:body><office:text>\
+            <text:p>has<office:note text:note-class=\"footnote\"><text:note-body><text:p>fn body</text:p></text:note-body></office:note> a note</text:p>\
+            <text:p>has<office:note text:note-class=\"endnote\"><text:note-body><text:p>en body</text:p></text:note-body></office:note> an endnote</text:p>\
+            </office:text></office:body></office:document-content>";
+        let result = convert(odt_with(content)).await;
+        assert!(result.markdown.contains("fn body"), "{result:?}");
+        assert!(result.markdown.contains("en body"), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn covered_table_cells_render_blank() {
+        let content = "<office:document-content><office:body><office:text><table:table>\
+            <table:table-row>\
+            <table:table-cell table:number-columns-spanned=\"2\" table:number-rows-spanned=\"1\"><text:p>span</text:p></table:table-cell>\
+            <table:covered-table-cell/>\
+            </table:table-row>\
+            <table:table-row>\
+            <table:table-cell/><table:table-cell/>\
+            </table:table-row>\
+            </table:table></office:text></office:body></office:document-content>";
+        let result = convert(odt_with(content)).await;
+        assert!(result.markdown.contains("span"), "{result:?}");
+        // Covered slot renders blank; the second row keeps two blanks.
+        assert!(result.markdown.matches("|  |").count() >= 2, "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn embedded_base64_image_becomes_asset() {
+        let content = "<office:document-content><office:body><office:text><text:p>\
+            <draw:frame><draw:image><office:binary-data>aGVsbG8gcG5n</office:binary-data></draw:image></draw:frame>\
+            </text:p></office:text></office:body></office:document-content>";
+        let result = convert(odt_with(content)).await;
+        assert!(
+            result.assets.iter().any(|a| !a.bytes.is_empty()),
+            "base64 image must materialize as an asset: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn note_citation_becomes_note_id_and_href_image_resolves() {
+        // note-citation ends the citation sink so the body text stays intact;
+        // an id-less note picks the citation up as its id.
+        let content = "<office:document-content><office:body><office:text>\
+            <text:p><office:note text:note-class=\"footnote\">\
+            <text:note-citation>1</text:note-citation>\
+            <text:note-body><text:p>body text</text:p></text:note-body>\
+            </office:note></text:p>\
+            <text:p><draw:frame draw:href=\"Pictures/src.png\"/><text:span>after</text:span></text:p>\
+            </office:text></office:body></office:document-content>";
+        let result = convert(odt_with(content)).await;
+        assert!(result.markdown.contains("body text"), "{result:?}");
+        assert!(result.markdown.contains("after"), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn table_cell_budget_exhaustion_fails_closed() {
+        // 4M-cell grid at minimum weight must hit MAX_SHEET-equivalent model
+        // budget before materializing rows (repeat caps bound the expansion).
+        let mut content =
+            String::from("<office:document-content><office:body><office:text><table:table>");
+        for _ in 0..900 {
+            content.push_str("<table:table-row table:number-rows-repeated=\"1000\">");
+            content.push_str("<table:table-cell table:number-columns-repeated=\"1000\"/>");
+            content.push_str("</table:table-row>");
+        }
+        content.push_str("</table:table></office:text></office:body></office:document-content>");
+        let result = OdtConverter::new()
+            .convert(Input::bytes(odt_with(&content), "huge.odt"))
+            .await;
+        assert!(result.is_err(), "900M-cell grid must be rejected");
+    }
+
+    #[tokio::test]
+    async fn external_image_href_without_part_degrades() {
+        // Missing Pictures/ part: the image reference degrades, no panic.
+        let content = "<office:document-content><office:body><office:text><text:p>\
+            <draw:frame><draw:image xlink:href=\"Pictures/missing.png\"/></draw:frame>\
+            </text:p></office:text></office:body></office:document-content>";
+        let result = convert(odt_with(content)).await;
+        assert!(!result.markdown.contains("!["), "{result:?}");
+    }
+
+    #[test]
+    fn default_constructor_matches_new() {
+        let _ = OdtConverter::default();
+    }
+
+    #[tokio::test]
+    async fn garbage_input_fails_closed() {
+        // Not a zip: odf_body_root returns None, the package open errors.
+        let err = OdtConverter::new()
+            .convert(Input::bytes(b"garbage".to_vec(), "t.odt"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ODF"), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn malformed_content_xml_fails_closed() {
+        // Mismatched end tag: quick-xml's default check_end_names errors
+        // inside the walker instead of yielding partial output.
+        let content = "<office:document-content><office:body><office:text>\
+            <text:p>oops</text:span>";
+        let err = OdtConverter::new()
+            .convert(Input::bytes(odt_with(content), "t.odt"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("parse"), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn entity_text_and_empty_list_items_render() {
+        // GeneralRef (entity) inside a paragraph; empty list-item end hits the
+        // close_item guard; stray notes/list ends hit their empty-stack guards.
+        let content = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+            <office:document-content><office:body><office:text>\
+            <text:p>caf&#233; &#65;</text:p>\
+            <text:list><text:list-item></text:list-item></text:list>\
+            <office:notes></office:notes>\
+            </office:text></office:body></office:document-content>";
+        let result = convert(odt_with(content)).await;
+        assert!(result.markdown.contains("café A"), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn weight_budget_covers_every_block_kind() {
+        // A table cell containing every block kind charges all weight arms;
+        // the grid stays inside the budget and renders.
+        let content = "<office:document-content><office:body><office:text><table:table>\
+            <table:table-row><table:table-cell>\
+            <text:p>para</text:p>\
+            <text:h text:outline-level=\"2\">head</text:h>\
+            <text:list><text:list-item><text:p>li</text:p></text:list-item></text:list>\
+            <table:table><table:table-row><table:table-cell><text:p>nested</text:p></table:table-cell></table:table-row></table:table>\
+            </table:table-cell></table:table-row>\
+            </table:table></office:text></office:body></office:document-content>";
+        let result = convert(odt_with(content)).await;
+        assert!(result.markdown.contains("nested"), "{result:?}");
+        assert!(result.markdown.contains("li"), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn covered_cell_budget_exhaustion_fails_closed() {
+        // Covered cells charge 96 bytes each: enough repeats must trip the
+        // place_covered budget arm rather than materializing.
+        let mut content =
+            String::from("<office:document-content><office:body><office:text><table:table>");
+        for _ in 0..800_000 {
+            content.push_str("<table:covered-table-cell/>");
+        }
+        content.push_str("</table:table></office:text></office:body></office:document-content>");
+        let result = OdtConverter::new()
+            .convert(Input::bytes(odt_with(&content), "covered.odt"))
+            .await;
+        assert!(result.is_err(), "800k covered cells must be rejected");
+    }
 }

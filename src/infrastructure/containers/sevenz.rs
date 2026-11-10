@@ -190,3 +190,125 @@ mod tests {
         assert_eq!(archive.format_name(), "7z");
     }
 }
+
+#[cfg(test)]
+mod fixture_tests {
+    use super::*;
+    use crate::application::registry::ConverterRegistry;
+    use crate::domain::input::Input;
+    use crate::infrastructure::containers::RegistrySlot;
+    use crate::infrastructure::document::text::TextConverter;
+    use sevenz_rust2::{ArchiveEntry, ArchiveWriter};
+    use std::io::Cursor;
+
+    fn sevenz_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut writer = ArchiveWriter::new(Cursor::new(Vec::new())).expect("7z writer");
+        for (name, data) in entries {
+            writer
+                .push_archive_entry(ArchiveEntry::new_file(name), Some(&data[..]))
+                .expect("push entry");
+        }
+        writer.finish().expect("finish").into_inner()
+    }
+
+    fn registry_with_text_and_slot() -> (
+        Arc<ConverterRegistry>,
+        crate::infrastructure::containers::RegistrySlot,
+    ) {
+        let slot: RegistrySlot = Arc::new(std::sync::OnceLock::new());
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(TextConverter::new()));
+        registry.register(Box::new(SevenZConverter::with_registry_slot(Arc::clone(
+            &slot,
+        ))));
+        let registry = Arc::new(registry);
+        let _ = slot.set(Arc::downgrade(&registry));
+        (registry, slot)
+    }
+
+    #[tokio::test]
+    async fn convert_7z_with_text_and_binary() {
+        let (registry, _slot) = registry_with_text_and_slot();
+        let bytes = sevenz_bytes(&[
+            ("notes.txt", b"hello from 7z".as_slice()),
+            ("blob.bin", &[0x00, 0xFF, 0x10].as_slice()),
+        ]);
+        let result = registry
+            .convert(&Input::bytes(bytes, "bundle.7z"))
+            .await
+            .unwrap();
+        assert!(result.markdown.contains("hello from 7z"), "{result:?}");
+        assert!(result.markdown.contains("blob.bin"), "{result:?}");
+        assert_eq!(result.metadata["file_count"], 2);
+        assert_eq!(result.metadata["converted_count"], 1);
+        assert_eq!(result.assets.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn convert_7z_empty_archive() {
+        let (registry, _slot) = registry_with_text_and_slot();
+        let bytes = sevenz_bytes(&[]);
+        let result = registry
+            .convert(&Input::bytes(bytes, "empty.7z"))
+            .await
+            .unwrap();
+        assert!(
+            result.markdown.contains("no convertible files"),
+            "{result:?}"
+        );
+        assert_eq!(result.metadata["file_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn extract_7z_skips_directories_and_metadata() {
+        let mut writer = ArchiveWriter::new(Cursor::new(Vec::new())).expect("7z writer");
+        writer
+            .push_archive_entry::<&[u8]>(ArchiveEntry::new_directory("docs"), None)
+            .expect("dir");
+        writer
+            .push_archive_entry(ArchiveEntry::new_file("._junk"), Some(&b"x"[..]))
+            .expect("meta");
+        writer
+            .push_archive_entry(
+                ArchiveEntry::new_file("docs/real.txt"),
+                Some(&b"real body"[..]),
+            )
+            .expect("file");
+        let bytes = writer.finish().expect("finish").into_inner();
+        let entries = extract_sevenz(&bytes).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["docs/real.txt"], "{names:?}");
+    }
+
+    #[tokio::test]
+    async fn convert_7z_nested_archive_recurses() {
+        let inner = sevenz_bytes(&[("leaf.txt", b"leaf body".as_slice())]);
+        let outer = sevenz_bytes(&[("inner.7z", inner.as_slice())]);
+        let (registry, _slot) = registry_with_text_and_slot();
+        let result = registry
+            .convert(&Input::bytes(outer, "outer.7z"))
+            .await
+            .unwrap();
+        assert!(
+            result.markdown.contains("leaf body"),
+            "7z->7z chain must recurse, got: {}",
+            result.markdown
+        );
+        assert_eq!(result.metadata["depth_limited"], 0);
+    }
+
+    #[tokio::test]
+    async fn sevenz_oversize_entry_rejected() {
+        // 65 MiB of zeros compresses to ~70KB (LZMA): the writer builds it
+        // cheaply and the per-entry limit must reject it.
+        let big = vec![0u8; crate::infrastructure::containers::MAX_ENTRY_BYTES as usize + 1];
+        let bytes = sevenz_bytes(&[("big.bin", big.as_slice())]);
+        let err = extract_sevenz(&bytes).unwrap_err();
+        assert!(err.to_string().contains("per-entry limit"), "{err}");
+    }
+
+    #[test]
+    fn sevenz_view_format_name() {
+        assert_eq!(SevenZArchive::new(Vec::new()).format_name(), "7z");
+    }
+}

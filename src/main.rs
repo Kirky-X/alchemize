@@ -154,3 +154,81 @@ fn main() {
         },
     }
 }
+
+#[cfg(test)]
+mod argv_tests {
+    use super::normalize_argv;
+
+    #[test]
+    fn version_short_circuit_not_tested_here() {
+        // `--version` exits the process; it must never appear in tests that
+        // call normalize_argv directly.
+    }
+
+    #[test]
+    fn passthrough_keeps_positional_tokens_after_double_dash() {
+        let raw = vec![
+            "alch".into(),
+            "convert".into(),
+            "--".into(),
+            "--output".into(),
+        ];
+        assert_eq!(
+            normalize_argv(raw),
+            vec!["alch", "convert", "--", "--output"]
+        );
+    }
+
+    #[test]
+    fn convert_flags_translate_to_snake_case() {
+        let raw = vec![
+            "alch".into(),
+            "convert".into(),
+            "-o".into(),
+            "out.md".into(),
+            "--no-remote".into(),
+            "--no-remote=true".into(),
+            "--format".into(),
+            "pdf".into(),
+            "--format=docx".into(),
+            "--base-url".into(),
+            "https://x.test".into(),
+            "--base-url=https://y.test".into(),
+            "--extract-main".into(),
+        ];
+        let out = normalize_argv(raw);
+        let joined: Vec<&str> = out.iter().map(|s| s.as_str()).collect();
+        let expected = [
+            "alch",
+            "convert",
+            "--output",
+            "out.md",
+            "--no_remote",
+            "true",
+            "--no_remote=true",
+            "--input_format",
+            "pdf",
+            "--input_format=docx",
+            "--base_url",
+            "https://x.test",
+            "--base_url=https://y.test",
+            "--extract_main",
+            "true",
+        ];
+        assert_eq!(joined, expected, "{joined:?}");
+    }
+
+    #[test]
+    fn flags_outside_convert_stay_verbatim() {
+        let raw = vec![
+            "alch".into(),
+            "doctor".into(),
+            "--format".into(),
+            "json".into(),
+        ];
+        assert_eq!(
+            normalize_argv(raw),
+            vec!["alch", "doctor", "--format", "json"]
+        );
+    }
+}

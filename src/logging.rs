@@ -61,3 +61,59 @@ pub async fn init_from_env() -> Result<Option<inklog::LoggerManager>, inklog::In
     let manager = inklog::LoggerManager::with_config(config).await?;
     Ok(Some(manager))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Serializes the env-mutating tests: ALCHEMIZE_LOG is process-global.
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unset_env_is_silent() {
+        let _g = env_guard();
+        unsafe {
+            std::env::remove_var("ALCHEMIZE_LOG");
+        }
+        assert!(init_from_env().await.unwrap().is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn off_and_empty_are_silent() {
+        let _g = env_guard();
+        unsafe {
+            std::env::set_var("ALCHEMIZE_LOG", "off");
+        }
+        assert!(init_from_env().await.unwrap().is_none());
+        unsafe {
+            std::env::set_var("ALCHEMIZE_LOG", "   ");
+        }
+        assert!(init_from_env().await.unwrap().is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn invalid_level_stays_off() {
+        let _g = env_guard();
+        unsafe {
+            std::env::set_var("ALCHEMIZE_LOG", "loud");
+        }
+        assert!(init_from_env().await.unwrap().is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn trimmed_lowercase_level_installs_and_shuts_down() {
+        let _g = env_guard();
+        unsafe {
+            std::env::set_var("ALCHEMIZE_LOG", "  DEBUG  ");
+        }
+        let manager = init_from_env().await.unwrap();
+        assert!(manager.is_some(), "valid level must install the subscriber");
+        if let Some(manager) = manager {
+            let _ = manager.shutdown();
+        }
+    }
+}

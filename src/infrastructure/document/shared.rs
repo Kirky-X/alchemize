@@ -154,8 +154,9 @@ pub fn local_tag_name(tag: &str) -> String {
     }
 }
 
-/// Decode the five XML predefined entities (`quick-xml` 0.42 surfaces them
-/// as `Event::GeneralRef`).
+/// Decode an XML entity reference body (`quick-xml` 0.42 surfaces them as
+/// `Event::GeneralRef`; the name is the reference WITHOUT the surrounding
+/// `&` / `;` — e.g. `amp`, `#233`, `#xE9`).
 pub fn decode_entity(name: &str) -> String {
     match name {
         "amp" => "&".into(),
@@ -163,7 +164,22 @@ pub fn decode_entity(name: &str) -> String {
         "gt" => ">".into(),
         "quot" => "\"".into(),
         "apos" => "'".into(),
-        other => format!("&{other};"), // unknown: keep verbatim, no silent loss
+        // Numeric references (decimal and hex): decode to the character;
+        // unknown/unrepresentable keeps the verbatim form, no silent loss.
+        other => match (other.strip_prefix("#x"), other.strip_prefix('#')) {
+            (Some(hex), _) => u32::from_str_radix(hex, 16)
+                .ok()
+                .and_then(char::from_u32)
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| format!("&{other};")),
+            (None, Some(dec)) => dec
+                .parse::<u32>()
+                .ok()
+                .and_then(char::from_u32)
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| format!("&{other};")),
+            (None, None) => format!("&{other};"),
+        },
     }
 }
 
@@ -204,6 +220,23 @@ pub fn detect_encoding(bytes: &[u8]) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decode_entity_covers_named_and_numeric_references() {
+        assert_eq!(decode_entity("amp"), "&");
+        assert_eq!(decode_entity("lt"), "<");
+        assert_eq!(decode_entity("gt"), ">");
+        assert_eq!(decode_entity("quot"), "\"");
+        assert_eq!(decode_entity("apos"), "'");
+        // Numeric: decimal and hex, as emitted by Event::GeneralRef (no & / ;).
+        assert_eq!(decode_entity("#233"), "é");
+        assert_eq!(decode_entity("#xE9"), "é");
+        assert_eq!(decode_entity("#65"), "A");
+        // Unknown name and unrepresentable codepoint stay verbatim.
+        assert_eq!(decode_entity("unknown"), "&unknown;");
+        assert_eq!(decode_entity("#0"), "\0");
+        assert_eq!(decode_entity("#xFFFFFFFF"), "&#xFFFFFFFF;");
+    }
 
     #[test]
     fn local_tag_name_strips_namespace() {

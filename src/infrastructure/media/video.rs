@@ -687,43 +687,33 @@ mod tests {
     #[tokio::test]
     async fn ffmpeg_extraction_failure_degrades_to_metadata() {
         let _serial = crate::test_support::env_lock();
-        // ffmpeg_available forced true but the binary is absent on this host:
-        // the spawn fails inside extract_audio and the converter degrades.
-        let has_ffmpeg = !std::process::Command::new("ffmpeg")
-            .arg("-version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if has_ffmpeg {
-            return; // host has ffmpeg: the failure branch is unreachable here
-        }
+        // PATH stripped to an empty dir: the ffmpeg spawn fails inside
+        // extract_audio and the converter degrades — deterministic on any host.
+        let empty_dir = tempfile::tempdir().unwrap();
+        let restore = PathRestore(Some(std::env::var("PATH").unwrap_or_default()));
+        unsafe { std::env::set_var("PATH", empty_dir.path()) };
         let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::AudioOnly, true);
         converter.transcribe = Some(std::sync::Arc::new(StubTranscriber("should not run")));
         let input = Input::bytes(vec![0, 0, 0, 24, b'f', b't', b'y', b'p'], "v.mp4");
         let result = converter.convert(input).await.unwrap();
         assert!(!result.markdown.is_empty());
         assert!(!result.markdown.contains("should not run"));
+        drop(restore);
     }
 
     #[tokio::test]
     async fn gpu_mode_without_ffmpeg_still_degrades() {
         let _serial = crate::test_support::env_lock();
-        let has_ffmpeg = !std::process::Command::new("ffmpeg")
-            .arg("-version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if has_ffmpeg {
-            return;
-        }
+        // PATH stripped to an empty dir: the ffmpeg spawn fails
+        // deterministically on any host.
+        let empty_dir = tempfile::tempdir().unwrap();
+        let restore = PathRestore(Some(std::env::var("PATH").unwrap_or_default()));
+        unsafe { std::env::set_var("PATH", empty_dir.path()) };
         let converter = converter_with_ffmpeg_flag(VideoProcessingMode::Gpu, true);
         let input = Input::bytes(vec![0, 0, 0, 24, b'f', b't', b'y', b'p'], "v.mp4");
         let result = converter.convert(input).await.unwrap();
         assert!(!result.markdown.is_empty());
+        drop(restore);
     }
 
     #[tokio::test]
@@ -783,21 +773,88 @@ mod tests {
     #[tokio::test]
     async fn audioonly_with_provider_and_ffmpeg_missing_stubs_not_called() {
         let _serial = crate::test_support::env_lock();
-        let has_ffmpeg = !std::process::Command::new("ffmpeg")
-            .arg("-version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if has_ffmpeg {
-            return;
-        }
+        let empty_dir = tempfile::tempdir().unwrap();
+        let restore = PathRestore(Some(std::env::var("PATH").unwrap_or_default()));
+        unsafe { std::env::set_var("PATH", empty_dir.path()) };
         let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::AudioOnly, true);
         converter.transcribe = Some(std::sync::Arc::new(StubTranscriber("stub text")));
         let input = Input::bytes(b"RIFF0000WAVE".to_vec(), "a.mp4");
         let result = converter.convert(input).await.unwrap();
         // extraction failed -> degraded metadata path, stub never invoked
         assert!(!result.markdown.contains("stub text"));
+        drop(restore);
+    }
+
+    struct FailingTranscriber;
+
+    #[async_trait::async_trait]
+    impl crate::application::ports::TranscribeProvider for FailingTranscriber {
+        async fn transcribe(
+            &self,
+            _audio: &[u8],
+        ) -> Result<crate::application::ports::Transcript, AlchemizeError> {
+            Err(AlchemizeError::AudioUnavailable("asr down".into()))
+        }
+        fn availability(&self) -> crate::application::ports::Availability {
+            crate::application::ports::Availability::Available
+        }
+        fn name(&self) -> &'static str {
+            "failing"
+        }
+    }
+
+    #[tokio::test]
+    async fn transcription_failure_surfaces_audio_unavailable() {
+        let _serial = crate::test_support::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _path = fake_ffmpeg(dir.path(), None);
+        let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::AudioOnly, true);
+        converter.transcribe = Some(std::sync::Arc::new(FailingTranscriber));
+        let input = Input::bytes(vec![0u8; 1024], "v.mp4");
+        let err = converter.convert(input).await.unwrap_err();
+        assert!(
+            matches!(err, AlchemizeError::AudioUnavailable(_)),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn stub_vision_trait_methods_run() {
+        // Direct invocation covers the stub impl arms the converter never hits.
+        let vision = StubVision(Some("desc"));
+        assert_eq!(vision.name(), "stub-vision");
+        let described =
+            futures_block(vision.describe(b"x", crate::domain::result::DetailLevel::Low))
+                .expect("stub describe");
+        assert_eq!(described, "desc");
+        assert_eq!(futures_block(vision.ocr(b"x")).expect("stub ocr"), "");
+    }
+
+    fn futures_block<F: std::future::Future>(fut: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(fut)
+    }
+
+    #[test]
+    fn stub_trait_metadata_methods_run() {
+        // The stub impls. availability/name arms are never hit through the
+        // converter; call them directly so the impls are fully covered.
+        let transcribe = StubTranscriber("t");
+        assert!(matches!(
+            crate::application::ports::TranscribeProvider::availability(&transcribe),
+            crate::application::ports::Availability::Available
+        ));
+        assert_eq!(
+            crate::application::ports::TranscribeProvider::name(&transcribe),
+            "stub-video"
+        );
+        let vision = StubVision(None);
+        assert_eq!(
+            crate::application::ports::VisionProvider::name(&vision),
+            "stub-vision"
+        );
     }
 }

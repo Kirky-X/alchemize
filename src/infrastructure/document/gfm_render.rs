@@ -7,7 +7,6 @@
 
 use crate::domain::document::{
     Block, CellSlot, Document, ImageSource, Inline, LinkTarget, List, MarkerKind, NoteKind,
-    TableKind,
 };
 use crate::infrastructure::document::shared::fence_for;
 
@@ -240,14 +239,14 @@ fn render_table(table: &crate::domain::document::Table, out: &mut String) {
         cells.resize(cols, String::new());
         rows.push(cells);
     }
-    let header_rows = match table.kind {
-        TableKind::Data => table.header_rows.max(1),
-        TableKind::Layout => 0,
+    // GFM requires a header row: the first rendered row always becomes the
+    // header regardless of the source's layout/data classification —
+    // otherwise a layout table would duplicate its first row in the body.
+    let header: Vec<String> = if rows.is_empty() {
+        Vec::new()
+    } else {
+        rows.remove(0)
     };
-    let header: Vec<String> = rows.first().cloned().unwrap_or_default();
-    if header_rows > 0 {
-        rows.remove(0);
-    }
     out.push_str("| ");
     out.push_str(&header.join(" | "));
     out.push_str(" |\n|");
@@ -293,6 +292,15 @@ fn render_inlines(inlines: &[Inline]) -> String {
     for item in &coalesced {
         match item {
             Coalesced::Text { text, style } => {
+                // Inline code wins over emphasis markers (GFM renders no
+                // emphasis inside backticks).
+                if style.code {
+                    let trimmed = text.trim_matches('`');
+                    out.push('`');
+                    out.push_str(trimmed);
+                    out.push('`');
+                    continue;
+                }
                 let (open, close) = style_markers(style);
                 // Trim inner edge whitespace out of the emphasis markers so
                 // `**bold **` (invalid GFM emphasis) becomes `**bold** `.
@@ -365,5 +373,235 @@ fn style_markers(style: &crate::domain::document::Style) -> (&'static str, &'sta
         (true, false) => ("**", "**"),
         (false, true) => ("*", "*"),
         (false, false) => ("", ""),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::document::{Cell, CellSlot, ListItem, Note, NoteKind, Style, TableKind};
+
+    fn text(s: &str) -> Inline {
+        Inline::Text {
+            text: s.to_string(),
+            style: Style::PLAIN,
+        }
+    }
+
+    fn bold(s: &str) -> Inline {
+        Inline::Text {
+            text: s.to_string(),
+            style: Style::BOLD,
+        }
+    }
+
+    fn plain_paragraph(s: &str) -> Block {
+        Block::Paragraph(vec![text(s)])
+    }
+
+    fn empty_doc(blocks: Vec<Block>) -> Document {
+        Document {
+            blocks,
+            notes: Vec::new(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn heading_level_clamped_to_six() {
+        let doc = empty_doc(vec![Block::Heading {
+            level: 9,
+            content: vec![text("deep")],
+        }]);
+        let md = render_markdown(&doc);
+        assert!(md.starts_with("\n###### deep"), "{md}");
+    }
+
+    #[test]
+    fn inline_markers_and_coalescing() {
+        let doc = empty_doc(vec![Block::Paragraph(vec![
+            bold("a"),
+            bold("b"),
+            Inline::Text {
+                text: " code ".to_string(),
+                style: Style::CODE,
+            },
+            Inline::Text {
+                text: "gone".to_string(),
+                style: Style {
+                    strike: true,
+                    ..Style::PLAIN
+                },
+            },
+        ])]);
+        let md = render_markdown(&doc);
+        assert!(md.contains("**ab**"), "{md}");
+        assert!(md.contains("` code `"), "{md}");
+        assert!(md.contains("gone"), "{md}");
+    }
+
+    #[test]
+    fn links_images_anchor_and_checkbox() {
+        let doc = empty_doc(vec![Block::Paragraph(vec![
+            Inline::Link {
+                content: vec![text("site")],
+                target: LinkTarget::External("https://x.test".into()),
+            },
+            Inline::Link {
+                content: vec![text("rel")],
+                target: LinkTarget::Relative("media/a.png".into()),
+            },
+            Inline::Link {
+                content: vec![text("sec")],
+                target: LinkTarget::Anchor("heading-2".into()),
+            },
+            Inline::Image {
+                alt: "alt".into(),
+                source: ImageSource::External("images/0.png".into()),
+            },
+            Inline::Checkbox(true),
+            Inline::LineBreak,
+            text("after"),
+            Inline::NoteRef("1".into()),
+            Inline::Anchor("drop".into()),
+            Inline::Math("x^2".into()),
+        ])]);
+        let md = render_markdown(&doc);
+        assert!(md.contains("[site](https://x.test)"), "{md}");
+        assert!(md.contains("[rel](media/a.png)"), "{md}");
+        assert!(md.contains("[sec](#heading-2)"), "{md}");
+        assert!(md.contains("![alt](images/0.png)"), "{md}");
+        assert!(md.contains("[x]"), "{md}");
+        assert!(md.contains("after"), "{md}");
+        assert!(md.contains("$x^2$"), "{md}");
+        // Anchor renders nothing and note refs without a note body are dropped.
+        assert!(!md.contains("drop"), "{md}");
+    }
+
+    #[test]
+    fn lists_render_marker_families_and_nested_blocks() {
+        let doc = empty_doc(vec![
+            Block::List(List {
+                marker: MarkerKind::Decimal,
+                start: 3,
+                items: vec![
+                    ListItem {
+                        blocks: vec![plain_paragraph("first")],
+                    },
+                    ListItem {
+                        blocks: vec![Block::List(List {
+                            marker: MarkerKind::Bullet,
+                            start: 1,
+                            items: vec![ListItem {
+                                blocks: vec![plain_paragraph("nested")],
+                            }],
+                        })],
+                    },
+                ],
+            }),
+            Block::List(List {
+                marker: MarkerKind::LowerRoman,
+                start: 1,
+                items: vec![ListItem {
+                    blocks: vec![plain_paragraph("roman")],
+                }],
+            }),
+        ]);
+        let md = render_markdown(&doc);
+        assert!(md.contains("3. first"), "{md}");
+        assert!(md.contains("- nested"), "{md}");
+        assert!(md.contains("i. roman"), "{md}");
+    }
+
+    #[test]
+    fn table_renders_header_and_blank_covered_slots() {
+        let doc = empty_doc(vec![Block::Table(crate::domain::document::Table {
+            grid: vec![
+                vec![
+                    CellSlot::Origin(Cell {
+                        blocks: vec![Block::Paragraph(vec![text("h1")])],
+                        col_span: 2,
+                        row_span: 1,
+                    }),
+                    CellSlot::Covered {
+                        origin_row: 0,
+                        origin_col: 0,
+                    },
+                ],
+                vec![
+                    CellSlot::Origin(Cell {
+                        blocks: vec![Block::Paragraph(vec![text("a")])],
+                        col_span: 1,
+                        row_span: 1,
+                    }),
+                    CellSlot::Origin(Cell {
+                        blocks: vec![Block::Paragraph(vec![text("b")])],
+                        col_span: 1,
+                        row_span: 1,
+                    }),
+                ],
+            ],
+            header_rows: 1,
+            kind: TableKind::Data,
+        })]);
+        let md = render_markdown(&doc);
+        assert!(md.contains("| h1 |  |"), "{md}");
+        assert!(md.contains("| a | b |"), "{md}");
+    }
+
+    #[test]
+    fn layout_table_has_no_duplicate_body_row() {
+        let doc = empty_doc(vec![Block::Table(crate::domain::document::Table {
+            grid: vec![vec![CellSlot::Origin(Cell {
+                blocks: vec![Block::Paragraph(vec![text("only")])],
+                col_span: 1,
+                row_span: 1,
+            })]],
+            header_rows: 1,
+            kind: TableKind::Layout,
+        })]);
+        let md = render_markdown(&doc);
+        // GFM needs a header + separator; the header row must not repeat in
+        // the body.
+        assert_eq!(
+            md, "| only |\n|---|\n\n",
+            "layout table duplicated its header row: {md}"
+        );
+    }
+
+    #[test]
+    fn blockquote_rule_math_and_code_render() {
+        let doc = empty_doc(vec![
+            Block::BlockQuote(vec![plain_paragraph("quoted"), Block::Rule]),
+            Block::CodeBlock {
+                lang: Some("rust".into()),
+                text: "fn main() {}".into(),
+            },
+            Block::Math("E=mc^2".into()),
+            Block::Paragraph(vec![]),
+        ]);
+        let md = render_markdown(&doc);
+        assert!(md.contains("> quoted"), "{md}");
+        assert!(md.contains("---"), "{md}");
+        assert!(md.contains("```rust\nfn main() {}\n```"), "{md}");
+        assert!(md.contains("$$E=mc^2$$"), "{md}");
+    }
+
+    #[test]
+    fn notes_section_renders_footnote_and_endnote() {
+        let mut doc = empty_doc(vec![Block::Paragraph(vec![Inline::NoteRef("n1".into())])]);
+        doc.notes.push(Note {
+            id: "n1".into(),
+            kind: NoteKind::Footnote,
+            blocks: vec![plain_paragraph("body one")],
+        });
+        doc.notes.push(Note {
+            id: "n2".into(),
+            kind: NoteKind::Endnote,
+            blocks: vec![plain_paragraph("body two")],
+        });
+        let md = render_markdown(&doc);
+        assert!(md.contains("[^footnote]: body one"), "{md}");
+        assert!(md.contains("[^endnote]: body two"), "{md}");
     }
 }

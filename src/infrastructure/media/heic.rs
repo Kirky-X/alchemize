@@ -311,10 +311,22 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "needs a real .heic file and a decoder (macOS sips)"]
     async fn real_heic_decodes_to_png_asset() {
+        // Self-skip when the fixture or the OS decoder is missing, so the
+        // coverage run exercises the real decode path wherever possible.
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/real/real.heic");
+        if !path.is_file() {
+            eprintln!("skipping: real.heic fixture missing");
+            return;
+        }
+        if matches!(
+            HeicConverter::new().availability(),
+            crate::application::ports::Availability::Unavailable { .. }
+        ) {
+            eprintln!("skipping: no OS HEIC decoder");
+            return;
+        }
         let result = HeicConverter::new()
             .convert(Input::Path(path))
             .await

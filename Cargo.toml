@@ -139,7 +139,10 @@ tar = { version = "0.4", default-features = false, optional = true }
 flate2 = { version = "1", default-features = false, optional = true }
 xz2 = { version = "0.1", default-features = false, optional = true }
 zstd = { version = "0.13", default-features = false, optional = true }
-sevenz-rust2 = { version = "0.25", default-features = false, optional = true }
+# compress: writer needed by tests to build fixtures; LZMA2 decode is ungated
+sevenz-rust2 = { version = "0.25", default-features = false, features = [
+    "compress",
+], optional = true }
 
 # 结构化数据（feature data）
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "lz4", "zstd", "flate2-rust_backend", "brotli"], optional = true }

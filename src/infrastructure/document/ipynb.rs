@@ -323,3 +323,150 @@ mod tests {
         assert!(result.markdown.contains("y = 2"), "{}", result.markdown);
     }
 }
+
+#[tokio::test]
+async fn outputs_all_variants_render() {
+    // stream (text as array), execute_result + display_data (data map),
+    // and a raw-string source cell all route through their branches.
+    let notebook = r#"{
+            "cells": [
+                {
+                    "cell_type": "code",
+                    "source": ["print('hi')"],
+                    "outputs": [
+                        {
+                            "output_type": "stream",
+                            "text": ["line one\n", "line two"]
+                        },
+                        {
+                            "output_type": "execute_result",
+                            "data": {"text/plain": "42"}
+                        },
+                        {
+                            "output_type": "display_data",
+                            "data": {"text/plain": "<chart>"}
+                        }
+                    ]
+                },
+                {
+                    "cell_type": "code",
+                    "source": "x = 1",
+                    "outputs": []
+                }
+            ],
+            "metadata": {
+                "kernelspec": {
+                    "display_name": "Py<script>",
+                    "name": "python3",
+                    "language": "python"
+                }
+            },
+            "nbformat": 4
+        }"#;
+    let converter = IpynbConverter::new();
+    let result = converter
+        .convert(Input::Bytes {
+            data: notebook.as_bytes().to_vec(),
+            filename: "notebook.ipynb".to_string(),
+            mimetype: None,
+            extension: None,
+        })
+        .await
+        .unwrap();
+    assert!(result.markdown.contains("line one"), "{result:?}");
+    assert!(result.markdown.contains("42"), "{result:?}");
+    assert!(result.markdown.contains("<chart>"), "{result:?}");
+    // Kernel display name is attacker-controlled: sanitized, no tags.
+    assert!(!result.markdown.contains("<script>"), "{result:?}");
+}
+
+#[tokio::test]
+async fn markdown_only_and_empty_cells_render() {
+    // markdown passthrough, empty-code skip, language_info name used.
+    let notebook = r##"{
+            "cells": [
+                {"cell_type": "markdown", "source": ["# Title\n", "body"]},
+                {"cell_type": "code", "source": [], "outputs": []},
+                {"cell_type": "raw", "source": ["ignored"]},
+                {"cell_type": "code", "source": ["y = 2"], "outputs": []}
+            ],
+            "metadata": {"language_info": {"name": "julia-1.9"}},
+            "nbformat": 4
+        }"##;
+    let converter = IpynbConverter::new();
+    let result = converter
+        .convert(Input::Bytes {
+            data: notebook.as_bytes().to_vec(),
+            filename: "n.ipynb".to_string(),
+            mimetype: None,
+            extension: None,
+        })
+        .await
+        .unwrap();
+    assert!(result.markdown.contains("# Title"), "{result:?}");
+    assert!(result.markdown.contains("julia"), "{result:?}");
+    // Empty code cell produces no fence.
+    assert!(!result.markdown.contains("````julia\n\n"), "{result:?}");
+    assert!(!result.markdown.contains("ignored"), "{result:?}");
+}
+
+#[tokio::test]
+async fn malformed_cells_fail_with_message() {
+    let converter = IpynbConverter::new();
+    let err = converter
+        .convert(Input::bytes(b"{not json".to_vec(), "bad.ipynb"))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("notebook"), "{err:?}");
+}
+
+#[test]
+fn default_matches_new() {
+    let _ = IpynbConverter::default();
+}
+
+#[tokio::test]
+async fn invalid_utf8_fails_cleanly() {
+    let converter = IpynbConverter::new();
+    let err = converter
+        .convert(Input::bytes(vec![0xFF, 0xFE, 0x00], "bad.ipynb"))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("notebook"), "{err:?}");
+}
+
+#[tokio::test]
+async fn output_value_variants_route() {
+    // stream text as a bare string (not array) and data without
+    // text/plain exercise the join_multiline / extract_json_string arms.
+    let notebook = r##"{
+            "cells": [
+                {
+                    "cell_type": "code",
+                    "source": ["x"],
+                    "outputs": [
+                        {"output_type": "stream", "text": "plain text out"},
+                        {"output_type": "execute_result", "data": {"image/png": "iVBOR"}},
+                        {"output_type": "error", "ename": "E"}
+                    ]
+                }
+            ],
+            "metadata": {},
+            "nbformat": 4
+        }"##;
+    let converter = IpynbConverter::new();
+    let result = converter
+        .convert(Input::Bytes {
+            data: notebook.as_bytes().to_vec(),
+            filename: "n.ipynb".to_string(),
+            mimetype: None,
+            extension: None,
+        })
+        .await
+        .unwrap();
+    assert!(result.markdown.contains("plain text out"), "{result:?}");
+    assert!(
+        !result.markdown.contains("iVBOR"),
+        "non-text data ignored: {result:?}"
+    );
+}

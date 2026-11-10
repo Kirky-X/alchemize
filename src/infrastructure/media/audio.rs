@@ -215,3 +215,61 @@ mod tests {
         let _converter = AudioConverter::default();
     }
 }
+
+#[cfg(test)]
+mod extra_tests {
+    use super::*;
+
+    struct TranscribeFailure;
+
+    #[async_trait::async_trait]
+    impl crate::application::ports::TranscribeProvider for TranscribeFailure {
+        async fn transcribe(
+            &self,
+            _audio: &[u8],
+        ) -> Result<crate::application::ports::Transcript, AlchemizeError> {
+            Err(AlchemizeError::AudioUnavailable("asr down".into()))
+        }
+        fn availability(&self) -> crate::application::ports::Availability {
+            crate::application::ports::Availability::Available
+        }
+        fn name(&self) -> &'static str {
+            "failing"
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_input_path_errors() {
+        let converter = AudioConverter::new();
+        let err = converter
+            .convert(Input::Path(std::path::PathBuf::from(
+                "/nonexistent/audio.wav",
+            )))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("audio"), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn transcription_failure_maps_to_audio_unavailable() {
+        let converter = AudioConverter::with_transcriber(std::sync::Arc::new(TranscribeFailure));
+        let err = converter
+            .convert(Input::bytes(b"raw wav bytes".to_vec(), "a.wav"))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, AlchemizeError::AudioUnavailable(_)),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn metadata_helpers() {
+        let converter = AudioConverter::new();
+        assert_eq!(converter.name(), "audio");
+        assert_eq!(
+            converter.supported_extensions(),
+            &["wav", "mp3", "ogg", "flac", "aac", "m4a", "wma", "opus"]
+        );
+    }
+}

@@ -557,3 +557,48 @@ mod tests {
         assert_eq!(extracted.files[0].0, "ok.txt");
     }
 }
+
+#[tokio::test]
+async fn cumulative_bomb_aborts() {
+    // Two 600MB-of-zeros entries: each passes the per-entry check (no
+    // max_entry_size), the aggregate 1 GiB ceiling must abort.
+    let zeros = vec![0u8; 600 * 1024 * 1024];
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut buf);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        use std::io::Write as _;
+        for name in ["a.bin", "b.bin"] {
+            writer.start_file(name, options).unwrap();
+            writer.write_all(&zeros).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+    let converter = ZipConverter::with_arc(Arc::new(ConverterRegistry::new()));
+    let err = converter
+        .convert(Input::bytes(buf.into_inner(), "bomb.zip"))
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("cumulative extracted size"),
+        "{err}"
+    );
+}
+
+#[test]
+fn converter_name_is_zip() {
+    assert_eq!(ZipConverter::new(ConverterRegistry::new()).name(), "zip");
+}
+
+#[tokio::test]
+async fn unreadable_input_errors() {
+    let converter = ZipConverter::new(ConverterRegistry::new());
+    let err = converter
+        .convert(Input::Path(std::path::PathBuf::from(
+            "/nonexistent/bomb.zip",
+        )))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("ZIP"), "{err:?}");
+}

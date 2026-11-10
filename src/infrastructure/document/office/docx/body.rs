@@ -607,3 +607,291 @@ mod tests {
         }
     }
 }
+
+#[test]
+fn parse_body_renders_table_with_spans() {
+    let xml = br#"<w:document xmlns:w="w"><w:body>
+<w:tbl>
+<w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>span</w:t></w:r></w:p></w:tc><w:tc/></w:tr>
+<w:tr><w:tc><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>b</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+</w:body></w:document>"#;
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let w = zip::ZipWriter::new(Cursor::new(&mut buf));
+        w.finish().unwrap();
+    }
+    let mut zip = zip::ZipArchive::new(Cursor::new(buf.as_slice())).unwrap();
+    let mut warnings = super::converter::Warnings::default();
+    let mut ctx = BodyCtx {
+        style_table: &StyleTable::default(),
+        rels: &HashMap::new(),
+        warnings: &mut warnings,
+        assets: Vec::new(),
+        assets_bytes: 0,
+        asset_index: HashMap::new(),
+        zip: &mut zip,
+    };
+    let blocks = parse_body(xml, &mut ctx).unwrap();
+    assert!(
+        blocks
+            .iter()
+            .any(|b| matches!(b, crate::domain::document::Block::Table(_))),
+        "{blocks:?}"
+    );
+}
+
+#[test]
+fn parse_body_extracts_hyperlink_and_note() {
+    let xml = br#"<w:document xmlns:w="w"><w:body>
+<w:p><w:hyperlink r:id="rId1"><w:r><w:t>link text</w:t></w:r></w:hyperlink></w:p>
+<w:p><w:r><w:t>footnote</w:t><w:footnoteReference w:id="2"/></w:r></w:p>
+</w:body></w:document>"#;
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let w = zip::ZipWriter::new(Cursor::new(&mut buf));
+        w.finish().unwrap();
+    }
+    let mut zip = zip::ZipArchive::new(Cursor::new(buf.as_slice())).unwrap();
+    let mut warnings = super::converter::Warnings::default();
+    let mut ctx = BodyCtx {
+        style_table: &StyleTable::default(),
+        rels: &HashMap::new(),
+        warnings: &mut warnings,
+        assets: Vec::new(),
+        assets_bytes: 0,
+        asset_index: HashMap::new(),
+        zip: &mut zip,
+    };
+    let blocks = parse_body(xml, &mut ctx).unwrap();
+    assert!(
+        blocks.iter().any(
+            |b| matches!(b, crate::domain::document::Block::Paragraph(inlines)
+            if inlines.iter().any(|i| matches!(i, crate::domain::document::Inline::Link { .. })))
+        ),
+        "{blocks:?}"
+    );
+    assert!(
+        blocks.iter().any(
+            |b| matches!(b, crate::domain::document::Block::Paragraph(inlines)
+            if inlines.iter().any(|i| matches!(i, crate::domain::document::Inline::NoteRef(_))))
+        ),
+        "{blocks:?}"
+    );
+}
+
+#[test]
+fn parse_body_covers_headings_runs_vmerge_images_math() {
+    use crate::domain::document::{Block, Inline as I, TableKind};
+    use std::io::Write as _;
+
+    // Package with one image part so the blip branch can resolve it.
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut w = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default();
+        w.start_file("word/media/image1.png", opts).unwrap();
+        w.write_all(b"\x89PNG-fake").unwrap();
+        w.finish().unwrap();
+    }
+    let data = buf.into_inner();
+    let mut zip = zip::ZipArchive::new(Cursor::new(data.as_slice())).unwrap();
+
+    let mut rels = HashMap::new();
+    rels.insert("rIdImg".to_string(), "media/image1.png".to_string());
+    rels.insert("rIdLink".to_string(), "https://doc.test/page".to_string());
+    let mut warnings = super::converter::Warnings::default();
+    let mut ctx = BodyCtx {
+        style_table: &StyleTable::default(),
+        rels: &rels,
+        warnings: &mut warnings,
+        assets: Vec::new(),
+        assets_bytes: 0,
+        asset_index: HashMap::new(),
+        zip: &mut zip,
+    };
+
+    let xml = br#"<w:document xmlns:w="w"><w:body>
+<w:p><w:pPr><w:outlineLvl w:val="0"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="28"/></w:rPr><w:t>Head</w:t></w:r></w:p>
+<w:p><w:r><w:rPr><w:i/></w:rPr><w:t>it</w:t></w:r><w:br/><w:tab/><w:hyperlink r:id="rIdLink"><w:r><w:t>linked</w:t></w:r></w:hyperlink></w:p>
+<w:p><w:r><w:drawing><a:graphic xmlns:a="a"><a:blip r:embed="rIdImg"/></a:graphic></w:drawing></w:r></w:p>
+<w:p><m:oMath><m:r><m:t>x+1</m:t></m:r></m:oMath></w:p>
+<w:tbl>
+<w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>origin</w:t></w:r></w:p></w:tc><w:tc/></w:tr>
+<w:tr><w:tc><w:tcPr><w:vMerge/></w:tcPr></w:tc><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr>
+</w:tbl>
+</w:body></w:document>"#;
+    let blocks = parse_body(xml, &mut ctx).unwrap();
+
+    // Heading: outlineLvl 0 → level 1, bold run.
+    assert!(
+        blocks
+            .iter()
+            .any(|b| matches!(b, Block::Heading { level: 1, content }
+                if content.iter().any(|i| matches!(i, I::Text { style, .. } if style.bold)))),
+        "heading: {blocks:?}"
+    );
+    // Italic run, hard break, tab, external link.
+    assert!(
+            blocks.iter().any(|b| matches!(b, Block::Paragraph(inlines)
+                if inlines.iter().any(|i| matches!(i, I::Text { style, .. } if style.italic))
+                    && inlines.iter().any(|i| matches!(i, I::LineBreak))
+                    && inlines.iter().any(|i| matches!(i, I::Text { text, .. } if text == "\t"))
+                    && inlines.iter().any(|i| matches!(i, I::Link { target: LinkTarget::External(u), .. } if u == "https://doc.test/page")))),
+            "styled paragraph: {blocks:?}"
+        );
+    // Image resolved from the package.
+    assert!(
+            blocks.iter().any(|b| matches!(b, Block::Paragraph(inlines)
+                if inlines.iter().any(|i| matches!(i, I::Image { source: ImageSource::Asset(0), .. })))),
+            "image: {blocks:?}"
+        );
+    assert_eq!(ctx.assets.len(), 1, "blip must pull the media part");
+    // Math island converted.
+    assert!(
+        blocks.iter().any(|b| matches!(b, Block::Paragraph(inlines)
+                if inlines.iter().any(|i| matches!(i, I::Math(_))))),
+        "math: {blocks:?}"
+    );
+    // Table with vMerge origin + covered continuation, gridSpan 2.
+    let table = blocks.iter().find_map(|b| match b {
+        Block::Table(t) => Some(t),
+        _ => None,
+    });
+    let table = table.expect("table present");
+    assert_eq!(table.kind, TableKind::Data);
+    assert!(matches!(table.grid[0][0], CellSlot::Origin(_)), "{table:?}");
+    assert!(
+        matches!(
+            table.grid[1][0],
+            CellSlot::Covered {
+                origin_row: 0,
+                origin_col: 0
+            }
+        ),
+        "vMerge continue must become covered: {table:?}"
+    );
+    assert!(matches!(table.grid[1][1], CellSlot::Origin(_)), "{table:?}");
+}
+
+#[test]
+fn parse_body_start_form_tags_and_rstyle_resolve() {
+    // Word also emits non-self-closing property elements; the Start arms
+    // must behave identically to the Empty arms. rStyle merges the
+    // character style over the run props.
+    let xml = br#"<w:document xmlns:w="w"><w:body>
+<w:p>
+  <w:pPr><w:pStyle w:val="Heading2"></w:pStyle><w:outlineLvl w:val="2"></w:outlineLvl></w:pPr>
+  <w:r><w:rPr><w:rStyle w:val="CodeChar"></w:rStyle><w:b></w:b><w:i></w:i><w:sz w:val="20"></w:sz></w:rPr><w:t>body</w:t></w:r>
+</w:p>
+<w:tbl><w:tr>
+  <w:tc><w:tcPr><w:gridSpan w:val="1"></w:gridSpan><w:vMerge w:val="restart"></w:vMerge></w:tcPr><w:p><w:r><w:t>o</w:t></w:r></w:p></w:tc>
+</w:tr></w:tbl>
+</w:body></w:document>"#;
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let w = zip::ZipWriter::new(Cursor::new(&mut buf));
+        w.finish().unwrap();
+    }
+    let mut zip = zip::ZipArchive::new(Cursor::new(buf.as_slice())).unwrap();
+    let mut warnings = super::converter::Warnings::default();
+    let mut ctx = BodyCtx {
+        style_table: &StyleTable::default(),
+        rels: &HashMap::new(),
+        warnings: &mut warnings,
+        assets: Vec::new(),
+        assets_bytes: 0,
+        asset_index: HashMap::new(),
+        zip: &mut zip,
+    };
+    let blocks = parse_body(xml, &mut ctx).unwrap();
+    assert!(
+            blocks.iter().any(|b| matches!(b, Block::Heading { level: 3, content }
+                if content.iter().any(|i| matches!(i, crate::domain::document::Inline::Text { style, .. } if style.bold && style.italic && style.size_pt == Some(10.0))))),
+            "start-form heading: {blocks:?}"
+        );
+    let table = blocks.iter().find_map(|b| match b {
+        Block::Table(t) => Some(t),
+        _ => None,
+    });
+    assert!(
+        matches!(table.expect("table").grid[0][0], CellSlot::Origin(_)),
+        "start-form vMerge restart: {blocks:?}"
+    );
+}
+
+#[test]
+fn parse_body_start_arms_entity_in_link_and_vmerge_default() {
+    // Non-self-closing property forms exercise the Start arms; entities
+    // inside runs and hyperlinks ride the GeneralRef path; a vMerge with
+    // no w:val defaults to Continue.
+    let xml = br#"<w:document xmlns:w="w"><w:body>
+<w:p><w:r><w:rPr><w:rStyle w:val="Code"></w:rStyle></w:rPr><w:t>caf&#233;</w:t></w:r><w:hyperlink r:id="rIdA"><w:r><w:t>outer </w:t></w:r><w:hyperlink r:id="rIdA"><w:r><w:t>inner&#65;</w:t></w:r></w:hyperlink></w:hyperlink></w:p>
+<w:tbl><w:tr><w:tc><w:tcPr><w:vMerge></w:vMerge></w:tcPr><w:p><w:r><w:t>v</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+</w:body></w:document>"#;
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let w = zip::ZipWriter::new(Cursor::new(&mut buf));
+        w.finish().unwrap();
+    }
+    let mut zip = zip::ZipArchive::new(Cursor::new(buf.as_slice())).unwrap();
+    let mut rels = HashMap::new();
+    rels.insert("rIdA".to_string(), "https://doc.test/a".to_string());
+    let mut warnings = super::converter::Warnings::default();
+    let mut ctx = BodyCtx {
+        style_table: &StyleTable::default(),
+        rels: &rels,
+        warnings: &mut warnings,
+        assets: Vec::new(),
+        assets_bytes: 0,
+        asset_index: HashMap::new(),
+        zip: &mut zip,
+    };
+    let blocks = parse_body(xml, &mut ctx).unwrap();
+    // Entity decoded (GeneralRef arm) inside a run carrying a character
+    // style: it lands as its own inline next to the literal run.
+    assert!(
+            blocks.iter().any(|b| matches!(b, Block::Paragraph(inlines)
+                if inlines.iter().any(|i| matches!(i, crate::domain::document::Inline::Text { text, .. } if text == "é")))),
+            "entity run: {blocks:?}"
+        );
+    // Nested hyperlink: inner link lands inside the outer link body.
+    assert!(
+            blocks.iter().any(|b| matches!(b, Block::Paragraph(inlines)
+                if inlines.iter().any(|i| matches!(i, crate::domain::document::Inline::Link { content, .. }
+                    if content.iter().any(|j| matches!(j, crate::domain::document::Inline::Link { .. })))))),
+            "nested link: {blocks:?}"
+        );
+    // vMerge with no val: continuation row 0 → origin kept as content.
+    let table = blocks.iter().find_map(|b| match b {
+        Block::Table(t) => Some(t),
+        _ => None,
+    });
+    assert!(
+        matches!(table.expect("table").grid[0][0], CellSlot::Origin(_)),
+        "first-row vMerge keeps its content: {blocks:?}"
+    );
+}
+
+#[test]
+fn parse_body_malformed_xml_fails_closed() {
+    let xml = br#"<w:document xmlns:w="w"><w:body><w:p><w:r><w:t>x</w:t:span></w:r></w:p></w:body></w:document>"#;
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let w = zip::ZipWriter::new(Cursor::new(&mut buf));
+        w.finish().unwrap();
+    }
+    let mut zip = zip::ZipArchive::new(Cursor::new(buf.as_slice())).unwrap();
+    let mut warnings = super::converter::Warnings::default();
+    let mut ctx = BodyCtx {
+        style_table: &StyleTable::default(),
+        rels: &HashMap::new(),
+        warnings: &mut warnings,
+        assets: Vec::new(),
+        assets_bytes: 0,
+        asset_index: HashMap::new(),
+        zip: &mut zip,
+    };
+    let err = parse_body(xml, &mut ctx).unwrap_err();
+    assert!(err.to_string().contains("parse"), "{err}");
+}

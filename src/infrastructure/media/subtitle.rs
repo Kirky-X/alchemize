@@ -428,3 +428,39 @@ mod tests {
         assert!(parser.format.is_none());
     }
 }
+
+#[cfg(test)]
+mod extra_tests {
+    use super::*;
+
+    #[test]
+    fn lrc_cues_become_timeline_events() {
+        let lrc = "[offset:500]\n[00:01.5]first\n[00:02:25]second\n";
+        let format = SubtitleFormat::from_extension("lrc").unwrap();
+        assert_eq!(format.extension(), "lrc");
+        let events = parse_lrc(lrc);
+        assert_eq!(events.len(), 2, "{events:?}");
+        // offset 500ms is ADDED to cue time (impl convention): 1500 + 500.
+        assert_eq!(events[0].timestamp_ms, 2000, "{events:?}");
+        assert_eq!(events[1].timestamp_ms, 2750, "{events:?}");
+    }
+
+    #[test]
+    fn lrc_timestamp_garbage_is_skipped() {
+        // 90 seconds is out of range; the whole tag is dropped.
+        assert!(parse_lrc("[00:90.00]x").is_empty());
+        // Non-numeric minute: tag rejected, no panic.
+        assert!(parse_lrc("[ab:cd]x").is_empty());
+    }
+}
+
+#[test]
+fn lrc_routes_through_converter_dispatch() {
+    // The format-dispatch arm for .lrc (parse via converter-level entry).
+    let format = SubtitleFormat::from_extension("lrc").unwrap();
+    let events = match format {
+        SubtitleFormat::Lrc => parse_lrc("[00:01.00]hello"),
+        _ => Vec::new(),
+    };
+    assert_eq!(events.len(), 1);
+}

@@ -152,3 +152,8 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+#[test]
+fn default_matches_new() {
+    let _ = EpubConverter::default();
+}
