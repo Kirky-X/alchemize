@@ -5,3 +5,4 @@ specmark/
 
 # 本地 OCR 扫描报告与运行日志（证据保留在本地，不入 git）
 logs/
+.zcode/
