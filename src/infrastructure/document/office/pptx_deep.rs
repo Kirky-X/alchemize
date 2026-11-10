@@ -70,6 +70,7 @@ impl Converter for PptxDeepConverter {
         let asset_count = parsed.document.assets.len();
         let markdown =
             crate::infrastructure::document::gfm_render::render_markdown(&parsed.document);
+        crate::infrastructure::document::shared::check_output_budget(markdown.len())?;
 
         let metadata = serde_json::json!({
             "source_format": "pptx",
@@ -131,12 +132,18 @@ pub fn parse(bytes: &[u8]) -> Result<ParsedPptx, AlchemizeError> {
     let mut media = MediaCtx {
         zip: &mut zip,
         assets: Vec::new(),
+        assets_bytes: 0,
         asset_index: HashMap::new(),
     };
 
     let mut blocks: Vec<Block> = Vec::new();
+    let mut text_bytes = 0usize;
     for (pos, (number, part)) in slide_parts.iter().enumerate() {
         let xml = read_part(media.zip, part)?;
+        // Cumulative text budget: the per-part limit cannot bound a package
+        // with hundreds of high-ratio slide parts.
+        text_bytes = text_bytes.saturating_add(xml.len());
+        crate::infrastructure::document::shared::check_output_budget(text_bytes)?;
         // Rels live beside the part: ppt/slides/_rels/<basename>.rels
         let base = part.rsplit('/').next().unwrap_or(part);
         let rels = read_slide_rels(media.zip, &format!("ppt/slides/_rels/{base}.rels"))?
@@ -167,6 +174,8 @@ pub fn parse(bytes: &[u8]) -> Result<ParsedPptx, AlchemizeError> {
     let mut notes: Vec<Note> = Vec::new();
     for (number, part) in note_parts {
         let xml = read_part(media.zip, &part)?;
+        text_bytes = text_bytes.saturating_add(xml.len());
+        crate::infrastructure::document::shared::check_output_budget(text_bytes)?;
         let text = collect_all_text(&xml);
         if !text.is_empty() {
             notes.push(Note {
@@ -217,6 +226,8 @@ struct MediaCtx<'a> {
     zip: &'a mut zip::ZipArchive<Cursor<&'a [u8]>>,
     /// Media payloads collected so far, in first-reference order.
     assets: Vec<RawMedia>,
+    /// Cumulative media bytes (shared output budget).
+    assets_bytes: usize,
     /// Package part name → index into `assets`.
     asset_index: HashMap<String, usize>,
 }
@@ -257,33 +268,26 @@ fn slide_number_of(name: &str, prefix: &str, suffix: &str) -> Option<u32> {
     num.parse().ok()
 }
 
-/// Read one part out of the package.
+/// Read one part out of the package (bounded by the shared per-part limit).
 fn read_part(
     zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
     name: &str,
 ) -> Result<Vec<u8>, AlchemizeError> {
-    use std::io::Read;
     let mut file = zip
         .by_name(name)
         .map_err(|e| AlchemizeError::Zip(format!("part {name} not found: {e}")))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)
-        .map_err(|e| AlchemizeError::Zip(format!("part {name} read failed: {e}")))?;
-    Ok(buf)
+    crate::infrastructure::document::shared::read_part_limited(&mut file, name)
 }
 
-/// Read a slide's relationships part (optional).
+/// Read a slide's relationships part (optional, bounded).
 fn read_slide_rels(
     zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
     name: &str,
 ) -> Result<Option<HashMap<String, String>>, AlchemizeError> {
-    use std::io::Read;
     let Ok(mut file) = zip.by_name(name) else {
         return Ok(None);
     };
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)
-        .map_err(|e| AlchemizeError::Zip(format!("part {name} read failed: {e}")))?;
+    let buf = crate::infrastructure::document::shared::read_part_limited(&mut file, name)?;
     Ok(Some(parse_rels(&buf)))
 }
 
@@ -378,6 +382,14 @@ fn asset_for(ctx: &mut MediaCtx, rels: &HashMap<String, String>, rid: &str) -> O
         return Some(*idx);
     }
     let bytes = read_part(ctx.zip, &part).ok()?;
+    if ctx.assets_bytes.saturating_add(bytes.len())
+        > crate::infrastructure::document::shared::MAX_OUTPUT_BYTES
+    {
+        // Budget exhausted: degrade the reference instead of growing memory
+        // without bound.
+        return None;
+    }
+    ctx.assets_bytes += bytes.len();
     let media_type = guess_media_type(&part);
     let idx = ctx.assets.len();
     ctx.asset_index.insert(part.clone(), idx);

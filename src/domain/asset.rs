@@ -25,9 +25,10 @@ pub fn validate_asset_filename(filename: &str) -> Result<(), String> {
     if filename.starts_with('/') || filename.contains(r":\") {
         return Err(format!("absolute asset filename: {filename:?}"));
     }
-    // Windows drive prefix ("C:...") in either separator flavor.
-    if filename.len() >= 2 && filename.as_bytes()[1] == b':' {
-        return Err(format!("drive-prefixed asset filename: {filename:?}"));
+    // Colons are rejected anywhere: Windows drive prefixes ("C:...") and
+    // NTFS alternate data streams ("a:b") must not reach the write boundary.
+    if filename.contains(':') {
+        return Err(format!("colon in asset filename: {filename:?}"));
     }
     for component in filename.split('/') {
         if component.is_empty() {
@@ -168,9 +169,17 @@ pub trait AssetSink: Send + Sync {
     fn put(&mut self, asset: Asset) -> std::io::Result<String>;
 }
 
-/// Sink that writes assets to an `images/` directory, referencing them by
-/// relative path. Filenames are `{seq:04}-{sha8}.{ext}`; identical content
-/// (same sha8) reuses the first reference without rewriting the file.
+/// Sink that writes assets to a directory and references them by the fixed
+/// `images/{seq:04}-{sha8}.{ext}` markdown convention. Filenames dedupe by
+/// content (same sha8 reuses the first reference without rewriting the file).
+///
+/// The returned reference always carries the `images/` prefix regardless of
+/// the configured root: [`Alchemize::asset_sink_for`] pairs the sink with
+/// `output_root.join("images")`, so the reference resolves relative to the
+/// output root. A directly constructed sink with a custom root still emits
+/// `images/…` references — keep that pairing in mind.
+///
+/// [`Alchemize::asset_sink_for`]: crate::application::builder::Alchemize::asset_sink_for
 pub struct DirSink {
     root: std::path::PathBuf,
     seq: u32,
@@ -201,16 +210,27 @@ impl AssetSink for DirSink {
         if let Some(existing) = self.seen.get(&sha8) {
             return Ok(existing.clone());
         }
+        // Whitelist the extension: the on-disk name is built from it, and a
+        // converter-provided name must not smuggle path punctuation into it.
         let ext = asset
             .extension()
+            .map(|e| {
+                e.chars()
+                    .filter(|c| c.is_ascii_alphanumeric())
+                    .take(16)
+                    .collect::<String>()
+            })
+            .filter(|e| !e.is_empty())
             .map(|e| format!(".{e}"))
             .unwrap_or_default();
         let name = format!("{:04}-{sha8}{ext}", self.seq);
-        self.seq += 1;
 
         std::fs::create_dir_all(&self.root)?;
         let path = self.root.join(&name);
         std::fs::write(&path, &asset.bytes)?;
+        // Advance only after the write lands: a failed write must not burn a
+        // sequence number (the caller retries and would otherwise leave a gap).
+        self.seq += 1;
 
         let reference = format!("images/{name}");
         self.seen.insert(sha8, reference.clone());
@@ -224,7 +244,10 @@ pub struct InlineSink;
 impl AssetSink for InlineSink {
     fn put(&mut self, asset: Asset) -> std::io::Result<String> {
         use base64::Engine as _;
-        let mime = match asset.extension() {
+        // Extension matching is case-insensitive: converters may hand over
+        // `IMAGE.PNG`, and MIME lookup must not degrade to octet-stream.
+        let ext = asset.extension().map(|e| e.to_ascii_lowercase());
+        let mime = match ext.as_deref() {
             Some("png") => "image/png",
             Some("jpg") | Some("jpeg") => "image/jpeg",
             Some("gif") => "image/gif",
@@ -386,13 +409,21 @@ mod tests {
     #[test]
     fn inline_sink_mime_by_extension() {
         let mut sink = InlineSink;
-        assert!(sink
-            .put(Asset::new("a.svg", vec![]))
-            .unwrap()
-            .starts_with("data:image/svg+xml"));
-        assert!(sink
-            .put(Asset::new("a.bin", vec![]))
-            .unwrap()
-            .starts_with("data:application/octet-stream"));
+        assert!(
+            sink.put(Asset::new("a.svg", vec![]))
+                .unwrap()
+                .starts_with("data:image/svg+xml")
+        );
+        assert!(
+            sink.put(Asset::new("a.bin", vec![]))
+                .unwrap()
+                .starts_with("data:application/octet-stream")
+        );
+        // Uppercase extensions resolve to the same MIME type.
+        assert!(
+            sink.put(Asset::new("PHOTO.PNG", vec![]))
+                .unwrap()
+                .starts_with("data:image/png")
+        );
     }
 }

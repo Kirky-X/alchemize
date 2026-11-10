@@ -13,6 +13,7 @@ use crate::application::ports::{Availability, Converter};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
+use crate::infrastructure::document::shared::fence_for;
 
 /// EML converter (headers + text body + attachment list).
 pub struct EmlConverter;
@@ -81,7 +82,11 @@ impl Converter for EmlConverter {
 fn render_message(parsed: &mail_parser::Message<'_>) -> String {
     let mut out = String::new();
     out.push_str("# ");
-    out.push_str(parsed.subject().unwrap_or("(no subject)"));
+    out.push_str(
+        &crate::infrastructure::document::shared::escape_markdown_label(
+            parsed.subject().unwrap_or("(no subject)"),
+        ),
+    );
     out.push_str("\n\n");
 
     let field = |name: &str, value: Option<String>| {
@@ -89,7 +94,10 @@ fn render_message(parsed: &mail_parser::Message<'_>) -> String {
         if value.is_empty() {
             String::new()
         } else {
-            format!("- **{name}**: {value}\n")
+            format!(
+                "- **{name}**: {}\n",
+                crate::infrastructure::document::shared::escape_markdown_label(&value)
+            )
         }
     };
     out.push_str(&field(
@@ -117,9 +125,10 @@ fn render_message(parsed: &mail_parser::Message<'_>) -> String {
     if let Some(html) = parsed.body_html(0) {
         let html = html.trim();
         if !html.is_empty() {
-            out.push_str("```html\n");
+            let fence = fence_for(html);
+            out.push_str(&format!("{fence}html\n"));
             out.push_str(html);
-            out.push_str("\n```\n");
+            out.push_str(&format!("\n{fence}\n"));
         }
     }
     out

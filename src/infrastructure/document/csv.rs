@@ -46,10 +46,18 @@ impl CsvConverter {
         if ext == "psv" {
             return b'|';
         }
-        let header = decoded.lines().next().unwrap_or("");
-        let tabs = header.matches('\t').count();
-        let commas = header.matches(',').count();
-        let pipes = header.matches('|').count();
+        // Sample the first few non-empty lines instead of only the header
+        // row: a header cell with embedded commas (or a leading blank line)
+        // would otherwise flip the vote on tab-separated data.
+        let sample: String = decoded
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .take(5)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tabs = sample.matches('\t').count();
+        let commas = sample.matches(',').count();
+        let pipes = sample.matches('|').count();
         // Pipe-separated files are frequently mislabelled `.csv`.
         if pipes > commas && pipes > tabs {
             b'|'
@@ -83,6 +91,24 @@ impl Converter for CsvConverter {
         let ext = input.extension().unwrap_or_default();
         let delimiter = self.effective_delimiter(&ext, &decoded);
 
+        // Pass 1: widest row. The table width is the widest row — truncating
+        // would lose data and a ragged table would break GFM rendering. Only
+        // widths are kept; buffering all cell contents would expand a 100 MB
+        // CSV of tiny cells into gigabytes.
+        let mut data_width = 0usize;
+        {
+            let mut probe = ReaderBuilder::new()
+                .delimiter(delimiter)
+                .has_headers(true)
+                .flexible(true)
+                .from_reader(decoded.as_bytes());
+            for result in probe.records() {
+                let record =
+                    result.map_err(|e| AlchemizeError::other(format!("CSV parse error: {e}")))?;
+                data_width = data_width.max(record.len());
+            }
+        }
+
         let mut reader = ReaderBuilder::new()
             .delimiter(delimiter)
             .has_headers(true)
@@ -93,8 +119,15 @@ impl Converter for CsvConverter {
             .headers()
             .map_err(|e| AlchemizeError::other(format!("failed to read CSV headers: {e}")))?;
 
-        let header_vec: Vec<String> = headers.iter().map(|s| s.to_string()).collect();
-        let col_count = header_vec.len();
+        let mut header_vec: Vec<String> = headers.iter().map(|s| s.to_string()).collect();
+        let col_count = header_vec.len().max(data_width);
+
+        // Pad the header to the final width with synthetic column names.
+        let padded_header_columns = col_count - header_vec.len();
+        while header_vec.len() < col_count {
+            let index = header_vec.len() + 1;
+            header_vec.push(format!("column_{index}"));
+        }
 
         let mut lines = Vec::new();
         lines.push(format!("| {} |", header_vec.join(" | ")));
@@ -103,23 +136,14 @@ impl Converter for CsvConverter {
             (0..col_count).map(|_| "---").collect::<Vec<_>>().join("|")
         ));
 
-        let mut row_count = 0;
+        // Pass 2: emit rows one at a time.
+        let mut row_count = 0usize;
         for result in reader.records() {
             let record =
                 result.map_err(|e| AlchemizeError::other(format!("CSV parse error: {e}")))?;
-            let cells: Vec<String> = record.iter().map(|s| s.to_string()).collect();
-
-            let cells_len = cells.len();
-            let padded_cells: Vec<String> = if cells_len < col_count {
-                cells
-                    .into_iter()
-                    .chain((cells_len..col_count).map(|_| String::new()))
-                    .collect()
-            } else {
-                cells
-            };
-
-            lines.push(format!("| {} |", padded_cells.join(" | ")));
+            let mut padded: Vec<String> = record.iter().map(|s| s.to_string()).collect();
+            padded.resize(col_count, String::new());
+            lines.push(format!("| {} |", padded.join(" | ")));
             row_count += 1;
         }
 
@@ -132,6 +156,7 @@ impl Converter for CsvConverter {
         let metadata = serde_json::json!({
             "source_format": ext,
             "column_count": col_count,
+            "padded_header_columns": padded_header_columns,
             "row_count": row_count,
             "encoding": encoding_name,
             "delimiter": match delimiter {
@@ -224,5 +249,40 @@ mod tests {
     fn effective_delimiter_fixed_override() {
         let converter = CsvConverter::with_delimiter(b';');
         assert_eq!(converter.effective_delimiter("csv", "a;b\nc;d"), b';');
+    }
+
+    #[test]
+    fn effective_delimiter_samples_multiple_lines() {
+        let converter = CsvConverter::new();
+        // Header has embedded commas, data rows are tab-separated: the
+        // multi-line vote must still pick tabs.
+        assert_eq!(
+            converter.effective_delimiter("csv", "name, full\nAlice\t30\nBob\t25"),
+            b'\t'
+        );
+        // Leading blank line does not break the vote.
+        assert_eq!(
+            converter.effective_delimiter("csv", "\n\na\tb\nc\td"),
+            b'\t'
+        );
+    }
+
+    #[tokio::test]
+    async fn convert_widens_table_for_ragged_rows() {
+        let converter = CsvConverter::new();
+        let csv = "a,b\n1,2,3,4\n5,6\n";
+        let input = Input::bytes(csv.as_bytes().to_vec(), "wide.csv");
+        let result = converter.convert(input).await.unwrap();
+        // The table widens to the widest row: no cell is dropped.
+        assert_eq!(result.metadata["column_count"], 4);
+        assert_eq!(result.metadata["padded_header_columns"], 2);
+        assert!(result.markdown.contains("| a | b | column_3 | column_4 |"));
+        assert!(result.markdown.contains("| 1 | 2 | 3 | 4 |"));
+        // Short rows are padded, never truncated.
+        assert!(result.markdown.contains("| 5 | 6 |  |  |"));
+        // Every rendered row keeps exactly the final column count.
+        for line in result.markdown.lines().filter(|l| l.starts_with('|')) {
+            assert_eq!(line.matches('|').count(), 5, "ragged row: {line}");
+        }
     }
 }

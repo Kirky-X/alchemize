@@ -72,6 +72,7 @@ impl Converter for DocxDeepConverter {
         let assets = rewrite_image_assets(&mut doc, &media);
         doc.assets.clear();
         let markdown = crate::infrastructure::document::gfm_render::render_markdown(&doc);
+        crate::infrastructure::document::shared::check_output_budget(markdown.len())?;
 
         let metadata = serde_json::json!({
             "source_format": "docx",
@@ -160,6 +161,7 @@ pub fn parse(bytes: &[u8]) -> Result<ParsedDocx, AlchemizeError> {
         rels: &rels,
         warnings: &mut warnings,
         assets: Vec::new(),
+        assets_bytes: 0,
         asset_index: HashMap::new(),
         zip: &mut zip,
     };

@@ -135,10 +135,14 @@ async fn golden_docx_text() {
 }
 
 #[tokio::test]
-async fn golden_xlsx_opens() {
-    // Fixture is a skeleton workbook: conversion succeeds (possibly empty).
-    let md = golden("xlsx", "xlsx").await;
-    assert!(!md.is_empty());
+async fn golden_xlsx_disabled_by_default() {
+    // Spreadsheet support was removed: no engine accepts xlsx/ods.
+    let input = Input::Path(fixture_dir("xlsx").join("sample.xlsx"));
+    let err = alch().convert(&input).await.unwrap_err();
+    assert!(
+        matches!(err, alchemize::AlchemizeError::UnsupportedFormat(_)),
+        "{err:?}"
+    );
 }
 
 #[tokio::test]

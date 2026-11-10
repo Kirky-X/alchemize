@@ -54,14 +54,33 @@ impl Converter for EpubConverter {
 
         let mut markdown_parts = Vec::new();
         let mut chapter_count = 0;
+        let mut chapter_bytes = 0usize;
+        let mut failed_chapters = 0usize;
+        let mut last_error: Option<String> = None;
 
         if let Some(title) = epub.metadata().title() {
-            markdown_parts.push(format!("# {}\n", title.value()));
+            markdown_parts.push(format!(
+                "# {}\n",
+                crate::infrastructure::document::shared::escape_markdown_label(title.value())
+            ));
         }
 
         let mut reader = epub.reader();
-        while let Some(Ok(data)) = reader.read_next() {
+        while let Some(result) = reader.read_next() {
+            // Degrade rather than fail (project principle): a broken chapter
+            // is recorded and skipped so the remaining chapters still reach
+            // the caller; only a book with zero successful chapters errors.
+            let data = match result {
+                Ok(data) => data,
+                Err(e) => {
+                    failed_chapters += 1;
+                    last_error = Some(format!("EPUB chapter read failed: {e}"));
+                    continue;
+                }
+            };
             let content = data.content();
+            chapter_bytes = chapter_bytes.saturating_add(content.len());
+            crate::infrastructure::document::shared::check_output_budget(chapter_bytes)?;
 
             if content.trim().is_empty() {
                 continue;
@@ -84,6 +103,15 @@ impl Converter for EpubConverter {
             }
         }
 
+        // Every chapter failed: surface the reason instead of a title-only
+        // document that hides the loss.
+        if chapter_count == 0
+            && failed_chapters > 0
+            && let Some(error) = last_error
+        {
+            return Err(AlchemizeError::other(error));
+        }
+
         let markdown = if markdown_parts.is_empty() {
             "*EPUB contains no extractable content.*\n".to_string()
         } else {
@@ -93,6 +121,7 @@ impl Converter for EpubConverter {
         let metadata = serde_json::json!({
             "source_format": "epub",
             "chapter_count": chapter_count,
+            "failed_chapters": failed_chapters,
         });
 
         Ok(

@@ -11,6 +11,7 @@ use crate::application::ports::{Availability, Converter};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
+use crate::infrastructure::document::shared::fence_for;
 use crate::infrastructure::tools::pandoc::PandocTool;
 
 /// Extension → pandoc input format.
@@ -83,7 +84,9 @@ impl Converter for PandocGenericConverter {
             }
             Availability::Unavailable { reason } => {
                 // Degrade: keep the source verbatim in a fenced block.
-                let markdown = format!("```{format}\n{}\n```\n", source.trim_end());
+                let body = source.trim_end();
+                let fence = fence_for(body);
+                let markdown = format!("{fence}{format}\n{body}\n{fence}\n");
                 let metadata = serde_json::json!({
                     "source_format": ext,
                     "engine": "fallback",
@@ -160,7 +163,7 @@ mod tests {
         } else {
             // No pandoc: the fenced fallback keeps the source intact.
             assert!(
-                result.markdown.starts_with("```asciidoc"),
+                result.markdown.starts_with("````asciidoc"),
                 "{}",
                 result.markdown
             );

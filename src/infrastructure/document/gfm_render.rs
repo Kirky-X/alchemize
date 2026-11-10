@@ -9,6 +9,7 @@ use crate::domain::document::{
     Block, CellSlot, Document, ImageSource, Inline, LinkTarget, List, MarkerKind, NoteKind,
     TableKind,
 };
+use crate::infrastructure::document::shared::fence_for;
 
 /// Render a document (already asset-rewritten) to GFM markdown.
 pub fn render_markdown(doc: &Document) -> String {
@@ -62,8 +63,17 @@ fn render_blocks(blocks: &[Block], out: &mut String) {
                 out.push('\n');
             }
             Block::CodeBlock { lang, text } => {
-                let lang = lang.as_deref().unwrap_or("");
-                out.push_str(&format!("```{lang}\n{text}\n```\n\n"));
+                // Info string: ASCII alphanumerics only — the language tag
+                // must not smuggle markdown through the fence line.
+                let lang: String = lang
+                    .as_deref()
+                    .unwrap_or("")
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+'))
+                    .take(16)
+                    .collect();
+                let fence = fence_for(text);
+                out.push_str(&format!("{fence}{lang}\n{text}\n{fence}\n\n"));
             }
             Block::Rule => out.push_str("---\n\n"),
             Block::Math(tex) => {

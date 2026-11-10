@@ -3,8 +3,6 @@
 
 //! PPTX to Markdown converter using ZIP + quick-xml.
 
-use std::io::Read;
-
 use async_trait::async_trait;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
@@ -76,11 +74,11 @@ impl Converter for PptxConverter {
             let mut file = archive
                 .by_name(entry_name)
                 .map_err(|e| AlchemizeError::Zip(format!("{e}")))?;
-            let mut xml_content = String::new();
-            file.read_to_string(&mut xml_content)
-                .map_err(|e| AlchemizeError::Zip(format!("{e}")))?;
+            let xml_bytes =
+                crate::infrastructure::document::shared::read_part_limited(&mut file, entry_name)?;
+            let xml_content = String::from_utf8_lossy(&xml_bytes);
 
-            let text_blocks = extract_text_from_slide_xml(&xml_content)?;
+            let text_blocks = extract_text_from_slide_xml(xml_content.as_ref())?;
             if text_blocks.is_empty() {
                 continue;
             }
@@ -93,6 +91,9 @@ impl Converter for PptxConverter {
                 markdown.push_str(block);
                 markdown.push('\n');
             }
+            // Cumulative output ceiling: per-part limits alone let many
+            // slides sum unboundedly.
+            crate::infrastructure::document::shared::check_output_budget(markdown.len())?;
         }
 
         if markdown.is_empty() {
@@ -178,7 +179,9 @@ fn extract_text_from_slide_xml(xml: &str) -> Result<Vec<String>, AlchemizeError>
                     _ => {}
                 }
             }
-            Ok(Event::Text(e)) if in_text => {
+            // Only text inside a paragraph counts: a malformed `a:t` outside
+            // any `a:p` must not leak into the previous/next paragraph state.
+            Ok(Event::Text(e)) if in_text && in_paragraph => {
                 let text = String::from_utf8_lossy(e.as_bytes()).to_string();
                 current_paragraph.push_str(&text);
             }

@@ -23,6 +23,9 @@ pub struct MineruConfig {
     /// Base URL for the MinerU Precision API (cloud).
     pub precision_base_url: String,
     /// Optional bearer token for cloud endpoints (redacted in Debug below).
+    ///
+    /// `skip_serializing`: a token can be supplied through a config payload,
+    /// but no serialization path ever writes it back out.
     #[serde(skip_serializing)]
     pub api_token: Option<String>,
     /// Per-request timeout in seconds.
@@ -279,7 +282,7 @@ impl AlchemizeBuilder {
     }
 
     /// Build the converter with all configured engines registered.
-    pub fn build(mut self) -> Alchemize {
+    pub fn build(self) -> Alchemize {
         let mut registry = if self.no_remote {
             ConverterRegistry::new_no_remote()
         } else {
@@ -289,16 +292,28 @@ impl AlchemizeBuilder {
         // html-deep：feature html-deep 编译即注册（默认配置）；with_html_deep 仅
         // 定制 base_url/extract_main——「编译即可用」的注册语义。
         #[cfg(feature = "html-deep")]
-        if self.html_deep.is_none() {
-            self.html_deep = Some(HtmlDeepEngineConfig::default());
-        }
+        let html_deep = Some(self.html_deep.clone().unwrap_or_default());
+        #[cfg(not(feature = "html-deep"))]
+        let html_deep = self.html_deep.clone();
+
+        // Container converters dispatch nested entries through the assembled
+        // registry (same post-assembly wiring as the zip facade): the slot is
+        // created now, handed to every container converter, and filled right
+        // after the registry is wrapped in its Arc — before any conversion
+        // can run. The slot is weak: the registry holds the converters that
+        // hold the slot, so a strong reference would form an Arc cycle and
+        // leak the whole registry per build (alch-mcp builds per request).
+        let container_registry_slot: std::sync::Arc<
+            std::sync::OnceLock<std::sync::Weak<ConverterRegistry>>,
+        > = std::sync::Arc::new(std::sync::OnceLock::new());
 
         for converter in crate::infrastructure::engines::default_converters(
             &self.mineru,
             self.vision_provider.clone(),
             self.transcribe_provider.clone(),
             self.video_mode,
-            &self.html_deep,
+            &html_deep,
+            &container_registry_slot,
         ) {
             registry.register(converter);
         }
@@ -308,6 +323,9 @@ impl AlchemizeBuilder {
         // Nested entries bypass the facade's size check (they hit the
         // registry directly), so the ceiling travels with the converter.
         let registry = std::sync::Arc::new(registry);
+        // Fill the container slot with a weak handle to the assembled
+        // registry (the strong owner is `Alchemize.registry`).
+        let _ = container_registry_slot.set(std::sync::Arc::downgrade(&registry));
         let zip = crate::infrastructure::document::ZipConverter::with_arc(std::sync::Arc::clone(
             &registry,
         ))

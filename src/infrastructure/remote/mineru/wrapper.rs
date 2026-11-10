@@ -17,6 +17,7 @@ use std::time::Duration;
 use tracing::{debug, info};
 
 use super::TaskStatus;
+use super::http_limit::{MAX_ERROR_RESPONSE_BYTES, read_limited_text, truncate_body};
 use super::validated_url::validate_base_url;
 use crate::application::ports::Converter;
 use crate::domain::error::AlchemizeError;
@@ -26,7 +27,7 @@ use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 // Configuration
 
 /// Configuration for the MinerU HTTP client.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MinerUHttpConfig {
     /// Base URL of the MinerU service (e.g. `http://localhost:8888`).
     pub base_url: String,
@@ -38,6 +39,26 @@ pub struct MinerUHttpConfig {
     pub lightweight_max_bytes: u64,
 }
 
+impl std::fmt::Debug for MinerUHttpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // api_token deliberately redacted: never leak secrets in logs
+        // (mirrors MineruConfig's manual Debug).
+        f.debug_struct("MinerUHttpConfig")
+            .field("base_url", &self.base_url)
+            .field("timeout_secs", &self.timeout_secs)
+            .field(
+                "api_token",
+                &if self.api_token.is_some() {
+                    "<redacted>"
+                } else {
+                    "None"
+                },
+            )
+            .field("lightweight_max_bytes", &self.lightweight_max_bytes)
+            .finish()
+    }
+}
+
 impl Default for MinerUHttpConfig {
     fn default() -> Self {
         Self::from_config(&crate::application::builder::MineruConfig::default())
@@ -47,15 +68,14 @@ impl Default for MinerUHttpConfig {
 impl MinerUHttpConfig {
     /// Build a [`MinerUConfig`] from the core [`MineruConfig`].
     ///
-    /// `base_url` comes from config; `timeout_secs`, `api_token`, and
-    /// `lightweight_max_bytes` keep their defaults. This is the config-driven
-    /// entry point — the hardcoded `base_url` lives only in
-    /// [`MineruConfig::default`].
+    /// `base_url`, `timeout_secs` and `api_token` are forwarded from the
+    /// config; `lightweight_max_bytes` keeps its default. Dropping the token
+    /// here would send unauthenticated requests to cloud endpoints.
     pub fn from_config(config: &MineruConfig) -> Self {
         Self {
             base_url: config.base_url.clone(),
-            timeout_secs: 300,
-            api_token: None,
+            timeout_secs: config.timeout_secs,
+            api_token: config.api_token.clone(),
             lightweight_max_bytes: 10 * 1024 * 1024, // 10MB
         }
     }
@@ -79,6 +99,16 @@ impl MinerUHttpConfig {
         self.timeout_secs = secs;
         self
     }
+}
+
+/// Cap remote response bodies embedded in error messages: they can be large
+/// and may carry internal detail, so never propagate them unbounded.
+async fn read_error_body(resp: reqwest::Response) -> String {
+    truncate_body(
+        read_limited_text(resp, MAX_ERROR_RESPONSE_BYTES)
+            .await
+            .unwrap_or_else(|_| "<unreadable>".to_string()),
+    )
 }
 
 // API Response Types
@@ -166,7 +196,7 @@ impl MinerUConverter {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+            let body = read_error_body(resp).await;
             return Err(AlchemizeError::MineruConversion(format!(
                 "MinerU API returned {status}: {body}"
             )));
@@ -197,7 +227,7 @@ impl MinerUConverter {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+            let body = read_error_body(resp).await;
             return Err(AlchemizeError::MineruConversion(format!(
                 "MinerU poll returned {status}: {body}"
             )));
@@ -232,9 +262,11 @@ impl MinerUConverter {
                     return Ok(markdown);
                 }
                 TaskStatus::Failed => {
-                    let error = status_resp
-                        .error
-                        .unwrap_or_else(|| "unknown error".to_string());
+                    let error = truncate_body(
+                        status_resp
+                            .error
+                            .unwrap_or_else(|| "unknown error".to_string()),
+                    );
                     return Err(AlchemizeError::MineruConversion(format!(
                         "MinerU task {task_id} failed: {error}"
                     )));
@@ -377,5 +409,13 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, AlchemizeError::MineruUnavailable(_)));
+    }
+
+    #[test]
+    fn debug_redacts_api_token() {
+        let config = MinerUHttpConfig::new("http://mineru:9999").with_token("secret-token");
+        let dbg = format!("{config:?}");
+        assert!(dbg.contains("<redacted>"));
+        assert!(!dbg.contains("secret-token"));
     }
 }

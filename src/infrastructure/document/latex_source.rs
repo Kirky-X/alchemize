@@ -11,6 +11,7 @@ use crate::application::ports::{Availability, Converter};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult, VideoProcessingMode};
+use crate::infrastructure::document::shared::fence_for;
 
 /// Converts LaTeX source files to markdown.
 ///
@@ -56,7 +57,8 @@ impl Converter for LatexSourceConverter {
         let latex = String::from_utf8_lossy(&bytes).into_owned();
 
         if !self.pandoc_available {
-            let markdown = format!("```latex\n{latex}\n```\n");
+            let fence = fence_for(&latex);
+            let markdown = format!("{fence}latex\n{latex}\n{fence}\n");
             let warnings = crate::domain::latex_validate::validate_markdown_math(&markdown);
             return Ok(ConvertResult::with_metadata(
                 markdown,
@@ -648,7 +650,7 @@ mod tests {
         };
         let input = Input::bytes(b"\\section{Hi}".to_vec(), "paper.tex");
         let result = converter.convert(input).await.unwrap();
-        assert!(result.markdown.starts_with("```latex\n"));
+        assert!(result.markdown.starts_with("````latex\n"));
         assert_eq!(result.quality, ConversionQuality::LocalFallback);
         // The converter always converts (fenced fallback is built in):
         // availability stays Available; pandoc status shows in metadata.

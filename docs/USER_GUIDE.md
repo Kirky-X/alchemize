@@ -39,7 +39,7 @@ cd alchemize
 # 默认特性（零外部服务依赖）
 cargo build --release          # 二进制：target/release/alch
 
-# 全功能（MinerU 云端 + anydoc office 后端 + 本地 ASR）
+# 全功能（MinerU 云端 + 本地 ASR）
 cargo build --release --features full
 
 # 安装到本地
@@ -54,7 +54,7 @@ alch convert paper.pdf
 
 # 写文件（父目录自动创建），stderr 给摘要行
 alch convert report.docx -o report.md
-# converted report.docx -> report.md [local_full] (engine: anydoc)
+# converted report.docx -> report.md [local_full] (engine: docx-deep)
 
 # 看看哪些引擎可用、支持哪些格式
 alch doctor
@@ -65,7 +65,7 @@ alch formats
 
 ### 注册表与 fallback 链
 
-每个扩展名的候选引擎按 `priority()` 降序排成链：前序返回 `Err` 自动尝试次优；`Unavailable` 引擎直接跳过并把原因记入 attempts。`--engine NAME` 把偏好引擎提到队首（前缀匹配、大小写不敏感，未命中静默回落不报错）。
+每个扩展名的候选引擎按 `priority()` 降序排成链：前序返回 `Err` 自动尝试次优；`Unavailable` 引擎直接跳过并把原因记入 attempts。`--engine NAME` 把偏好引擎提到队首（精确名优先、无精确命中时按前缀匹配，大小写不敏感，未命中静默回落不报错）。
 
 ### 质量分层
 
@@ -74,7 +74,7 @@ alch formats
 | 层级 | 含义 | 典型来源 |
 | --- | --- | --- |
 | `api` | 远端高保真 | MinerU 云端 |
-| `local_full` | 本地全功能 | anydoc、原生解析器 |
+| `local_full` | 本地全功能 | 原生解析器（docx-deep/odt/odp/pptx-deep 等） |
 | `local_fallback` | 本地降级 | pdf-extract 文本链、无 pandoc 的 LaTeX 围栏 |
 
 降级产出同样算成功（退出码 0）——是否可接受由质量标签判断，工具不替你取舍。
@@ -84,12 +84,11 @@ alch formats
 | 引擎名 | 扩展名 | 说明 |
 | --- | --- | --- |
 | `text` | txt/text/log/md + ~45 代码/配置扩展名 | 围栏代码块（语言标签映射） |
-| `csv` | csv/tsv | 分隔符自探测（首行 tab 多于逗号按 TSV） |
+| `csv` | csv/tsv/psv | 分隔符自探测（采样前 5 个非空行；tsv 强制制表符、psv 强制竖线） |
 | `html` / `epub` / `ipynb` | html/htm、epub、ipynb | 结构化文本解析 |
-| `docx` / `pptx` / `xlsx` | OOXML 族（+xls/ods） | 原生 XML + calamine |
+| `docx` / `pptx` | OOXML 族 | 原生 XML（表格 xlsx/xls/xlsb/ods 不支持） |
 | `pdf` | pdf | pdf-extract 文本 + TOC 剔除/结构启发 |
 | `html-deep`（feature `html-deep`） | html/htm | 自研迭代状态机 → htmd 兜底；`--extract-main` 主内容提取、`--base-url` 链接绝对化；含 `<math` 自动路由 htmd 保真 |
-| `anydoc`（feature） | office 全格式 + 旧版二进制 Office | priority 15 压过原生解析 |
 | `mineru`（feature+配置） | pdf | 云端高保真，链尾 |
 | `latex-source` | tex/latex | pandoc 探测，缺失时围栏兜底 |
 | `image` / `audio` / `video` / `subtitle` | 图片/音频/视频/字幕族 | 见下文进阶用法 |
@@ -165,11 +164,11 @@ alch formats     # 全部支持扩展名，排序去重空格分隔
 
 ### ✅ 质量与降级判读
 
-`local_fallback` 不等于失败：PDF 无 `anydoc` 时走文本链是预期行为。判读顺序：先看 stderr 摘要行 `[quality]`，再按需升级特性（装 `anydoc`/配 MinerU）。库使用者读 `metadata.converter` 与 `quality` 字段做同样判断。
+`local_fallback` 不等于失败：PDF 本地文本链是预期行为。判读顺序：先看 stderr 摘要行 `[quality]`，再按需升级特性（配 MinerU）。库使用者读 `metadata.converter` 与 `quality` 字段做同样判断。
 
 ### ☁️ MinerU 云端与本地服务
 
-MinerU 排链尾：本地链（anydoc → pdf-extract）失败后才尝试云端（产出 `api` 级）。要完全离线用 `--no-remote`。agent/precision 双客户端按文件大小自动选择（precision 自身 200 MB 上限）；响应体积按用途分级限量。
+MinerU 排链尾：本地链（pdf-extract）失败后才尝试云端（产出 `api` 级）。要完全离线用 `--no-remote`。agent/precision 双客户端按文件大小自动选择（precision 自身 200 MB 上限）；响应体积按用途分级限量。
 
 ### 📝 字幕与时间码
 
@@ -225,7 +224,7 @@ let alch = AlchemizeBuilder::new()
     .with_asset_mode(AssetMode::Inline)
     .with_no_remote()               // 离线环境
     .build();
-let result = alch.convert_pref(&Input::Path("report.docx".into()), Some("anydoc")).await?;
+let result = alch.convert_pref(&Input::Path("report.docx".into()), Some("docx-deep")).await?;
 println!("{} [{}]", result.title.as_deref().unwrap_or("-"), result.quality);
 ```
 
@@ -242,7 +241,7 @@ println!("{} [{}]", result.title.as_deref().unwrap_or("-"), result.quality);
 ### 🔒 安全实践
 
 - 不可信环境加 `--no-remote`，进程零网络出口。
-- 凭据只走环境变量；不要把 `MINERU_API_TOKEN` 写进 shell 历史（用 env 文件或 secret 管理器）。
+- 凭据来自环境变量或 `MineruConfig::api_token`；不要把 `MINERU_API_TOKEN` 写进 shell 历史（用 env 文件或 secret 管理器）。
 - 细节见[安全文档](SECURITY.md)。
 
 ## 🔧 故障排查
@@ -251,7 +250,7 @@ println!("{} [{}]", result.title.as_deref().unwrap_or("-"), result.quality);
 | --- | --- |
 | 退出码 2 `unsupported format: <ext>` | `alch formats` 确认扩展名；或用 `--format` 显式指定；需要的引擎可能未编译进特性 |
 | 退出码 3 全链失败 | stderr 逐行列出各引擎失败原因，按原因处理（端点不可达/文件损坏/依赖缺失） |
-| 产出质量只有 `local_fallback` | 属预期降级；要更高保真装 `anydoc`/配 MinerU |
+| 产出质量只有 `local_fallback` | 属预期降级；要更高保真配 MinerU |
 | 图片只有元数据 | 未注入 VisionProvider；无内置兜底是设计行为 |
 | 转换报 `AudioUnavailable` | doctor 不显示 provider 级缺失；核对 bundle 布局与 `ORT_DYLIB_PATH` |
 | `zip` 转换报不支持嵌套 | zip 递归只支持一层容器内的普通文件；嵌套 zip 属显式不支持 |

@@ -12,6 +12,13 @@ pub enum AlchemizeError {
     #[error("unsupported format for input: {0}")]
     UnsupportedFormat(String),
 
+    /// Recursive container nesting exceeded the configured depth limit.
+    #[error("container nesting exceeds the depth limit of {limit}")]
+    DepthLimitExceeded {
+        /// Maximum nesting depth allowed per conversion chain.
+        limit: u32,
+    },
+
     /// No converter accepted the input.
     #[error("no converter accepted the input")]
     NoConverterAccepted,
@@ -115,6 +122,31 @@ impl AlchemizeError {
     /// Convenience constructor for a generic error from any Display source.
     pub fn other(msg: impl std::fmt::Display) -> Self {
         Self::Other(msg.to_string())
+    }
+
+    /// Stable, non-sensitive variant label for logs and metrics.
+    ///
+    /// Converter errors can embed remote response bodies or internal
+    /// endpoints; logs must use this instead of `Display`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::UnsupportedFormat(_) => "unsupported_format",
+            Self::DepthLimitExceeded { .. } => "depth_limit_exceeded",
+            Self::NoConverterAccepted => "no_converter_accepted",
+            Self::AllBackendsFailed { .. } => "all_backends_failed",
+            Self::FileRead { .. } => "file_read",
+            Self::Pdf(_) => "pdf",
+            Self::Zip(_) => "zip",
+            Self::Xml(_) => "xml",
+            Self::VideoUnavailable(_) => "video_unavailable",
+            Self::AudioUnavailable(_) => "audio_unavailable",
+            Self::VisionUnavailable(_) => "vision_unavailable",
+            Self::MineruUnavailable(_) => "mineru_unavailable",
+            Self::MineruConversion(_) => "mineru_conversion",
+            Self::SecurityViolation { .. } => "security_violation",
+            Self::ResponseTooLarge { .. } => "response_too_large",
+            Self::Other(_) => "other",
+        }
     }
 }
 

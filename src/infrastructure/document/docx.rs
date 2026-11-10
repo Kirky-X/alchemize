@@ -3,8 +3,6 @@
 
 //! DOCX to Markdown converter using ZIP + quick-xml.
 
-use std::io::Read;
-
 use async_trait::async_trait;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
@@ -52,15 +50,18 @@ impl Converter for DocxConverter {
         let mut archive = ZipArchive::new(std::io::Cursor::new(bytes))
             .map_err(|e| AlchemizeError::Zip(format!("{e}")))?;
 
-        let mut xml_content = String::new();
-        {
+        // Keep the Cow: valid UTF-8 borrows, only lossy input allocates a
+        // replacement (matches the pptx shallow reader).
+        let xml_content = {
             let mut doc_file = archive
                 .by_name("word/document.xml")
                 .map_err(|e| AlchemizeError::Zip(format!("word/document.xml not found: {e}")))?;
-            doc_file
-                .read_to_string(&mut xml_content)
-                .map_err(|e| AlchemizeError::Zip(format!("{e}")))?;
-        }
+            let bytes = crate::infrastructure::document::shared::read_part_limited(
+                &mut doc_file,
+                "word/document.xml",
+            )?;
+            String::from_utf8_lossy(&bytes).into_owned()
+        };
 
         let paragraphs = extract_paragraphs_from_docx_xml(&xml_content)?;
 

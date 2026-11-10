@@ -53,7 +53,6 @@ cargo build --features full
 | feature | 引入 | 说明 |
 | --- | --- | --- |
 | `mineru` | MinerU 云端 PDF 引擎 | 需 `ALCHEMIZE_MINERU_URL` 配置端点才注册 |
-| `anydoc` | office 全格式后端（firecrawl/anydoc, MIT） | priority 15，压过原生 office 解析 |
 | `asr` | vecboost 转录门面（Qwen3-ASR ONNX + silero VAD） | 需模型 bundle + `ORT_DYLIB_PATH` |
 | `mcp` | MCP 工具面（alch-mcp，rmcp stdio） | CLI 封装（sdforge cli）恒在 |
 | `html-deep` | html-deep 自研引擎（`document/html_deep/engine/`） | scraper/ego-tree/dom_smoothie/icu_properties 同批可选 |
@@ -120,7 +119,7 @@ git branch -d feat/my-engine
 
 ### 命名约定
 
-- 引擎 `name()` 用小写连字符（`latex-source`、`anydoc`、`mineru`），与 `--engine` 和 `metadata.converter` 取值一致。
+- 引擎 `name()` 用小写连字符（`latex-source`、`docx-deep`、`mineru`），与 `--engine` 和 `metadata.converter` 取值一致。
 - 环境变量统一 `ALCHEMIZE_` 前缀（测试专用变量除外）。
 
 ### 代码质量要求

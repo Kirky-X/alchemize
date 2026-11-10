@@ -39,8 +39,7 @@ cargo update -d          # 更新漏洞通告数据库
 
 | 风险 | 现状 | 缓解 |
 | --- | --- | --- |
-| anydoc 0.2.4 传递依赖 zip 8.6.0 | cargo-audit 通告（RUSTSEC-2026-0367/0368/0369/0429） | 可达性分析=不可达（anydoc 仅用 new/len/by_name/index_for_name，四条 CVE 全在 extract 系列）；修复路线已分析（fork 换 zip 9.4 一行改动实证可行），待拍板实施 |
-| `with_max_file_size` 未被引擎装配消费 | 预留接口未生效 | 文档已标注「勿依赖」；MinerU precision 自带 200MB 上限 |
+| `with_max_file_size` 消费点 | 已在 facade 分发前拦截超限输入，并作为 ZIP 嵌套条目上限 | 覆盖注册表分发与 zip 分支；tar/tgz/7z 嵌套固定 64 MiB/条目 + 256 MiB/整包，gz/xz/zst 单流解压上限 64 MiB，均不受此值影响；MinerU precision 另有 200MB 上限 |
 | libsqlite3-sys 0.35 存量通告 RUSTSEC-2026-0459（C SQLite CVE-2026-119375，medium） | `data` feature 传递依赖，存量非新增 | cargo-audit 已核；升级 rusqlite 属独立依赖变更，随下一依赖批次处理 |
 | 仓库无 CI 与 git 钩子 | 门禁靠贡献者本地执行 | CONTRIBUTING 明确列出本地门禁清单 |
 
@@ -92,7 +91,7 @@ cargo update -d          # 更新漏洞通告数据库
 
 | 攻击面 | 解析器 | 对策 |
 | --- | --- | --- |
-| zip / docx / pptx / xlsx / epub（ZIP 容器） | `zip` crate（deflate） | 声明式依赖 + Cargo.lock 锁定；解析失败返回 `Zip`/`Xml` 结构化错误而非 panic |
+| zip / docx / pptx / epub（ZIP 容器） | `zip` crate（deflate） | 声明式依赖 + Cargo.lock 锁定；解析失败返回 `Zip`/`Xml` 结构化错误而非 panic |
 | pdf | `lopdf` 0.47（crates.io 直连；pdfium 档另见下行） | 解析失败返回 `Pdf` 错误；TOC 剔除与结构启发只影响产出质量；每页/每流解压上限 64 MiB + 256 MiB 全文档累计文本预算，超限显性拒绝，防解压炸弹；lopdf 原生传播解压错误（无吞错路径） |
 | xml | `quick-xml` | 无外部实体解析路径 |
 | tex/latex | pandoc 子进程 | 仅 PATH 探测 + 参数化调用，无 shell 拼接；围栏兜底路径无子进程 |
@@ -124,7 +123,7 @@ cargo update -d          # 更新漏洞通告数据库
 
 ### 凭据与敏感信息处理
 
-- **凭据只经环境变量传递**：`MINERU_API_TOKEN`（Precision API bearer token）；无配置文件、无内置密钥、无加密存储需求。
+- **凭据来源与传递**：`MINERU_API_TOKEN` 或 `MineruConfig::api_token`（两者均转成 Bearer token，仅发往通过 `validate_base_url` 的端点）；无内置密钥、无加密存储需求。token 会随请求发往配置的 base_url：`validate_base_url` 约束主机与 scheme 白名单，但本地部署使用明文 http 端点时由部署方自行承担链路风险。容器嵌套另有链级 512 MiB 累计解压预算（按转换链计数）；每层在解压物化后才计费，瞬时峰值可多出一层的 256 MiB。
 - **三通路脱敏**：`MineruConfig::api_token` 在 `Debug`（手工 impl）、`Display`、serde 序列化（`skip_serializing`）中均不出现明文——单测 `mineru_config_display_redacts_token` 钉住三条通路。
 - **日志不落密钥**：tracing 输出仅含引擎名、优先级、失败原因等诊断字段。
 

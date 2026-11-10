@@ -22,7 +22,6 @@ pub mod pdfium;
 pub mod pptx;
 pub mod shared;
 pub mod text;
-pub mod xlsx;
 pub mod zip;
 
 pub use csv::CsvConverter;
@@ -43,5 +42,4 @@ pub use pdfium::PdfiumConverter;
 pub use pptx::PptxConverter;
 pub use shared::{decode_entity, detect_encoding, local_tag_name};
 pub use text::TextConverter;
-pub use xlsx::XlsxConverter;
 pub use zip::ZipConverter;

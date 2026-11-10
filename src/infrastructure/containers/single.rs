@@ -9,17 +9,20 @@
 //! can handle degrade to a fenced code block / attachment.
 
 use std::io::Cursor;
+#[cfg(test)]
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::application::ports::Converter;
+#[cfg(test)]
 use crate::application::registry::ConverterRegistry;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::{Input, detect_format};
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 use crate::infrastructure::containers::{
-    ContainerBase, MAX_SINGLE_DECOMPRESSED_BYTES, fallback_entry, read_limited,
+    ContainerBase, MAX_SINGLE_DECOMPRESSED_BYTES, RegistrySlot, acquire_depth, charge_chain_bytes,
+    fallback_entry, read_limited, with_depth_scope,
 };
 
 /// Converts gzip-compressed single files (`.gz`).
@@ -38,49 +41,55 @@ pub struct ZstConverter {
 }
 
 impl GzConverter {
-    /// Create a new gz converter owning a registry for nested handling.
-    pub fn new(registry: ConverterRegistry) -> Self {
+    /// Create with a deferred registry slot (builder wiring: filled once the
+    /// enclosing registry is assembled). If the slot stays empty, the payload
+    /// degrades to a fenced block / attachment (`metadata.registry_wired`).
+    pub fn with_registry_slot(slot: RegistrySlot) -> Self {
         Self {
-            base: ContainerBase::new(Arc::new(registry)),
+            base: ContainerBase::with_slot(slot),
         }
     }
 
-    /// Create with an existing shared registry.
-    pub fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
-            base: ContainerBase::new(registry),
+            base: ContainerBase::with_arc(registry),
         }
     }
 }
 
 impl XzConverter {
-    /// Create a new xz converter owning a registry for nested handling.
-    pub fn new(registry: ConverterRegistry) -> Self {
+    /// Create with a deferred registry slot (builder wiring: filled once the
+    /// enclosing registry is assembled). If the slot stays empty, the payload
+    /// degrades to a fenced block / attachment (`metadata.registry_wired`).
+    pub fn with_registry_slot(slot: RegistrySlot) -> Self {
         Self {
-            base: ContainerBase::new(Arc::new(registry)),
+            base: ContainerBase::with_slot(slot),
         }
     }
 
-    /// Create with an existing shared registry.
-    pub fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
-            base: ContainerBase::new(registry),
+            base: ContainerBase::with_arc(registry),
         }
     }
 }
 
 impl ZstConverter {
-    /// Create a new zst converter owning a registry for nested handling.
-    pub fn new(registry: ConverterRegistry) -> Self {
+    /// Create with a deferred registry slot (builder wiring: filled once the
+    /// enclosing registry is assembled). If the slot stays empty, the payload
+    /// degrades to a fenced block / attachment (`metadata.registry_wired`).
+    pub fn with_registry_slot(slot: RegistrySlot) -> Self {
         Self {
-            base: ContainerBase::new(Arc::new(registry)),
+            base: ContainerBase::with_slot(slot),
         }
     }
 
-    /// Create with an existing shared registry.
-    pub fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
-            base: ContainerBase::new(registry),
+            base: ContainerBase::with_arc(registry),
         }
     }
 }
@@ -144,62 +153,90 @@ async fn convert_single(
     source_format: &'static str,
     decompress: fn(&[u8]) -> Result<Vec<u8>, AlchemizeError>,
 ) -> Result<ConvertResult, AlchemizeError> {
-    let _depth = base.acquire_depth()?;
-    let bytes = input
-        .to_bytes()
-        .await
-        .map_err(|e| AlchemizeError::other(format!("failed to read {source_format} input: {e}")))?;
-    let filename = input.filename().unwrap_or("payload").to_string();
-    let inner_name = strip_compression_suffix(&filename);
-    let data = decompress(&bytes)?;
+    with_depth_scope(async {
+        let _depth = acquire_depth()?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(format!("failed to read {source_format} input: {e}"))
+        })?;
+        let filename = input.filename().unwrap_or("payload").to_string();
+        let inner_name = strip_compression_suffix(&filename);
+        let data = decompress(&bytes)?;
+        charge_chain_bytes(data.len() as u64)?;
 
-    // 1) Filename-derived routing: the registry matches on the inner name.
-    if let Ok(mut result) = base
-        .registry()
-        .convert(&Input::bytes(data.clone(), inner_name.clone()))
-        .await
-    {
-        return Ok(finish_inner(source_format, &inner_name, &mut result));
-    }
-
-    // 2) Magic-byte assist: rename by detected format and retry once.
-    if let Some(suggested) = magic_suggested_name(&data, &inner_name) {
-        if let Ok(mut result) = base
-            .registry()
-            .convert(&Input::bytes(data.clone(), suggested.clone()))
-            .await
-        {
-            return Ok(finish_inner(source_format, &suggested, &mut result));
+        // 1) Filename-derived routing: the registry matches on the inner name.
+        // 2) Magic-byte assist: rename by detected format and retry once.
+        // An unwired slot degrades to the fallback below (metadata records
+        // `registry_wired: false`) instead of failing the whole stream.
+        let registry = base.registry();
+        let registry_wired = registry.is_some();
+        let mut depth_limited = false;
+        if let Some(registry) = &registry {
+            match registry
+                .convert(&Input::bytes(data.clone(), inner_name.clone()))
+                .await
+            {
+                Ok(mut result) => {
+                    return Ok(finish_inner(
+                        source_format,
+                        &inner_name,
+                        &mut result,
+                        registry_wired,
+                    ));
+                }
+                Err(err) => {
+                    depth_limited = matches!(err, AlchemizeError::DepthLimitExceeded { .. });
+                }
+            }
+            // A depth rejection is final for this chain: retrying under a
+            // magic-derived name would hit the same limit and must not
+            // overwrite the reason.
+            if !depth_limited && let Some(suggested) = magic_suggested_name(&data, &inner_name) {
+                match registry
+                    .convert(&Input::bytes(data.clone(), suggested.clone()))
+                    .await
+                {
+                    Ok(mut result) => {
+                        return Ok(finish_inner(source_format, &suggested, &mut result, true));
+                    }
+                    Err(err) => {
+                        depth_limited = matches!(err, AlchemizeError::DepthLimitExceeded { .. });
+                    }
+                }
+            }
         }
-    }
 
-    // 3) Degrade: fenced code block for text, attachment for binary.
-    // Use the magic-suggested name when one exists so the attachment carries
-    // the real format extension (no image converter is registered here, but
-    // the payload's type must not be lost).
-    let fallback_name =
-        magic_suggested_name(&data, &inner_name).unwrap_or_else(|| inner_name.clone());
-    let (markdown, asset) = fallback_entry(&fallback_name, &data);
-    let mut metadata = serde_json::json!({
-        "source_format": source_format,
-        "inner_name": inner_name,
-        "decompressed_bytes": data.len(),
-        "converted": false,
-        "attachments": [fallback_name],
-    });
-    if let Some(asset) = asset {
-        metadata["attachment_extracted"] = serde_json::Value::Bool(true);
-        return Ok(
-            ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
-                .with_quality(ConversionQuality::LocalFull)
-                .with_asset(asset),
-        );
-    }
-    Ok(ConvertResult::with_metadata(
-        markdown,
-        ContentType::Document,
-        metadata,
-    ))
+        // 3) Degrade: fenced code block for text, attachment for binary.
+        // Use the magic-suggested name when one exists so the attachment
+        // carries the real format extension (no image converter is registered
+        // here, but the payload's type must not be lost).
+        let fallback_name =
+            magic_suggested_name(&data, &inner_name).unwrap_or_else(|| inner_name.clone());
+        let (markdown, asset) = fallback_entry(&fallback_name, &data, depth_limited);
+        let mut metadata = serde_json::json!({
+            "source_format": source_format,
+            "inner_name": inner_name,
+            "decompressed_bytes": data.len(),
+            "converted": false,
+            "attachments": [fallback_name],
+            "nested_attachments": 0,
+            "depth_limited": if depth_limited { 1 } else { 0 },
+            "registry_wired": registry.is_some(),
+        });
+        if let Some(asset) = asset {
+            metadata["attachment_extracted"] = serde_json::Value::Bool(true);
+            return Ok(
+                ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
+                    .with_quality(ConversionQuality::LocalFull)
+                    .with_asset(asset),
+            );
+        }
+        Ok(ConvertResult::with_metadata(
+            markdown,
+            ContentType::Document,
+            metadata,
+        ))
+    })
+    .await
 }
 
 /// Wrap a successfully converted inner result with source metadata.
@@ -207,19 +244,52 @@ fn finish_inner(
     source_format: &'static str,
     inner_name: &str,
     result: &mut ConvertResult,
+    registry_wired: bool,
 ) -> ConvertResult {
-    let metadata = serde_json::json!({
+    // Promote the inner result's nesting counters: a gz around a tar chain
+    // must not reset depth_limited/attachments to zero.
+    let inner_depth_limited = result
+        .metadata
+        .get("depth_limited")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let inner_nested_attachments = result
+        .metadata
+        .get("nested_attachments")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let inner_attachments = result
+        .metadata
+        .get("attachments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let mut metadata = serde_json::json!({
         "source_format": source_format,
         "inner_name": inner_name,
         "converted": true,
-        "attachments": [],
+        "attachments": inner_attachments,
+        "nested_attachments": inner_nested_attachments,
+        "depth_limited": inner_depth_limited,
+        "registry_wired": registry_wired,
     });
-    ConvertResult::with_metadata(
+    // Preserve the inner engine's metadata (converter name, counts) so the
+    // wrapper does not erase provenance.
+    if !result.metadata.is_null() {
+        metadata["inner_metadata"] = std::mem::take(&mut result.metadata);
+    }
+    let mut out = ConvertResult::with_metadata(
         std::mem::take(&mut result.markdown),
         ContentType::Document,
         metadata,
     )
-    .with_quality(ConversionQuality::LocalFull)
+    .with_quality(ConversionQuality::LocalFull);
+    // Inner assets (e.g. images extracted from a docx inside the stream) must
+    // survive the wrapper; dropping them leaves `images/...` references
+    // dangling in the markdown.
+    for asset in std::mem::take(&mut result.assets) {
+        out = out.with_asset(asset);
+    }
+    out
 }
 
 #[async_trait]
@@ -302,20 +372,29 @@ mod tests {
     #[test]
     fn supported_extensions_and_names() {
         assert_eq!(
-            GzConverter::new(ConverterRegistry::new()).supported_extensions(),
+            GzConverter::with_arc(Arc::new(ConverterRegistry::new())).supported_extensions(),
             &["gz"]
         );
         assert_eq!(
-            XzConverter::new(ConverterRegistry::new()).supported_extensions(),
+            XzConverter::with_arc(Arc::new(ConverterRegistry::new())).supported_extensions(),
             &["xz"]
         );
         assert_eq!(
-            ZstConverter::new(ConverterRegistry::new()).supported_extensions(),
+            ZstConverter::with_arc(Arc::new(ConverterRegistry::new())).supported_extensions(),
             &["zst"]
         );
-        assert_eq!(GzConverter::new(ConverterRegistry::new()).name(), "gz");
-        assert_eq!(XzConverter::new(ConverterRegistry::new()).name(), "xz");
-        assert_eq!(ZstConverter::new(ConverterRegistry::new()).name(), "zst");
+        assert_eq!(
+            GzConverter::with_arc(Arc::new(ConverterRegistry::new())).name(),
+            "gz"
+        );
+        assert_eq!(
+            XzConverter::with_arc(Arc::new(ConverterRegistry::new())).name(),
+            "xz"
+        );
+        assert_eq!(
+            ZstConverter::with_arc(Arc::new(ConverterRegistry::new())).name(),
+            "zst"
+        );
     }
 
     #[test]
@@ -480,5 +559,90 @@ mod tests {
             err.to_string().contains("safety limit"),
             "expected bomb protection error, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn gz_unwired_slot_degrades_without_error() {
+        // Direct `default_converters` callers may never fill the slot; the
+        // stream must still convert into a fenced block, flagged in metadata.
+        let converter = GzConverter::with_registry_slot(RegistrySlot::default());
+        let result = converter
+            .convert(Input::bytes(gz_bytes(b"plain text payload"), "note.txt.gz"))
+            .await
+            .unwrap();
+        assert_eq!(result.metadata["registry_wired"], false);
+        assert_eq!(result.metadata["converted"], false);
+        assert!(result.markdown.contains("plain text payload"));
+    }
+
+    #[tokio::test]
+    async fn gz_depth_chain_propagates_depth_rejection() {
+        // gz -> tar -> tar -> tar: the 4th container exceeds MAX_DEPTH. The
+        // gz wrapper must not swallow the rejection (or inline the tar bytes
+        // as text).
+        let mut inner = {
+            let mut b = tar::Builder::new(Vec::new());
+            let mut h = tar::Header::new_gnu();
+            let data = b"leaf body".as_slice();
+            h.set_size(data.len() as u64);
+            h.set_cksum();
+            b.append_data(&mut h, "leaf.txt", data).unwrap();
+            b.into_inner().unwrap()
+        };
+        for _ in 0..2 {
+            let mut b = tar::Builder::new(Vec::new());
+            let mut h = tar::Header::new_gnu();
+            h.set_size(inner.len() as u64);
+            h.set_cksum();
+            b.append_data(&mut h, "nested.tar", inner.as_slice())
+                .unwrap();
+            inner = b.into_inner().unwrap();
+        }
+
+        let slot: RegistrySlot = Arc::new(std::sync::OnceLock::new());
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(TextConverter::new()));
+        registry.register(Box::new(
+            crate::infrastructure::containers::TarConverter::with_registry_slot(Arc::clone(&slot)),
+        ));
+        registry.register(Box::new(GzConverter::with_registry_slot(Arc::clone(&slot))));
+        let registry = Arc::new(registry);
+        let _ = slot.set(Arc::downgrade(&registry));
+
+        let result = registry
+            .convert(&Input::bytes(gz_bytes(&inner), "chain.tar.gz"))
+            .await
+            .unwrap();
+        assert_eq!(
+            result.metadata["depth_limited"], 1,
+            "gz must promote the inner depth rejection: {}",
+            result.metadata
+        );
+        assert!(
+            result.markdown.contains("depth limit"),
+            "gz must render the depth reason, got: {:?}",
+            result.markdown
+        );
+    }
+
+    #[test]
+    fn finish_inner_preserves_assets_and_inner_metadata() {
+        // A docx inside a gz stream brings images; the wrapper must not drop
+        // them (dangling `images/...` references) or the inner provenance.
+        let mut inner = ConvertResult::with_metadata(
+            "# body".to_string(),
+            ContentType::Document,
+            serde_json::json!({"converter": "docx", "image_count": 1}),
+        )
+        .with_asset(crate::domain::asset::Asset::new(
+            "images/a.png",
+            vec![1, 2, 3],
+        ));
+        let out = finish_inner("gz", "doc.docx", &mut inner, true);
+        assert_eq!(out.markdown, "# body");
+        assert_eq!(out.assets.len(), 1);
+        assert_eq!(out.assets[0].filename, "images/a.png");
+        assert_eq!(out.metadata["converted"], true);
+        assert_eq!(out.metadata["inner_metadata"]["converter"], "docx");
     }
 }

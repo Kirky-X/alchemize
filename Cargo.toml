@@ -1,6 +1,5 @@
 [workspace]
 resolver = "3"
-# third_party vendor 自成一体，不并入本工作区（避免多工作区根冲突）
 
 
 [workspace.package]
@@ -80,7 +79,6 @@ base64 = { version = "0.22", default-features = false, features = ["std"] }
 bytes = { version = "1.0", default-features = false, features = ["std"] }
 
 # 文档解析
-calamine = { version = "0.38", default-features = false }
 csv = { version = "1.4", default-features = false }
 encoding_rs = { version = "0.8", default-features = false }
 htmd = { version = "0.5", default-features = false }
@@ -130,7 +128,10 @@ icu_properties = { version = "2.3", default-features = false, features = ["compi
 # 轮询退避原语：MinerU 三客户端共享 poll_delay 走 limiteron delay_for_attempt
 limiteron = { version = "0.3.0-rc.10", default-features = false, features = ["retry"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
-# 自研转录引擎门面：Qwen3-ASR ONNX 三图 + silero VAD（load-dynamic ort）
+# 自研转录引擎门面：Qwen3-ASR ONNX 三图 + silero VAD（load-dynamic ort）。
+# path 依赖是刻意的 monorepo 布局：编译 asr feature 要求同级存在 ../vecboost。
+# 代价：cargo publish 会因 path 依赖被拒——发布前须切换为 registry 依赖
+# 或把 vecboost 并入本工作区。
 vecboost = { path = "../vecboost", version = "0.3.0-rc.3", default-features = false, features = ["transcribe"], optional = true }
 
 # 归档容器族（feature containers）

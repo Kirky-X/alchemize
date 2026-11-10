@@ -79,6 +79,21 @@ pub(super) async fn read_limited_bytes(
     Ok(buf)
 }
 
+/// Cap a remote response body embedded in an error message.
+///
+/// Error text can reach CLI stderr / MCP responses; keep it short and free
+/// of unbounded remote content.
+pub(super) fn truncate_body(body: String) -> String {
+    const MAX_CHARS: usize = 512;
+    if body.chars().count() <= MAX_CHARS {
+        body
+    } else {
+        let mut out: String = body.chars().take(MAX_CHARS).collect();
+        out.push('…');
+        out
+    }
+}
+
 /// Read a response body as text with a hard size limit.
 pub(super) async fn read_limited_text(
     resp: Response,

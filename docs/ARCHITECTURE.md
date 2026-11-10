@@ -47,7 +47,7 @@ flowchart TB
     end
     subgraph INFRA["infrastructure/"]
         ENG["engines.rs 引擎装配（feature → 引擎列表）"]
-        DOC["document/：text csv html-deep html epub docx pptx xlsx ipynb<br/>latex_source pdf anydoc anydoc_render zip<br/>shared（detect_encoding 等共享原语）"]
+        DOC["document/：text csv html-deep html epub docx pptx ipynb<br/>latex_source pdf zip<br/>shared（detect_encoding 等共享原语）"]
         MEDIA["media/：image audio video subtitle subtitle_converter<br/>timeline dedup asr（vecboost · whisper_api）"]
         REMOTE["remote/mineru/：client factory agent precision<br/>backoff http_limit validated_url types wrapper"]
         TOOLS["tools/：pandoc（外部二进制探测）"]
@@ -82,7 +82,7 @@ flowchart TB
 | `application/ports.rs` | 四个端口 trait + `Availability` + `Transcript`（VAD 段级转录，明确不含说话人归属）+ `which_program()` PATH 探测 |
 | `application/registry.rs` | 优先级降序注册、fallback 链尝试、attempts 记录、`metadata.converter` 注入 |
 | `application/builder.rs` | `AlchemizeBuilder` → `Alchemize` 门面（convert / convert_pref / availability / engines / asset_sink_for）；zip 门面特判 |
-| `infrastructure/document/` | text（纯文本 + ~45 扩展名代码围栏）、csv（分隔符自探测）、html-deep（自研迭代状态机 → htmd 兜底，feature `html-deep`）、html、epub、docx/pptx/xlsx（原生 XML）、latex-source（pandoc 探测 + 围栏兜底）、pdf（lopdf + TOC 剔除/结构启发）、anydoc_render（自研 GFM 渲染器）、shared（detect_encoding：UTF-8 → CJK 优先探测 → lossy 兜底） |
+| `infrastructure/document/` | text（纯文本 + ~45 扩展名代码围栏）、csv（分隔符自探测）、html-deep（自研迭代状态机 → htmd 兜底，feature `html-deep`）、html、epub、docx/pptx（原生 XML）、latex-source（pandoc 探测 + 围栏兜底）、pdf（lopdf + TOC 剔除/结构启发）、gfm_render（自研 GFM 渲染器）、shared（detect_encoding：UTF-8 → CJK 优先探测 → lossy 兜底） |
 | `infrastructure/media/` | image / audio / video（ffmpeg 抽轨）/ subtitle（srt/vtt/ass/ssa 原生解析）/ timeline / dedup（视频帧去重） |
 | `infrastructure/remote/mineru/` | 云端 PDF 后端（见[特性门控模块](#特性门控模块)） |
 | `infrastructure/tools/` | pandoc 外部二进制探测（构建时缺席、运行时探测） |
@@ -91,7 +91,6 @@ flowchart TB
 
 | feature | 模块 | 说明 |
 | --- | --- | --- |
-| `anydoc` | `infrastructure/document/anydoc.rs` | office 全格式后端（firecrawl/anydoc, MIT），含旧版二进制 Office（doc/ppt/…）；priority 15 压过原生解析；图片按文档序经自研 `anydoc_render` 渲染 |
 | `mineru` | `infrastructure/remote/mineru/` | 云端 PDF：`client`/`factory`（按文件大小选 agent/precision 客户端）、`backoff`（limiteron 轮询退避）、`http_limit`（响应体积分级上限）、`validated_url`（SSRF 校验）、`wrapper`（Converter 适配，priority 5 链尾） |
 | `asr` | `infrastructure/media/asr/` | `vecboost.rs`（自研 transcribe 门面：Qwen3-ASR ONNX 三件套 + silero VAD，path 依赖兄弟仓）与 `whisper_api.rs`（Whisper 兼容云端后端，仅显式注入激活） |
 | `html-deep` | `infrastructure/document/html_deep/` | 自研迭代状态机（HTML→Markdown）+ htmd 兜底，priority 15 压过 html(10)；`--extract-main`/`--base-url` |
@@ -122,34 +121,35 @@ flowchart TD
 
 ### 降级链数据流
 
-以 PDF 为例（feature `anydoc` 开、MinerU 已配置时）：
+以 PDF 为例（MinerU 已配置时）：
 
 | 顺序 | 引擎 | priority | quality |
 | --- | --- | --- | --- |
-| 1 | `anydoc` | 15 | `local_full` |
-| 2 | `pdf`（pdf-extract + TOC 剔除/结构启发） | 10 | `local_fallback` |
-| 3 | `mineru`（云端，仅在本地链失败后尝试） | 5 | `api` |
+| 1 | `pdf`（pdf-extract + TOC 剔除/结构启发） | 10 | `local_fallback` |
+| 2 | `mineru`（云端，仅在本地链失败后尝试） | 5 | `api` |
 
-前序引擎返回 `Err` 自动尝试次优；`Unavailable` 引擎直接跳过（原因记入 attempts）；`--engine NAME` 把名称匹配（精确或前缀，大小写不敏感）的引擎提到队首，未命中静默回落。`quality` 由产出引擎如实标注，与尝试顺序解耦。
+前序引擎返回 `Err` 自动尝试次优；`Unavailable` 引擎直接跳过（原因记入 attempts）；`--engine NAME` 精确名优先、无精确命中时按前缀匹配（大小写不敏感），把命中的引擎提到队首，未命中静默回落。`quality` 由产出引擎如实标注，与尝试顺序解耦。
 
 ### zip 递归容器数据流
 
 zip 在门面层特判处理：`ZipConverter` 与主注册表共享同一引擎集（`Arc<ConverterRegistry>` clone），压缩包内普通文件按扩展名走各自引擎；zip 自身**不注册进注册表**，嵌套 zip 直接报不支持——无界自递归在结构上不可能发生。
 
+tar/tgz/gz/xz/zst/7z 走注册表内的容器转换器：它们需要同一个已装配的注册表来转换内层文件，因此构造时只拿一个弱引用槽（`RegistrySlot`），由 `AlchemizeBuilder::build` 在注册表包进 `Arc` 后回填——强引用会形成 Arc 环。嵌套深度按「每次转换链」用 tokio task-local 计数（并发转换互不占用），超过 `MAX_DEPTH=3` 的内层条目降级为附件。调用方自建注册表时若未回填槽，条目降级为附件并记 `metadata.registry_wired=false`，不会让整个压缩包失败。zip 门面有独立的 1 GiB 解压聚合上限，不占容器深度层（嵌套 zip 显式不支持）。
+
 ## 🔒 安全设计
 
 四道防线（完整模型见[安全文档](SECURITY.md)）：
 
-1. **输入不可信**：文档输入按不可信构造处理，ZIP 容器（docx/pptx/xlsx/epub/zip）经声明式依赖解析，解析失败返回结构化错误而非 panic。
+1. **输入不可信**：文档输入按不可信构造处理，ZIP 容器（docx/pptx/epub/zip）经声明式依赖解析，解析失败返回结构化错误而非 panic。
 2. **SSRF 防护**：MinerU 文件下载 URL 必须通过 `ValidatedFileUrl` 校验（HTTPS-only、拒环回/私网/CGNAT/链路本地、IPv4 映射 IPv6 同分类、域名白名单、签名要求）。
 3. **响应限量**：远端响应按用途分级上限（64KB/8KB/50MB/50MB，预分配 8MB），超限返回 `ResponseTooLarge`。
-4. **凭据脱敏**：`MineruConfig::api_token` 在 `Debug`/`Display`/serde 三通路全部脱敏（手工 `Debug` impl + 单测钉住）；凭据只经环境变量传递。
+4. **凭据脱敏**：`MineruConfig::api_token` 在 `Debug`/`Display`/serde 三通路全部脱敏（手工 `Debug` impl + 单测钉住）；凭据来自环境变量或 `MineruConfig::api_token`，仅发往通过 `validate_base_url` 的端点。
 
 ## ⚡ 性能设计
 
 设计级取舍（本仓暂无 criterion 基准数据，不提供性能数字）：
 
-- **单线程 runtime**：CLI 用 current-thread tokio runtime（`main.rs`），转换以单文件为粒度，无跨任务共享状态竞争。
+- **多线程 runtime**：CLI（`main.rs` 显式构建 multi-thread runtime）与 `alch-mcp`（`#[tokio::main]` 默认 multi-thread，MCP 包装器内部 `block_in_place` 要求如此）均为多线程；转换以单文件为粒度，无跨任务共享状态竞争。
 - **async-trait 端口**：远端与转录路径全异步，轮询退避经 limiteron `delay_for_attempt`，不忙等。
 - **无全局健康缓存**：availability 每次转换即时探测（单次转换内一致），换取无过期窗错误路由。
 - **内存有界**：远端响应经分级限量读取器（预分配上限 8MB）；zip 拒绝嵌套递归防无界深度。

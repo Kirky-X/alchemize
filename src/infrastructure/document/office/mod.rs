@@ -1,7 +1,6 @@
 //! Self-hosted office-format deep parsers.
 
 pub mod docx;
-pub mod numfmt;
 pub mod odp;
 pub mod odt;
 pub mod omml;

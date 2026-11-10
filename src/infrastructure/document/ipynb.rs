@@ -7,12 +7,13 @@
 //! preserving the notebook structure with cell type markers.
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::application::ports::Converter;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
+use crate::infrastructure::document::shared::fence_for;
 
 /// Converts Jupyter Notebook (.ipynb) files to markdown.
 ///
@@ -61,7 +62,12 @@ impl Converter for IpynbConverter {
         // Add notebook metadata header if available
         if let Some(ref metadata) = notebook.metadata {
             if let Some(ref kernel) = metadata.kernelspec {
-                markdown_parts.push(format!("# Jupyter Notebook ({})\n\n", kernel.display_name));
+                markdown_parts.push(format!(
+                    "# Jupyter Notebook ({})\n\n",
+                    crate::infrastructure::document::shared::escape_markdown_label(
+                        &kernel.display_name
+                    )
+                ));
             }
         }
 
@@ -79,14 +85,22 @@ impl Converter for IpynbConverter {
                 "code" => {
                     let code = join_cell_source(&cell.source);
                     if !code.trim().is_empty() {
-                        let language = notebook
+                        // Fence info string: alphanumerics plus the usual
+                        // language punctuation only — a metadata value must
+                        // not close the fence and inject markdown.
+                        let language: String = notebook
                             .metadata
                             .as_ref()
                             .and_then(|m| m.language_info.as_ref())
-                            .map(|l| l.name.clone())
-                            .unwrap_or_else(|| "python".to_string());
+                            .map(|l| l.name.as_str())
+                            .unwrap_or("python")
+                            .chars()
+                            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+'))
+                            .take(16)
+                            .collect();
 
-                        markdown_parts.push(format!("```{language}\n{code}\n```\n"));
+                        let fence = fence_for(&code);
+                        markdown_parts.push(format!("{fence}{language}\n{code}\n{fence}\n"));
 
                         // Include outputs if present
                         if let Some(outputs) = cell.outputs {
@@ -94,8 +108,9 @@ impl Converter for IpynbConverter {
                                 if output.output_type == "stream" {
                                     if let Some(text) = output.text {
                                         let text_content = join_multiline(&text);
+                                        let fence = fence_for(&text_content);
                                         markdown_parts.push(format!(
-                                            "**Output:**\n```\n{text_content}\n```\n"
+                                            "**Output:**\n{fence}\n{text_content}\n{fence}\n"
                                         ));
                                     }
                                 } else if output.output_type == "execute_result"
@@ -104,8 +119,9 @@ impl Converter for IpynbConverter {
                                     if let Some(data) = output.data {
                                         if let Some(text_plain) = data.get("text/plain") {
                                             let text_content = extract_json_string(text_plain);
+                                            let fence = fence_for(&text_content);
                                             markdown_parts.push(format!(
-                                                "**Output:**\n```\n{text_content}\n```\n"
+                                                "**Output:**\n{fence}\n{text_content}\n{fence}\n"
                                             ));
                                         }
                                     }
@@ -206,8 +222,26 @@ struct Notebook {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Cell {
     cell_type: String,
+    /// nbformat allows `source` as a string or a list of strings; the string
+    /// form is normalized into a one-element list so line joining stays
+    /// uniform (`deserialize_cell_source`).
+    #[serde(deserialize_with = "deserialize_cell_source")]
     source: Vec<serde_json::Value>,
     outputs: Option<Vec<Output>>,
+}
+
+/// Accept both nbformat shapes: `"source": "text"` and
+/// `"source": ["line", "line"]`.
+fn deserialize_cell_source<'de, D>(deserializer: D) -> Result<Vec<serde_json::Value>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::String(text) => vec![serde_json::Value::String(text)],
+        serde_json::Value::Array(items) => items,
+        other => vec![other],
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,5 +300,26 @@ mod tests {
         let result = converter.convert(input).await.unwrap();
         assert!(result.markdown.contains("Title"));
         assert!(result.markdown.contains("x = 1"));
+    }
+
+    #[tokio::test]
+    async fn convert_string_source_notebook() {
+        // nbformat permits `source` as a single string; it must not be
+        // rejected by deserialization.
+        let converter = IpynbConverter::new();
+        let notebook_json = "{\"cells\":[{\"cell_type\":\"markdown\",\"source\":\"# String source\\nbody\"},{\"cell_type\":\"code\",\"source\":\"y = 2\",\"outputs\":[]}],\"metadata\":{},\"nbformat\":4}";
+        let input = Input::Bytes {
+            data: notebook_json.as_bytes().to_vec(),
+            filename: "string-source.ipynb".to_string(),
+            mimetype: None,
+            extension: None,
+        };
+        let result = converter.convert(input).await.unwrap();
+        assert!(
+            result.markdown.contains("String source"),
+            "{}",
+            result.markdown
+        );
+        assert!(result.markdown.contains("y = 2"), "{}", result.markdown);
     }
 }

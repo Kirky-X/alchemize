@@ -8,7 +8,7 @@
 //! median). The markdown table is printed to stdout and can be pasted into
 //! `docs/benchmarks.md`.
 //!
-//! Red lines (spec R-self-003 constraints): docx < 1s, xlsx < 5s, pdf < 2s,
+//! Red lines (spec R-self-003 constraints): docx < 1s, pdf < 2s,
 //! plain text < 50ms.
 
 use std::path::PathBuf;
@@ -20,7 +20,6 @@ use alchemize::domain::input::Input;
 /// Fixtures measured per run, in report order.
 const FIXTURES: &[(&str, &str)] = &[
     ("real.docx", "docx (923KB wordlist)"),
-    ("real.xlsx", "xlsx (6.7MB lexicon)"),
     ("real.pdf", "pdf (100KB multi-page)"),
     ("real.odt", "odt (ODF text)"),
     ("real.odp", "odp (ODF presentation)"),
@@ -110,7 +109,7 @@ async fn main() {
 
     println!();
     if violations == 0 {
-        println!("All red lines met (docx<1s, xlsx<5s, pdf<2s, text<50ms).");
+        println!("All red lines met (docx<1s, pdf<2s, text<50ms).");
     } else {
         println!("{violations} red-line violation(s) — optimize before the release gate.");
         std::process::exit(1);
@@ -121,7 +120,6 @@ async fn main() {
 fn red_line_for(file: &str) -> Option<Duration> {
     match file.rsplit('.').next().unwrap_or("") {
         "docx" | "odt" | "odp" | "pptx" => Some(Duration::from_secs(1)),
-        "xlsx" => Some(Duration::from_secs(5)),
         "pdf" => Some(Duration::from_secs(2)),
         "md" | "rs" => Some(Duration::from_millis(50)),
         _ => None,

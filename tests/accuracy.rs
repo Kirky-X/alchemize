@@ -6,7 +6,6 @@
 //! this suite measures and prints *ratios*:
 //!
 //! - docx character recall (extracted vs. source XML text) ≥ 95%
-//! - xlsx row/column alignment (markdown table rows vs. worksheet `<row>`s)
 //! - pdf character recall (vs. a raw pdftotext-style extraction when present)
 //! - formula zero-silent-loss (OMML fallback counter + output presence)
 //! - image sha alignment (asset bytes hash vs. the source media part)
@@ -15,18 +14,6 @@ use std::path::PathBuf;
 
 use alchemize::application::builder::AlchemizeBuilder;
 use alchemize::domain::input::Input;
-
-/// Pipes that act as column separators (`\|` is escaped cell content).
-fn unescaped_pipes(line: &str) -> usize {
-    let bytes = line.as_bytes();
-    let mut count = 0;
-    for (i, b) in bytes.iter().enumerate() {
-        if *b == b'|' && (i == 0 || bytes[i - 1] != b'\\') {
-            count += 1;
-        }
-    }
-    count
-}
 
 fn real(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -117,73 +104,17 @@ async fn accuracy_docx_char_recall_over_95_percent() {
 }
 
 #[tokio::test]
-async fn accuracy_xlsx_rows_and_columns_align() {
-    // Count worksheet rows in the package and markdown table rows in output.
-    use std::io::Read;
-    let file = std::fs::File::open(real("real.xlsx")).expect("open xlsx");
-    let mut zip = zip::ZipArchive::new(file).expect("zip");
-    let mut sheet_rows = 0usize;
-    for i in 0..zip.len() {
-        let name = zip
-            .by_index(i)
-            .expect("entry")
-            .name()
-            .expect("name")
-            .to_string();
-        if !name.starts_with("xl/worksheets/sheet") || !name.ends_with(".xml") {
-            continue;
-        }
-        let mut xml = String::new();
-        zip.by_name(&name)
-            .expect("sheet")
-            .read_to_string(&mut xml)
-            .expect("read");
-        sheet_rows += xml.matches("<row ").count() + xml.matches("<row>").count();
-    }
-    let (md, meta) = convert("real.xlsx").await;
-    let table_rows = md
-        .lines()
-        .filter(|l| l.starts_with('|') && !l.contains("---"))
-        .count();
-    // Each worksheet's first row becomes the header (so table rows should be
-    // close to sheet rows; separators excluded above).
-    println!(
-        "xlsx: worksheet_rows={sheet_rows} table_rows={table_rows} meta_rows={} engine={}",
-        meta["total_rows"], meta["converter"]
-    );
+async fn accuracy_xlsx_is_disabled_by_default() {
+    // Spreadsheet support was removed: calamine's materialization cannot be
+    // bounded for untrusted input, so no engine accepts xlsx/ods.
+    let alch = AlchemizeBuilder::new().build();
+    let err = alch
+        .convert(&Input::Path(real("real.xlsx")))
+        .await
+        .unwrap_err();
     assert!(
-        sheet_rows > 1000,
-        "fixture should be large, got {sheet_rows}"
-    );
-    let ratio = table_rows as f64 / sheet_rows as f64;
-    assert!(
-        ratio >= 0.95 && ratio <= 1.05,
-        "row alignment {ratio:.3} outside [0.95, 1.05] (sheet {sheet_rows}, table {table_rows})"
-    );
-    // Column count sanity, per sheet: each table section must be rectangular
-    // (different sheets legitimately have different widths).
-    let mut section_widths: Vec<usize> = Vec::new();
-    let mut current: Option<usize> = None;
-    for line in md.lines() {
-        if line.starts_with("## ") {
-            current = None;
-        } else if line.starts_with('|') && !line.contains("---") {
-            // Count *unescaped* pipes: `\|` is cell content, not a separator.
-            let width = unescaped_pipes(line);
-            match current {
-                None => current = Some(width),
-                Some(expected) => {
-                    if width != expected {
-                        section_widths.push(width);
-                    }
-                }
-            }
-        }
-    }
-    assert!(
-        section_widths.is_empty(),
-        "ragged xlsx table: {} rows differ from their sheet header width",
-        section_widths.len()
+        matches!(err, alchemize::AlchemizeError::UnsupportedFormat(_)),
+        "{err:?}"
     );
 }
 

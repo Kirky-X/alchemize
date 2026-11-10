@@ -3,16 +3,19 @@
 //! TAR archive converter with recursive extraction (T020).
 
 use std::io::{Cursor, Read};
+#[cfg(test)]
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::application::ports::Converter;
+#[cfg(test)]
 use crate::application::registry::ConverterRegistry;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::infrastructure::containers::{
-    ContainerBase, ContainerEntry, RecursiveContainer, check_entry_size, read_limited,
+    ContainerBase, ContainerEntry, RecursiveContainer, RegistrySlot, acquire_depth,
+    charge_chain_bytes, check_entry_size, is_metadata_entry, read_limited, with_depth_scope,
 };
 
 /// View over raw tar bytes implementing the shared container skeleton.
@@ -44,17 +47,19 @@ pub struct TarConverter {
 }
 
 impl TarConverter {
-    /// Create a new tar converter owning a registry for nested handling.
-    pub fn new(registry: ConverterRegistry) -> Self {
+    /// Create with a deferred registry slot (builder wiring: filled once the
+    /// enclosing registry is assembled). If the slot stays empty, entries
+    /// degrade to attachments (`metadata.registry_wired = false`).
+    pub fn with_registry_slot(slot: RegistrySlot) -> Self {
         Self {
-            base: ContainerBase::new(Arc::new(registry)),
+            base: ContainerBase::with_slot(slot),
         }
     }
 
-    /// Create with an existing shared registry.
-    pub fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
-            base: ContainerBase::new(registry),
+            base: ContainerBase::with_arc(registry),
         }
     }
 }
@@ -69,15 +74,18 @@ impl Converter for TarConverter {
         &self,
         input: Input,
     ) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
-        let _depth = self.base.acquire_depth()?;
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read tar input: {e}")))?;
-        let archive = TarArchive::new(bytes);
-        self.base
-            .convert_container(archive.format_name(), archive.entries())
-            .await
+        with_depth_scope(async {
+            let _depth = acquire_depth()?;
+            let bytes = input
+                .to_bytes()
+                .await
+                .map_err(|e| AlchemizeError::other(format!("failed to read tar input: {e}")))?;
+            let archive = TarArchive::new(bytes);
+            self.base
+                .convert_container(archive.format_name(), archive.entries())
+                .await
+        })
+        .await
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -97,17 +105,19 @@ pub struct TarGzConverter {
 }
 
 impl TarGzConverter {
-    /// Create a new tar.gz converter owning a registry for nested handling.
-    pub fn new(registry: ConverterRegistry) -> Self {
+    /// Create with a deferred registry slot (builder wiring: filled once the
+    /// enclosing registry is assembled). If the slot stays empty, entries
+    /// degrade to attachments (`metadata.registry_wired = false`).
+    pub fn with_registry_slot(slot: RegistrySlot) -> Self {
         Self {
-            base: ContainerBase::new(Arc::new(registry)),
+            base: ContainerBase::with_slot(slot),
         }
     }
 
-    /// Create with an existing shared registry.
-    pub fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
-            base: ContainerBase::new(registry),
+            base: ContainerBase::with_arc(registry),
         }
     }
 }
@@ -122,22 +132,26 @@ impl Converter for TarGzConverter {
         &self,
         input: Input,
     ) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
-        let _depth = self.base.acquire_depth()?;
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read tar.gz input: {e}")))?;
-        // The decompressed tar is itself a container, so it is bounded by the
-        // total limit rather than the single-file limit.
-        let tar_bytes = read_limited(
-            flate2::read::GzDecoder::new(Cursor::new(&bytes)),
-            crate::infrastructure::containers::MAX_TOTAL_BYTES,
-            "tar.gz",
-        )?;
-        let archive = TarArchive::new(tar_bytes);
-        self.base
-            .convert_container(archive.format_name(), archive.entries())
-            .await
+        with_depth_scope(async {
+            let _depth = acquire_depth()?;
+            let bytes = input
+                .to_bytes()
+                .await
+                .map_err(|e| AlchemizeError::other(format!("failed to read tar.gz input: {e}")))?;
+            // The decompressed tar is itself a container, so it is bounded by
+            // the total limit rather than the single-file limit.
+            let tar_bytes = read_limited(
+                flate2::read::GzDecoder::new(Cursor::new(&bytes)),
+                crate::infrastructure::containers::MAX_TOTAL_BYTES,
+                "tar.gz",
+            )?;
+            charge_chain_bytes(tar_bytes.len() as u64)?;
+            let archive = TarArchive::new(tar_bytes);
+            self.base
+                .convert_container(archive.format_name(), archive.entries())
+                .await
+        })
+        .await
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -149,12 +163,13 @@ impl Converter for TarGzConverter {
 fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
     let mut archive = tar::Archive::new(Cursor::new(bytes));
     let mut out = Vec::new();
+    let mut total: u64 = 0;
 
     for entry in archive
         .entries()
         .map_err(|e| AlchemizeError::other(format!("failed to read tar archive: {e}")))?
     {
-        let mut entry =
+        let entry =
             entry.map_err(|e| AlchemizeError::other(format!("failed to read tar entry: {e}")))?;
 
         // Only real file contents. Directories, symlinks, pax extended
@@ -169,6 +184,12 @@ fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
             .map_err(|e| AlchemizeError::other(format!("failed to read tar entry name: {e}")))?
             .to_string_lossy()
             .into_owned();
+
+        // OS metadata (AppleDouble `._*`, `__MACOSX`) is not document
+        // content; the zip converter filters the same class of entries.
+        if is_metadata_entry(&name) {
+            continue;
+        }
 
         let declared = entry
             .header()
@@ -186,6 +207,10 @@ fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
                 AlchemizeError::other(format!("failed to read tar entry '{name}': {e}"))
             })?;
         check_entry_size(&name, data.len() as u64)?;
+        // Incremental aggregate check: the post-materialization check would
+        // run after the peak allocation.
+        total = total.saturating_add(data.len() as u64);
+        crate::infrastructure::containers::check_total_bytes(total)?;
 
         out.push(ContainerEntry { name, bytes: data });
     }
@@ -243,9 +268,9 @@ mod tests {
 
     #[test]
     fn supported_extensions() {
-        let converter = TarConverter::new(ConverterRegistry::new());
+        let converter = TarConverter::with_arc(Arc::new(ConverterRegistry::new()));
         assert_eq!(converter.supported_extensions(), &["tar"]);
-        let gz = TarGzConverter::new(ConverterRegistry::new());
+        let gz = TarGzConverter::with_arc(Arc::new(ConverterRegistry::new()));
         assert_eq!(gz.supported_extensions(), &["tgz", "tar.gz"]);
         assert_eq!(converter.name(), "tar");
         assert_eq!(gz.name(), "tar-gz");
@@ -344,7 +369,7 @@ mod tests {
 
     #[test]
     fn extract_tar_declared_oversize_rejected() {
-        // Header claims > 64MB; extraction must refuse before reading payload.
+        // Header claims >64MB; extraction must refuse before reading payload.
         let mut builder = Builder::new(Vec::new());
         let mut header = Header::new_gnu();
         header.set_size(crate::infrastructure::containers::MAX_ENTRY_BYTES + 1);
@@ -355,5 +380,49 @@ mod tests {
         let tar_bytes = builder.into_inner().unwrap();
         let err = extract_tar(&tar_bytes).unwrap_err();
         assert!(err.to_string().contains("per-entry limit"));
+    }
+
+    #[tokio::test]
+    async fn four_level_nesting_rejects_and_propagates_depth_counter() {
+        // leaf.tar -> l2.tar -> l3.tar -> l4.tar: the 4th container exceeds
+        // MAX_DEPTH=3. The top-level result must still report the rejection.
+        let mut inner = build_tar(&[("leaf.txt", b"leaf body")]);
+        for _ in 0..3 {
+            let mut builder = Builder::new(Vec::new());
+            let mut header = Header::new_gnu();
+            header.set_size(inner.len() as u64);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, "nested.tar", inner.as_slice())
+                .unwrap();
+            inner = builder.into_inner().unwrap();
+        }
+
+        // Self-referential wiring: the slot points at the registry that holds
+        // the converter (same post-assembly wiring the builder performs).
+        let slot: crate::infrastructure::containers::RegistrySlot =
+            Arc::new(std::sync::OnceLock::new());
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(TextConverter::new()));
+        registry.register(Box::new(TarConverter::with_registry_slot(Arc::clone(
+            &slot,
+        ))));
+        let registry = Arc::new(registry);
+        let _ = slot.set(Arc::downgrade(&registry));
+
+        let result = registry
+            .convert(&Input::bytes(inner, "outer.tar"))
+            .await
+            .unwrap();
+        assert_eq!(
+            result.metadata["depth_limited"], 1,
+            "top-level result must expose the nested depth rejection: {}",
+            result.metadata
+        );
+        assert!(
+            result.markdown.contains("depth limit"),
+            "rendered reason must say depth limit, got: {:?}",
+            result.markdown
+        );
     }
 }

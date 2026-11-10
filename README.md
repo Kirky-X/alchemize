@@ -63,7 +63,7 @@
 
 <table style="width:100%; border-collapse: collapse">
 <tr>
-<td width="50%" style="vertical-align:top; padding: 12px">📄 <b>文档全格式</b><br><span style="color:#64748B">PDF（pdfium/纯 Rust/MinerU）、docx/pptx/xlsx（+xls/xlsb/ods）、odt/odp、旧版二进制 Office（doc/ppt/rtf，LibreOffice）、html/epub、csv/tsv/psv、LaTeX/org/rst/asciidoc（pandoc）、ipynb</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">📄 <b>文档全格式</b><br><span style="color:#64748B">PDF（pdfium/纯 Rust/MinerU）、docx/pptx、odt/odp、旧版二进制 Office（doc/ppt/rtf，LibreOffice）、html/epub、csv/tsv/psv、LaTeX/org/rst/asciidoc（pandoc）、ipynb</span></td>
 <td width="50%" style="vertical-align:top; padding: 12px">🧬 <b>代码围栏化</b><br><span style="color:#64748B">py/rs/js/ts/go/java/c/cpp/json/yaml/toml/xml/sh 等 ~45 扩展名，带语言标签的围栏代码块</span></td>
 </tr>
 <tr>
@@ -76,7 +76,7 @@
 </tr>
 <tr>
 <td width="50%" style="vertical-align:top; padding: 12px">🌐 <b>多编码探测</b><br><span style="color:#64748B">UTF-8 直读 → GBK/Big5/Shift-JIS 等 CJK 优先探测 → lossy 兜底；csv 分隔符自探测</span></td>
-<td width="50%" style="vertical-align:top; padding: 12px">🧭 <b>引擎偏好与诊断</b><br><span style="color:#64748B"><code>--engine</code> 前缀匹配提前（未命中静默回落）；<code>doctor</code> 逐引擎可用性、<code>formats</code> 全格式清单</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">🧭 <b>引擎偏好与诊断</b><br><span style="color:#64748B"><code>--engine</code> 精确名优先、前缀回退（未命中静默回落）；<code>doctor</code> 逐引擎可用性、<code>formats</code> 全格式清单</span></td>
 </tr>
 <tr>
 <td width="50%" style="vertical-align:top; padding: 12px">🖼 <b>资产双模式</b><br><span style="color:#64748B"><code>dir</code>（图片写 <code>images/</code> 相对引用）与 <code>inline</code>（base64 单文件交付）</span></td>
@@ -139,7 +139,7 @@ alch formats
 | Word（旧版） | doc, rtf | legacy-office(15，LibreOffice) | `libreoffice` |
 | OpenDocument 文本 | odt | odt-deep(18) | — |
 | 演示文稿 | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `libreoffice`（仅旧二进制） |
-| 电子表格 | xlsx, xls, xlsb, ods | xlsx（calamine + numFmt 显示值） | — |
+| 电子表格 | —（不支持） | 表格解析器已移除：calamine 的物化面（共享字符串、styles/theme、ODS 重复与文本展开）无法在不可信输入上被前置校验约束；xlsx/xls/xlsb/ods 不再支持 | — |
 | PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdfium` / `mineru` |
 | 网页 / 电子书 | html, htm / epub | html(htmd) → html-deep(15) / epub | `html-deep`（html-deep） |
 | 纯文本 / 代码 | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 代码扩展 | text（围栏化） | — |
@@ -305,7 +305,7 @@ cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
 
 ### 🛡️ 安全设计
 
-四道防线：不可信输入的结构化错误处理（不 panic）；MinerU 下载 URL 的 SSRF 校验（HTTPS-only、拒环回/RFC1918/CGNAT/链路本地、域名白名单、预签名）；远端响应按用途分级限量（64KB/8KB/50MB/50MB）；凭据只经环境变量且三通路脱敏。详见 [🔒 安全文档](docs/SECURITY.md)。
+四道防线：不可信输入的结构化错误处理（不 panic）；MinerU 下载 URL 的 SSRF 校验（HTTPS-only、拒环回/RFC1918/CGNAT/链路本地、域名白名单、预签名）；远端响应按用途分级限量（64KB/8KB/50MB/50MB）；凭据来自环境变量或 `MineruConfig::api_token`，三通路脱敏。详见 [🔒 安全文档](docs/SECURITY.md)。
 
 ### ⛓️ 供应链与门禁
 
@@ -382,7 +382,6 @@ Apache-2.0（[LICENSE](LICENSE)）。全部源文件带 SPDX 头；自其他仓�
 
 ### 🌟 核心依赖
 
-- [calamine](https://github.com/tafia/calamine)（MIT）——xlsx/xls/xlsb/ods 读取。
 - [pdf-extract](https://github.com/jrmuizel/pdf-extract)（MIT）——PDF 文本层提取。
 - [quick-xml](https://github.com/tafia/quick-xml)（MIT/Apache-2.0）——OOXML/ODF/OMML 事件流。
 - [sevenz-rust2](https://github.com/hasenbanck/sevenz-rust2)（Apache-2.0）与 [tar](https://github.com/alexcrichton/tar-rs)/[flate2](https://github.com/rust-lang/flate2)/[xz2](https://github.com/alexcrichton/xz2-rs)/[zstd](https://github.com/gyscos/zstd-rs)（MIT/Apache-2.0）——归档容器。
@@ -391,7 +390,7 @@ Apache-2.0（[LICENSE](LICENSE)）。全部源文件带 SPDX 头；自其他仓�
 - [LibreOffice](https://www.libreoffice.org/)（MPL-2.0）——旧版二进制 Office 转换（可选外部工具）。
 - [pandoc](https://pandoc.org/)（GPL-2.0+）——LaTeX/org/rst/asciidoc 等标记语言转换（可选外部工具）。
 - [vecboost](https://github.com/Kirky-X/vecboost)（自有）——Qwen3-ASR ONNX + silero VAD 本地转录门面。
-- [pdf-extract](https://crates.io/crates/pdf-extract)、[calamine](https://crates.io/crates/calamine)、[quick-xml](https://crates.io/crates/quick-xml)、[aspasia](https://crates.io/crates/aspasia)、[rbook](https://crates.io/crates/rbook)、[htmd](https://crates.io/crates/htmd) 等优秀开源 crate。
+- [pdf-extract](https://crates.io/crates/pdf-extract)、[quick-xml](https://crates.io/crates/quick-xml)、[aspasia](https://crates.io/crates/aspasia)、[rbook](https://crates.io/crates/rbook)、[htmd](https://crates.io/crates/htmd) 等优秀开源 crate。
 
 ### 💝 特别感谢
 

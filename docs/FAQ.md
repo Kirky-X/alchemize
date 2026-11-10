@@ -39,7 +39,7 @@
 
 ### ❓ 项目采用什么许可证？
 
-Apache-2.0（`LICENSE` 与 Cargo.toml 一致，全部源文件带 SPDX 头）。致谢与边界：anydoc（MIT）为依赖；PDFMathTranslate（AGPL-3.0）仅吸收设计思想、零代码复制。
+Apache-2.0（`LICENSE` 与 Cargo.toml 一致，全部源文件带 SPDX 头）。致谢与边界：PDFMathTranslate（AGPL-3.0）仅吸收设计思想、零代码复制。
 
 ## 📦 安装与配置
 
@@ -55,7 +55,6 @@ cargo install --path . --features full   # 或 cargo build --release
 
 ```bash
 cargo build                        # 最小化：纯本地，零外部服务
-cargo build --features anydoc      # office 全格式（含旧版二进制 Office）
 cargo build --features mineru      # 云端 PDF 高保真（还需配置端点）
 cargo build --features asr         # 本地转录（还需模型 bundle + ORT 库）
 cargo build --features full        # 全量
@@ -81,7 +80,7 @@ alch doctor && alch formats         # 先看引擎与格式
 
 ### ❓ 支持哪些格式和来源？
 
-文档族（pdf/docx/pptx/xlsx/xls/ods/odt/odp/rtf/旧版二进制 Office/html/epub/csv/tsv/txt/md/zip 递归/ipynb/tex）、代码配置族（~45 扩展名围栏化）、图片（png/jpg/gif/bmp/webp/tiff/svg）、音频（wav/mp3/ogg/opus/flac/aac/m4a/wma）、视频（mp4/avi/mkv/mov/wmv/flv/webm/m4v，ffmpeg 抽轨）、字幕（srt/vtt/ass/ssa）。以 `alch formats` 实时输出为准。
+文档族（pdf/docx/pptx/odt/odp/rtf/旧版二进制 Office/html/epub/csv/tsv/txt/md/zip 递归/ipynb/tex；表格（xlsx/xls/xlsb/ods）不支持）、代码配置族（~45 扩展名围栏化）、图片（png/jpg/gif/bmp/webp/tiff/svg）、音频（wav/mp3/ogg/opus/flac/aac/m4a/wma）、视频（mp4/avi/mkv/mov/wmv/flv/webm/m4v，ffmpeg 抽轨）、字幕（srt/vtt/ass/ssa）。以 `alch formats` 实时输出为准。
 
 ### ❓ 转换质量怎么判读？有校验功能吗？
 

@@ -1,6 +1,6 @@
-```yaml
+````yaml
 key: value
 list:
   - a
 
-```
+````

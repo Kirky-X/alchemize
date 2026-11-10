@@ -174,13 +174,14 @@ async fn convert(
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            std::fs::write(&path, &result.markdown)
-                .map_err(|e| map_error(AlchemizeError::Other(format!("write failed: {e}"))))?;
             // Dir mode: write extracted assets at their converter-assigned
-            // names next to the output. The write boundary validates the
-            // converter-provided filename first: an illegal name is a hard
-            // error, not a silent rewrite (rewriting would desynchronize
-            // the markdown reference from the file on disk).
+            // names next to the output. Validate every converter-provided
+            // name BEFORE any write: an illegal name is a hard error, not a
+            // silent rewrite (rewriting would desynchronize the markdown
+            // reference), and it must not leave a half-written output with
+            // the markdown on disk but assets missing.
+            let asset_dir = path.parent().unwrap_or(std::path::Path::new("."));
+            let mut asset_paths = Vec::with_capacity(result.assets.len());
             for asset in &result.assets {
                 if let Err(reason) =
                     alchemize::domain::asset::validate_asset_filename(&asset.filename)
@@ -189,10 +190,11 @@ async fn convert(
                         "asset filename rejected by write boundary: {reason}"
                     ))));
                 }
-                let asset_path = path
-                    .parent()
-                    .unwrap_or(std::path::Path::new("."))
-                    .join(&asset.filename);
+                asset_paths.push(asset_dir.join(&asset.filename));
+            }
+            std::fs::write(&path, &result.markdown)
+                .map_err(|e| map_error(AlchemizeError::Other(format!("write failed: {e}"))))?;
+            for (asset, asset_path) in result.assets.iter().zip(asset_paths) {
                 if let Some(dir) = asset_path.parent() {
                     let _ = std::fs::create_dir_all(dir);
                 }

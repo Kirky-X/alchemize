@@ -86,10 +86,19 @@ impl ConverterRegistry {
 
         if let Some(pref) = prefer {
             let pref_lc = pref.to_ascii_lowercase();
-            if let Some(idx) = candidates.iter().position(|c| {
-                c.name().to_ascii_lowercase() == pref_lc
-                    || c.name().to_ascii_lowercase().starts_with(&pref_lc)
-            }) {
+            // Exact engine names win globally; only when no candidate matches
+            // exactly does prefix matching apply (in priority order). A single
+            // pass would let a higher-priority `pdfium` shadow an exact `pdf`
+            // preference.
+            let idx = candidates
+                .iter()
+                .position(|c| c.name().to_ascii_lowercase() == pref_lc)
+                .or_else(|| {
+                    candidates
+                        .iter()
+                        .position(|c| c.name().to_ascii_lowercase().starts_with(&pref_lc))
+                });
+            if let Some(idx) = idx {
                 let preferred = candidates.remove(idx);
                 candidates.insert(0, preferred);
             }
@@ -101,6 +110,11 @@ impl ConverterRegistry {
         }
 
         let mut attempts: Vec<(String, String)> = Vec::new();
+        // Depth rejection is control-flow, not a "backend failed" detail:
+        // callers (container nesting) must be able to distinguish it from a
+        // missing converter. Keep the first one seen and return it instead of
+        // the generic aggregate.
+        let mut depth_limit: Option<u32> = None;
         for (i, converter) in candidates.iter().enumerate() {
             if let Availability::Unavailable { reason } = converter.availability() {
                 debug!(
@@ -123,9 +137,16 @@ impl ConverterRegistry {
             match converter.convert(input.clone()).await {
                 Ok(mut result) => {
                     // Record which engine actually produced this result so
-                    // `--engine` effects are observable downstream.
-                    if result.metadata.get("converter").is_none() {
-                        if result.metadata.is_null() {
+                    // `--engine` effects are observable downstream. A
+                    // non-object metadata payload (string/array/number) is
+                    // replaced — provenance must never be silently dropped.
+                    // A present-but-null `converter` key counts as missing.
+                    if result
+                        .metadata
+                        .get("converter")
+                        .is_none_or(|value| value.is_null())
+                    {
+                        if !result.metadata.is_object() {
                             result.metadata = serde_json::json!({});
                         }
                         if let Some(obj) = result.metadata.as_object_mut() {
@@ -138,12 +159,25 @@ impl ConverterRegistry {
                     return Ok(result);
                 }
                 Err(e) => {
-                    warn!(error = %e, attempt = i + 1, engine = converter.name(), "converter failed, trying next");
+                    if let AlchemizeError::DepthLimitExceeded { limit } = &e {
+                        depth_limit.get_or_insert(*limit);
+                    }
+                    // Log the variant label only: converter messages may embed
+                    // remote response bodies or internal endpoints.
+                    warn!(
+                        error_kind = e.kind(),
+                        attempt = i + 1,
+                        engine = converter.name(),
+                        "converter failed, trying next"
+                    );
                     attempts.push((converter.name().to_string(), e.to_string()));
                 }
             }
         }
 
+        if let Some(limit) = depth_limit {
+            return Err(AlchemizeError::DepthLimitExceeded { limit });
+        }
         let ext = input.extension().unwrap_or_else(|| "<none>".to_string());
         Err(AlchemizeError::AllBackendsFailed { ext, attempts })
     }
@@ -270,6 +304,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn convert_pref_exact_name_beats_prefix_collision() {
+        // `pdfium` sorts first by priority and is a prefix match for `pdf`;
+        // the exact `pdf` engine must still win the preference.
+        let mut registry = ConverterRegistry::new();
+        registry.register(stub(&["pdf"], 20, "pdfium", ConversionQuality::Api));
+        registry.register(stub(&["pdf"], 10, "pdf", ConversionQuality::LocalFallback));
+        let input = Input::bytes(vec![], "t.pdf");
+
+        let result = registry.convert_pref(&input, Some("pdf")).await.unwrap();
+        assert_eq!(result.markdown, "pdf");
+        assert_eq!(result.metadata["converter"], "pdf");
+
+        // No exact hit: unique prefix still resolves (fallback semantics).
+        let result = registry.convert_pref(&input, Some("pdfi")).await.unwrap();
+        assert_eq!(result.markdown, "pdfium");
+    }
+
+    #[tokio::test]
     async fn convert_pref_ignores_unknown_name() {
         let mut registry = ConverterRegistry::new();
         registry.register(stub(&["pdf"], 10, "only", ConversionQuality::LocalFallback));
@@ -291,6 +343,37 @@ mod tests {
         assert_eq!(converters.len(), 2);
         assert_eq!(converters[0].priority(), 20);
         assert_eq!(converters[1].priority(), 5);
+    }
+
+    #[tokio::test]
+    async fn convert_records_converter_over_non_object_metadata() {
+        // A converter returning scalar metadata must not lose provenance.
+        struct ScalarMetadata;
+        #[async_trait::async_trait]
+        impl Converter for ScalarMetadata {
+            async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+                let mut result = ConvertResult::from_markdown("body", ContentType::Document);
+                result.metadata = serde_json::json!("scalar");
+                Ok(result)
+            }
+            fn supported_extensions(&self) -> &[&str] {
+                &["pdf"]
+            }
+            fn priority(&self) -> u8 {
+                10
+            }
+            fn name(&self) -> &'static str {
+                "scalar"
+            }
+        }
+
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(ScalarMetadata));
+        let result = registry
+            .convert(&Input::bytes(vec![], "t.pdf"))
+            .await
+            .unwrap();
+        assert_eq!(result.metadata["converter"], "scalar");
     }
 
     #[tokio::test]

@@ -20,12 +20,23 @@ alchemize 所有显著变更记录于此文件。
 ### 修复
 
 - `MineruConfig` 手工实现 `Debug`：修复 derived Debug 明文打印 `api_token` 的泄密面（Display/serde 原已脱敏），单测补钉 Debug 通路断言。
-- README.md 两处对外失实修正：PDF fallback 链序（原写 MinerU 链首，实际 anydoc→pdf-extract→MinerU 链尾）；退出码清单补 `1`（其他错误）。
+- README.md 对外失实修正：PDF fallback 链序（原写 MinerU 链首，实际本地链在前、MinerU 链尾）；退出码清单补 `1`（其他错误）。
+- gz/xz/zst 包装内层转换结果时保留内层 `assets` 与 `metadata`：原实现只取 markdown，内层 docx/odt 抽出的图片被丢弃、`images/...` 引用悬空。
+- CSV 参差行改为扩宽表格（合成 `column_N` 表头）而非截断；容器与 zip 统一过滤 `._*`/`__MACOSX` 元数据条目；`MinerUHttpConfig` 手工 `Debug` 脱敏。
+- 围栏注入防护统一：文本/代码/ipynb/eml/pandoc/LaTeX/GFM 渲染与容器、zip 路径全部改用 `fence_for`（按正文最长反引号串加长、兼容 lone CR/CRLF、容忍 ≤3 空格缩进），避免不可信内容提前闭合代码块。
 
 ### 变更
 
+- **移除表格解析器**：xlsx/ods 支持与 `calamine` 依赖整体移除——其物化面（共享字符串逐格克隆、styles/theme、ODS 重复与 `text:c` 展开）无法在不可信输入上被前置校验约束。xlsx/xls/xlsb/ods 一律返回 `UnsupportedFormat`。
+- **容器转换器构造面收敛**：tar/tgz/gz/xz/zst/7z 只保留 `with_registry_slot(slot)`；嵌套深度改为按转换链 task-local 计数（并发转换互不占用）；槽未回填时条目降级为附件并记 `metadata.registry_wired=false`（原为硬报错）。
+- `default_converters` 增加容器注册表槽参数；`AlchemizeBuilder::build()` 自动回填。
 - **CLI 改为 sdforge 封装**：convert/doctor/formats 改写为 `#[forge]` 端点（`src/forge_app.rs`），`alch` 经 CliBuilder + 自定义 runner 驱动；退出码 0/1/2/3、位置参数、stdout/stderr 形态、`-o`/`--no-remote`/`--format` 契约全部保留（tests/cli.rs 零改动全绿）。MSRV 1.91 → 1.97.1（sdforge 要求）；直接依赖 clap 移除（sdforge 自带）。
 - 文档表述对齐代码事实：domain 层 IO 例外（`Input::to_bytes` 读盘、`DirSink` 落盘）、doctor/availability 语义（未注册引擎不出现、媒体依赖缺失走转换时降级）、模块树补齐 engines/shared/subtitle_converter。
+
+### 移除
+
+- 表格解析器 `xlsx`/`ods`（`calamine` 依赖）、`XlsxConverter` 及其 fixtures/基准行。
+- 容器转换器 `new(registry)` / `with_arc(registry)` 公开构造（测试路径保留为 `#[cfg(test)]`）。
 
 ## [0.1.0] - 2026-11-07
 

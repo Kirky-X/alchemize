@@ -10,7 +10,6 @@ Generated: 2026-11-09.
 | fixture | format | size | median | throughput | engine |
 |---|---|---|---|---|---|
 | real.docx | docx (923KB wordlist, 25MB uncompressed XML) | 901KB | 83.4ms | 10.6 MB/s | docx-deep |
-| real.xlsx | xlsx (6.7MB morphology lexicon) | 6.5MB | 500.8ms | 12.9 MB/s | xlsx (calamine) |
 | real.pdf | pdf (100KB multi-page) | 105KB | 16.3ms | 6.3 MB/s | pdf (pdf-extract) |
 | real.odt | odt (ODF text) | 5KB | 0.1ms | 51.9 MB/s | odt-deep |
 | real.odp | odp (ODF presentation) | 4KB | 0.1ms | 55.8 MB/s | odp-deep |
@@ -27,7 +26,6 @@ Generated: 2026-11-09.
 | family | limit | result |
 |---|---|---|
 | docx | < 1 s | 83 ms ✅ |
-| xlsx | < 5 s | 501 ms ✅ |
 | pdf | < 2 s | 16 ms ✅ |
 | plain text / markdown | < 50 ms | < 1 ms ✅ |
 

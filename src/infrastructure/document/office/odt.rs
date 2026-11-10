@@ -73,6 +73,8 @@ pub struct ParsedOdf {
     pub(crate) paragraph_count: usize,
     /// Number of repeat attributes that exceeded [`REPEAT_CAP`].
     pub(crate) repeated_truncated: usize,
+    /// True when repeat expansion hit the model-bytes budget.
+    pub(crate) budget_exceeded: bool,
 }
 
 /// Table being built (stacked so nested tables inside cells work).
@@ -86,6 +88,8 @@ struct TableState {
     row_repeat: u32,
     /// Covered position → its origin, for `table:covered-table-cell`.
     coverage: HashMap<(usize, usize), (usize, usize)>,
+    /// Estimated bytes charged for the current row (billed again per repeat).
+    row_charge: usize,
 }
 
 impl TableState {
@@ -99,6 +103,7 @@ impl TableState {
             in_header: false,
             row_repeat: 1,
             coverage: HashMap::new(),
+            row_charge: 0,
         }
     }
 }
@@ -145,11 +150,19 @@ pub(crate) struct OdfWalker<'a> {
     zip: &'a mut zip::ZipArchive<Cursor<&'a [u8]>>,
     styles: HashMap<String, OdfStyleDef>,
     pub(crate) raw_assets: Vec<RawOdfAsset>,
+    /// Cumulative asset bytes; capped by the shared output budget so many
+    /// embedded media parts cannot sum unboundedly.
+    raw_assets_bytes: usize,
     asset_index: HashMap<String, usize>,
     pub(crate) blocks: Vec<Block>,
     pub(crate) notes: Vec<Note>,
     pub(crate) paragraph_count: usize,
     pub(crate) repeated_truncated: usize,
+    /// Estimated model bytes charged so far (repeat expansion is capped by
+    /// the shared output budget so a 1000x1000 repeat cannot explode).
+    model_bytes: usize,
+    /// Set when a repeat expansion would exceed the model budget.
+    pub(crate) budget_exceeded: bool,
     page_no: usize,
     note_seq: usize,
     containers: Vec<Container>,
@@ -170,11 +183,14 @@ impl<'a> OdfWalker<'a> {
             zip,
             styles,
             raw_assets: Vec::new(),
+            raw_assets_bytes: 0,
             asset_index: HashMap::new(),
             blocks: Vec::new(),
             notes: Vec::new(),
             paragraph_count: 0,
             repeated_truncated: 0,
+            model_bytes: 0,
+            budget_exceeded: false,
             page_no: 0,
             note_seq: 0,
             containers: Vec::new(),
@@ -317,12 +333,12 @@ impl<'a> OdfWalker<'a> {
     }
 
     fn close_item(&mut self) {
-        if let Some(Container::List { items, current, .. }) = self.containers.last_mut() {
-            if !current.is_empty() {
-                items.push(ListItem {
-                    blocks: std::mem::take(current),
-                });
-            }
+        if let Some(Container::List { items, current, .. }) = self.containers.last_mut()
+            && !current.is_empty()
+        {
+            items.push(ListItem {
+                blocks: std::mem::take(current),
+            });
         }
     }
 
@@ -385,13 +401,30 @@ impl<'a> OdfWalker<'a> {
     // ---- table placement --------------------------------------------------
 
     fn place_origin(&mut self, cell: Cell, repeat: u32) {
-        let Some(t) = self.tables.last_mut() else {
+        if self.budget_exceeded {
             return;
-        };
+        }
         if repeat > REPEAT_CAP {
             self.repeated_truncated += 1;
         }
         let n = repeat.min(REPEAT_CAP) as usize;
+        // Merged spans expand into coverage-map entries too: bill them so a
+        // huge `number-rows-spanned` cannot balloon the map unbounded.
+        let coverage_entries =
+            (cell.row_span.saturating_sub(1) as usize).saturating_mul(cell.col_span as usize);
+        let charge = n
+            .saturating_mul(cell_weight(&cell).saturating_add(coverage_entries.saturating_mul(64)));
+        if self.model_bytes.saturating_add(charge)
+            > crate::infrastructure::document::shared::MAX_OUTPUT_BYTES
+        {
+            self.budget_exceeded = true;
+            return;
+        }
+        self.model_bytes += charge;
+        let Some(t) = self.tables.last_mut() else {
+            return;
+        };
+        t.row_charge = t.row_charge.saturating_add(charge);
         for k in 0..n {
             let col = t.col + k * cell.col_span as usize;
             if cell.row_span > 1 {
@@ -408,13 +441,25 @@ impl<'a> OdfWalker<'a> {
     }
 
     fn place_covered(&mut self, repeat: u32) {
-        let Some(t) = self.tables.last_mut() else {
+        if self.budget_exceeded {
             return;
-        };
+        }
         if repeat > REPEAT_CAP {
             self.repeated_truncated += 1;
         }
         let n = repeat.min(REPEAT_CAP) as usize;
+        let charge = n.saturating_mul(96);
+        if self.model_bytes.saturating_add(charge)
+            > crate::infrastructure::document::shared::MAX_OUTPUT_BYTES
+        {
+            self.budget_exceeded = true;
+            return;
+        }
+        self.model_bytes += charge;
+        let Some(t) = self.tables.last_mut() else {
+            return;
+        };
+        t.row_charge = t.row_charge.saturating_add(charge);
         for k in 0..n {
             let col = t.col + k;
             let origin = t
@@ -431,13 +476,38 @@ impl<'a> OdfWalker<'a> {
     }
 
     fn close_row(&mut self) {
+        if self.budget_exceeded {
+            return;
+        }
+        let (n, row_charge, too_many) = match self.tables.last() {
+            Some(t) => (
+                t.row_repeat.min(REPEAT_CAP) as usize,
+                t.row_charge,
+                t.row_repeat > REPEAT_CAP,
+            ),
+            None => return,
+        };
+        if too_many {
+            self.repeated_truncated += 1;
+        }
+        // Each row is billed twice: once when its cells are placed
+        // (`place_origin` / `place_covered`) and once here, when the row is
+        // cloned into the grid `n` times. Peak memory really holds both the
+        // row vector and its grid copies, so this is a deliberate ~2x
+        // conservative factor: the effective model budget is
+        // MAX_OUTPUT_BYTES/2. Do not "fix" one side without re-measuring the
+        // other.
+        let charge = n.saturating_mul(row_charge);
+        if self.model_bytes.saturating_add(charge)
+            > crate::infrastructure::document::shared::MAX_OUTPUT_BYTES
+        {
+            self.budget_exceeded = true;
+            return;
+        }
+        self.model_bytes += charge;
         let Some(t) = self.tables.last_mut() else {
             return;
         };
-        if t.row_repeat > REPEAT_CAP {
-            self.repeated_truncated += 1;
-        }
-        let n = t.row_repeat.min(REPEAT_CAP) as usize;
         for _ in 0..n {
             let row = t.row.clone();
             t.grid.push(row);
@@ -448,6 +518,7 @@ impl<'a> OdfWalker<'a> {
         }
         t.row.clear();
         t.col = 0;
+        t.row_charge = 0;
     }
 
     // ---- assets -----------------------------------------------------------
@@ -457,6 +528,14 @@ impl<'a> OdfWalker<'a> {
             return Some(idx);
         }
         let bytes = read_part(self.zip, part).ok()?;
+        if self.raw_assets_bytes.saturating_add(bytes.len())
+            > crate::infrastructure::document::shared::MAX_OUTPUT_BYTES
+        {
+            // Budget exhausted: degrade the reference instead of growing
+            // memory without bound.
+            return None;
+        }
+        self.raw_assets_bytes += bytes.len();
         let media_type = guess_media_type(part);
         let idx = self.raw_assets.len();
         self.asset_index.insert(part.to_string(), idx);
@@ -648,6 +727,16 @@ impl<'a> OdfWalker<'a> {
                     .and_then(|v| v.trim().parse::<usize>().ok())
                     .unwrap_or(1)
                     .min(SPACE_CAP);
+                // A run of `text:s` elements is unbounded across the document
+                // even though each one is capped; charge the shared model
+                // budget before allocating.
+                if self.model_bytes.saturating_add(count)
+                    > crate::infrastructure::document::shared::MAX_OUTPUT_BYTES
+                {
+                    self.budget_exceeded = true;
+                    return;
+                }
+                self.model_bytes += count;
                 self.push_inline(Inline::Text {
                     text: " ".repeat(count),
                     style: self.effective().to_style(),
@@ -781,6 +870,34 @@ pub(crate) fn walk_content(xml: &[u8], w: &mut OdfWalker) -> Result<(), Alchemiz
     Ok(())
 }
 
+/// First child element of `<office:body>` in an ODF `content.xml`:
+/// `text`, `spreadsheet` or `presentation`. `None` when unreadable.
+fn odf_body_root(bytes: &[u8]) -> Option<String> {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
+    let content = read_part(&mut zip, "content.xml").ok()?;
+    let mut reader = Reader::from_reader(content.as_slice());
+    let mut buf = Vec::new();
+    let mut in_body = false;
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                let name = local_tag_name(e.name().as_ref());
+                if name == "body" {
+                    in_body = true;
+                } else if in_body {
+                    return Some(name);
+                }
+            }
+            Ok(Event::Eof) | Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
 /// Parse an ODF package (`content.xml` + optional `styles.xml`) into the
 /// unified model. Shared by the ODT and ODP converters.
 pub fn parse(bytes: &[u8]) -> Result<ParsedOdf, AlchemizeError> {
@@ -813,6 +930,7 @@ pub fn parse(bytes: &[u8]) -> Result<ParsedOdf, AlchemizeError> {
             .collect(),
     };
     Ok(ParsedOdf {
+        budget_exceeded: w.budget_exceeded,
         document,
         raw_assets: w.raw_assets,
         paragraph_count: w.paragraph_count,
@@ -897,15 +1015,88 @@ pub(crate) fn rewrite_asset_refs(doc: &mut Document, raw: &[RawOdfAsset]) -> Vec
     ctx.namer.into_assets()
 }
 
+/// Estimated in-memory bytes of a table cell (text + structural overhead).
+fn cell_weight(cell: &Cell) -> usize {
+    const SLOT_OVERHEAD: usize = 128;
+    SLOT_OVERHEAD + blocks_weight(&cell.blocks)
+}
+
+fn blocks_weight(blocks: &[Block]) -> usize {
+    blocks
+        .iter()
+        .map(|block| match block {
+            Block::Heading { content, .. } => inlines_weight(content),
+            Block::Paragraph(content) => inlines_weight(content),
+            Block::List(list) => {
+                64 + list
+                    .items
+                    .iter()
+                    .map(|item| blocks_weight(&item.blocks))
+                    .sum::<usize>()
+            }
+            Block::Table(table) => {
+                64 + table
+                    .grid
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|slot| match slot {
+                                CellSlot::Origin(cell) => cell_weight(cell),
+                                CellSlot::Covered { .. } => 96,
+                            })
+                            .sum::<usize>()
+                    })
+                    .sum::<usize>()
+            }
+            Block::BlockQuote(inner) => 32 + blocks_weight(inner),
+            Block::CodeBlock { text, .. } => 32 + text.len(),
+            Block::Math(text) => 32 + text.len(),
+            Block::Rule => 32,
+        })
+        .sum()
+}
+
+fn inlines_weight(inlines: &[Inline]) -> usize {
+    inlines
+        .iter()
+        .map(|inline| match inline {
+            Inline::Text { text, .. } => 16 + text.len(),
+            Inline::Link { content, target } => {
+                16 + inlines_weight(content)
+                    + match target {
+                        LinkTarget::External(url) => url.len(),
+                        LinkTarget::Relative(url) => url.len(),
+                        LinkTarget::Anchor(anchor) => anchor.len(),
+                    }
+            }
+            Inline::Image { alt, .. } => 16 + alt.len(),
+            Inline::Math(text) => 16 + text.len(),
+            Inline::Checkbox(_) => 8,
+            Inline::Anchor(text) => 8 + text.len(),
+            Inline::NoteRef(id) => 8 + id.len(),
+            Inline::LineBreak => 4,
+        })
+        .sum()
+}
+
 /// Shared converter tail for ODT and ODP: rewrite asset refs, render, and
 /// assemble the [`ConvertResult`].
 pub(crate) fn build_result(
     parsed: ParsedOdf,
     source_format: &str,
 ) -> Result<ConvertResult, AlchemizeError> {
+    // Repeat expansion hit the model budget while parsing: fail explicitly
+    // instead of rendering a model that already consumed the memory.
+    if parsed.budget_exceeded {
+        return Err(AlchemizeError::other(format!(
+            "{source_format} table repeat expansion exceeds the {}-byte output budget",
+            crate::infrastructure::document::shared::MAX_OUTPUT_BYTES
+        )));
+    }
     let mut doc = parsed.document;
     let assets = rewrite_asset_refs(&mut doc, &parsed.raw_assets);
     let markdown = crate::infrastructure::document::gfm_render::render_markdown(&doc);
+    crate::infrastructure::document::shared::check_output_budget(markdown.len())?;
     let metadata = serde_json::json!({
         "source_format": source_format,
         "paragraph_count": parsed.paragraph_count,
@@ -947,9 +1138,24 @@ impl Converter for OdtConverter {
             .to_bytes()
             .await
             .map_err(|e| AlchemizeError::other(format!("failed to read ODT input: {e}")))?;
-        let parsed = tokio::task::spawn_blocking(move || parse(&bytes))
-            .await
-            .map_err(|e| AlchemizeError::other(format!("odt-deep task panicked: {e}")))??;
+        // Zip open + content.xml decompression are blocking work; the body
+        // guard runs inside the same blocking task as `parse` so neither
+        // occupies a runtime worker.
+        let parsed = tokio::task::spawn_blocking(move || {
+            // The gz/xz/zst magic rename can hand an ODS/ODP payload to this
+            // converter under an `.odt` name; reject non-text ODF bodies.
+            if let Some(kind) = odf_body_root(&bytes) {
+                if kind == "spreadsheet" {
+                    return Err(AlchemizeError::UnsupportedFormat("ods".to_string()));
+                }
+                if kind == "presentation" {
+                    return Err(AlchemizeError::UnsupportedFormat("odp".to_string()));
+                }
+            }
+            parse(&bytes)
+        })
+        .await
+        .map_err(|e| AlchemizeError::other(format!("odt-deep task panicked: {e}")))??;
         build_result(parsed, "odt")
     }
 
@@ -1149,6 +1355,54 @@ pub(crate) fn parse_odf_styles(xml: &[u8]) -> HashMap<String, OdfStyleDef> {
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn repeated_table_expansion_is_budgeted() {
+        use std::io::Write as _;
+        let content = "<office:document-content><office:body><office:text><table:table><table:table-row table:number-rows-repeated=\"1000\"><table:table-cell table:number-columns-repeated=\"1000\"><text:p>cell</text:p></table:table-cell></table:table-row></table:table></office:text></office:body></office:document-content>";
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut w = zip::ZipWriter::new(&mut buf);
+            w.start_file("content.xml", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(content.as_bytes()).unwrap();
+            w.finish().unwrap();
+        }
+        let result = OdtConverter::new()
+            .convert(Input::bytes(buf.into_inner(), "big.odt"))
+            .await;
+        assert!(result.is_err(), "repeat bomb must be rejected");
+    }
+
+    #[tokio::test]
+    async fn cumulative_text_space_expansion_is_budgeted() {
+        // Each `text:s` is capped, but thousands of them are not.
+        let mut content =
+            String::from("<office:document-content><office:body><office:text><text:p>");
+        for _ in 0..7_000 {
+            content.push_str("<text:s text:c=\"10000\"/>");
+        }
+        content.push_str("</text:p></office:text></office:body></office:document-content>");
+        let result = OdtConverter::new()
+            .convert(Input::bytes(odt_with(&content), "spaces.odt"))
+            .await;
+        let err = result.expect_err("space bomb must be rejected");
+        assert!(err.to_string().contains("output budget"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn spreadsheet_body_is_rejected_by_the_text_converter() {
+        // gz magic rename can hand an ODS payload to OdtConverter.
+        let content = "<office:document-content><office:body><office:spreadsheet/></office:body></office:document-content>";
+        let err = OdtConverter::new()
+            .convert(Input::bytes(odt_with(content), "renamed.odt"))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, AlchemizeError::UnsupportedFormat(ref ext) if ext == "ods"),
+            "{err:?}"
+        );
+    }
     use super::*;
 
     fn zip_parts(parts: &[(&str, &[u8])]) -> Vec<u8> {

@@ -28,6 +28,9 @@ pub struct BodyCtx<'a> {
     pub warnings: &'a mut super::converter::Warnings,
     /// Media payloads collected so far.
     pub assets: Vec<super::converter::RawAsset>,
+    /// Cumulative media bytes; capped by the shared output budget so many
+    /// embedded parts cannot sum unboundedly.
+    pub assets_bytes: usize,
     /// Package-relative part → index into `assets`.
     pub asset_index: HashMap<String, usize>,
     /// The DOCX package.
@@ -43,6 +46,14 @@ impl BodyCtx<'_> {
             return Some(*idx);
         }
         let bytes = read_part(self.zip, &part).ok()?;
+        if self.assets_bytes.saturating_add(bytes.len())
+            > crate::infrastructure::document::shared::MAX_OUTPUT_BYTES
+        {
+            // Budget exhausted: degrade the reference instead of growing
+            // memory without bound.
+            return None;
+        }
+        self.assets_bytes += bytes.len();
         let media_type = guess_media_type(&part);
         let idx = self.assets.len();
         self.asset_index.insert(part.clone(), idx);
@@ -118,19 +129,15 @@ pub fn guess_media_type(part: &str) -> String {
     .to_string()
 }
 
-/// Read one part out of the package.
+/// Read one part out of the package (bounded by the shared per-part limit).
 pub fn read_part(
     zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
     name: &str,
 ) -> Result<Vec<u8>, AlchemizeError> {
-    use std::io::Read;
     let mut file = zip
         .by_name(name)
         .map_err(|e| AlchemizeError::Zip(format!("part {name} not found: {e}")))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)
-        .map_err(|e| AlchemizeError::Zip(format!("part {name} read failed: {e}")))?;
-    Ok(buf)
+    crate::infrastructure::document::shared::read_part_limited(&mut file, name)
 }
 
 /// Vertical merge state of a table cell.

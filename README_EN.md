@@ -63,7 +63,7 @@ Hand `alch` a file — PDF, Office, audio/video, a zip archive — and it picks 
 
 <table style="width:100%; border-collapse: collapse">
 <tr>
-<td width="50%" style="vertical-align:top; padding: 12px">📄 <b>Full document formats</b><br><span style="color:#64748B">PDF (pdfium/pure-Rust/MinerU), docx/pptx/xlsx (+xls/xlsb/ods), odt/odp, legacy binary Office (doc/ppt/rtf via LibreOffice), html/epub, csv/tsv/psv, LaTeX/org/rst/asciidoc (pandoc), ipynb</span></td>
+<td width="50%" style="vertical-align:top; padding: 12px">📄 <b>Full document formats</b><br><span style="color:#64748B">PDF (pdfium/pure-Rust/MinerU), docx/pptx, odt/odp, legacy binary Office (doc/ppt/rtf via LibreOffice), html/epub, csv/tsv/psv, LaTeX/org/rst/asciidoc (pandoc), ipynb</span></td>
 <td width="50%" style="vertical-align:top; padding: 12px">🧬 <b>Code fencing</b><br><span style="color:#64748B">py/rs/js/ts/go/java/c/cpp/json/yaml/toml/xml/sh and ~45 extensions total, as language-tagged fenced code blocks</span></td>
 </tr>
 <tr>
@@ -139,7 +139,7 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | Word (legacy) | doc, rtf | legacy-office(15, LibreOffice) | `libreoffice` |
 | OpenDocument text | odt | odt-deep(18) | — |
 | Presentations | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `libreoffice` (legacy binary only) |
-| Spreadsheets | xlsx, xls, xlsb, ods | xlsx (calamine + numFmt display values) | — |
+| Spreadsheets | — (not supported) | The spreadsheet parser was removed: calamine materialization (shared strings, styles/theme, ODS repeats and text expansion) cannot be bounded by a pre-check; xlsx/xls/xlsb/ods are unsupported | — |
 | PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdfium` / `mineru` |
 | Web / e-book | html, htm / epub | html(htmd) → html-deep(15) / epub | `html-deep` (html-deep) |
 | Plain text / code | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 code extensions | text (fenced) | — |
@@ -305,7 +305,7 @@ No criterion benchmarks yet — no performance numbers are provided (none are fa
 
 ### 🛡️ Security Design
 
-Four defense lines: structured error handling for untrusted input (no panics); SSRF validation of MinerU download URLs (HTTPS-only, loopback/RFC1918/CGNAT/link-local denied, hostname allowlist, presigned signatures); tiered response limits (64KB/8KB/50MB/50MB); credentials passed only via environment variables and redacted on all three output paths. Details in the [🔒 Security doc](docs/SECURITY.md).
+Four defense lines: structured error handling for untrusted input (no panics); SSRF validation of MinerU download URLs (HTTPS-only, loopback/RFC1918/CGNAT/link-local denied, hostname allowlist, presigned signatures); tiered response limits (64KB/8KB/50MB/50MB); credentials from env vars or `MineruConfig::api_token`, redacted on all three output paths. Details in the [🔒 Security doc](docs/SECURITY.md).
 
 ### ⛓️ Supply Chain and Gates
 
@@ -382,7 +382,6 @@ Apache-2.0 ([LICENSE](LICENSE)). Every source file carries an SPDX header; files
 
 ### 🌟 Core Dependencies
 
-- [calamine](https://github.com/tafia/calamine) (MIT) — xlsx/xls/xlsb/ods reading.
 - [pdf-extract](https://github.com/jrmuizel/pdf-extract) (MIT) — PDF text-layer extraction.
 - [quick-xml](https://github.com/tafia/quick-xml) (MIT/Apache-2.0) — OOXML/ODF/OMML event streams.
 - [sevenz-rust2](https://github.com/hasenbanck/sevenz-rust2) (Apache-2.0) plus [tar](https://github.com/alexcrichton/tar-rs)/[flate2](https://github.com/rust-lang/flate2)/[xz2](https://github.com/alexcrichton/xz2-rs)/[zstd](https://github.com/gyscos/zstd-rs) (MIT/Apache-2.0) — archive containers.
@@ -391,7 +390,7 @@ Apache-2.0 ([LICENSE](LICENSE)). Every source file carries an SPDX header; files
 - [LibreOffice](https://www.libreoffice.org/) (MPL-2.0) — legacy binary Office conversion (optional external tool).
 - [pandoc](https://pandoc.org/) (GPL-2.0+) — LaTeX/org/rst/asciidoc markup conversion (optional external tool).
 - [vecboost](https://github.com/Kirky-X/vecboost) (own project) — Qwen3-ASR ONNX + silero VAD local transcription facade.
-- Excellent open-source crates: [pdf-extract](https://crates.io/crates/pdf-extract), [calamine](https://crates.io/crates/calamine), [quick-xml](https://crates.io/crates/quick-xml), [aspasia](https://crates.io/crates/aspasia), [rbook](https://crates.io/crates/rbook), [htmd](https://crates.io/crates/htmd), and more.
+- Excellent open-source crates: [pdf-extract](https://crates.io/crates/pdf-extract), [quick-xml](https://crates.io/crates/quick-xml), [aspasia](https://crates.io/crates/aspasia), [rbook](https://crates.io/crates/rbook), [htmd](https://crates.io/crates/htmd), and more.
 
 ### 💝 Special Thanks
 

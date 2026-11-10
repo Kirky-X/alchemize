@@ -19,7 +19,7 @@ use tracing::{debug, info, warn};
 
 use super::http_limit::{
     MAX_ERROR_RESPONSE_BYTES, MAX_POLL_RESPONSE_BYTES, MAX_RESULT_RESPONSE_BYTES,
-    MAX_SUBMIT_RESPONSE_BYTES, read_limited_json, read_limited_text,
+    MAX_SUBMIT_RESPONSE_BYTES, read_limited_json, read_limited_text, truncate_body,
 };
 use super::types::DEFAULT_TIMEOUT_SECS;
 use super::validated_url::{DEFAULT_MINERU_ALLOWLIST, validate_base_url, validate_file_url};
@@ -194,9 +194,11 @@ impl MineruPrecisionClient {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body = read_limited_text(resp, MAX_ERROR_RESPONSE_BYTES)
-                .await
-                .unwrap_or_else(|_| "<unreadable>".to_string());
+            let body = truncate_body(
+                read_limited_text(resp, MAX_ERROR_RESPONSE_BYTES)
+                    .await
+                    .unwrap_or_else(|_| "<unreadable>".to_string()),
+            );
             return Err(AlchemizeError::MineruConversion(format!(
                 "MinerU Precision API returned {status}: {body}"
             )));
@@ -236,9 +238,11 @@ impl MineruPrecisionClient {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body = read_limited_text(resp, MAX_ERROR_RESPONSE_BYTES)
-                .await
-                .unwrap_or_else(|_| "<unreadable>".to_string());
+            let body = truncate_body(
+                read_limited_text(resp, MAX_ERROR_RESPONSE_BYTES)
+                    .await
+                    .unwrap_or_else(|_| "<unreadable>".to_string()),
+            );
             return Err(AlchemizeError::MineruConversion(format!(
                 "MinerU poll returned {status}: {body}"
             )));
@@ -258,7 +262,12 @@ impl MineruPrecisionClient {
             "completed" => TaskStatus::Completed,
             "failed" => TaskStatus::Failed,
             other => {
-                warn!(status = other, "unknown task status");
+                // Remote-controlled: bound length and strip control chars
+                // before it reaches the log.
+                let status_label = crate::infrastructure::document::shared::sanitize_label(
+                    &truncate_body(other.to_string()),
+                );
+                warn!(status = %status_label, "unknown task status");
                 TaskStatus::Failed
             }
         };
@@ -357,7 +366,8 @@ impl MineruClient for MineruPrecisionClient {
                     return Ok(content);
                 }
                 TaskStatus::Failed => {
-                    let err_msg = error.unwrap_or_else(|| "unknown error".to_string());
+                    let err_msg =
+                        truncate_body(error.unwrap_or_else(|| "unknown error".to_string()));
                     return Err(AlchemizeError::MineruConversion(format!(
                         "MinerU task {} failed: {}",
                         task_id, err_msg

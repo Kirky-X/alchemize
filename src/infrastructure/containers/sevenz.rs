@@ -6,16 +6,19 @@
 //! (`for_each_entries`), bounded by the shared per-entry safety limit.
 
 use std::io::{Cursor, Read};
+#[cfg(test)]
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::application::ports::Converter;
+#[cfg(test)]
 use crate::application::registry::ConverterRegistry;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::infrastructure::containers::{
-    ContainerBase, ContainerEntry, RecursiveContainer, check_entry_size,
+    ContainerBase, ContainerEntry, RecursiveContainer, RegistrySlot, acquire_depth,
+    check_entry_size, is_metadata_entry, with_depth_scope,
 };
 
 /// View over raw 7z bytes implementing the shared container skeleton.
@@ -50,17 +53,19 @@ pub struct SevenZConverter {
 }
 
 impl SevenZConverter {
-    /// Create a new 7z converter owning a registry for nested handling.
-    pub fn new(registry: ConverterRegistry) -> Self {
+    /// Create with a deferred registry slot (builder wiring: filled once the
+    /// enclosing registry is assembled). If the slot stays empty, entries
+    /// degrade to attachments (`metadata.registry_wired = false`).
+    pub fn with_registry_slot(slot: RegistrySlot) -> Self {
         Self {
-            base: ContainerBase::new(Arc::new(registry)),
+            base: ContainerBase::with_slot(slot),
         }
     }
 
-    /// Create with an existing shared registry.
-    pub fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
-            base: ContainerBase::new(registry),
+            base: ContainerBase::with_arc(registry),
         }
     }
 }
@@ -75,15 +80,18 @@ impl Converter for SevenZConverter {
         &self,
         input: Input,
     ) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
-        let _depth = self.base.acquire_depth()?;
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read 7z input: {e}")))?;
-        let archive = SevenZArchive::new(bytes);
-        self.base
-            .convert_container(archive.format_name(), archive.entries())
-            .await
+        with_depth_scope(async {
+            let _depth = acquire_depth()?;
+            let bytes = input
+                .to_bytes()
+                .await
+                .map_err(|e| AlchemizeError::other(format!("failed to read 7z input: {e}")))?;
+            let archive = SevenZArchive::new(bytes);
+            self.base
+                .convert_container(archive.format_name(), archive.entries())
+                .await
+        })
+        .await
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -102,10 +110,14 @@ fn extract_sevenz(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
             .map_err(|e| AlchemizeError::other(format!("failed to open 7z archive: {e}")))?;
 
     let mut out: Vec<ContainerEntry> = Vec::new();
+    let mut total: u64 = 0;
     let limit = crate::infrastructure::containers::MAX_ENTRY_BYTES;
     reader
         .for_each_entries(|entry, data| {
             if entry.is_directory || entry.is_anti_item || !entry.has_stream {
+                return Ok(true);
+            }
+            if is_metadata_entry(&entry.name) {
                 return Ok(true);
             }
             if entry.size > limit {
@@ -125,6 +137,11 @@ fn extract_sevenz(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
             })?;
             check_entry_size(&entry.name, buf.len() as u64)
                 .map_err(|e| sevenz_rust2::Error::Other(e.to_string().into()))?;
+            // Incremental aggregate check: `check_total_bytes` on the fully
+            // materialized list would run after the peak allocation.
+            total = total.saturating_add(buf.len() as u64);
+            crate::infrastructure::containers::check_total_bytes(total)
+                .map_err(|e| sevenz_rust2::Error::Other(e.to_string().into()))?;
             out.push(ContainerEntry {
                 name: entry.name.clone(),
                 bytes: buf,
@@ -143,7 +160,7 @@ mod tests {
 
     #[test]
     fn supported_extensions_and_name() {
-        let converter = SevenZConverter::new(ConverterRegistry::new());
+        let converter = SevenZConverter::with_arc(Arc::new(ConverterRegistry::new()));
         assert_eq!(converter.supported_extensions(), &["7z"]);
         assert_eq!(converter.name(), "7z");
     }

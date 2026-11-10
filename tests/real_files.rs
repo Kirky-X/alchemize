@@ -79,23 +79,18 @@ async fn real_docx_extracts_wordlist() {
 // -- XLSX (real MorphoLEX_en.xlsx, 6.7MB morphology lexicon) -----------------
 
 #[tokio::test]
-async fn real_xlsx_extracts_tables() {
-    let (md, meta) = convert("real.xlsx").await;
-    assert!(md.contains('|'), "no markdown table emitted");
-    let rows = md.lines().filter(|l| l.starts_with('|')).count();
+async fn real_xlsx_is_disabled_by_default() {
+    // Spreadsheet support was removed: no engine accepts xlsx/ods.
+    let path = real("real.xlsx");
+    assert!(path.is_file(), "real fixture missing: {}", path.display());
+    let alch = AlchemizeBuilder::new().build();
+    let err = alch
+        .convert(&Input::Path(path))
+        .await
+        .expect_err("default engine set must decline spreadsheets");
     assert!(
-        rows > 20,
-        "expected a populated lexicon table, got {rows} table lines"
-    );
-    // Engine-sensitive metadata: the calamine engine reports total_rows.
-    if meta["converter"] == "xlsx" {
-        let total_rows = meta["total_rows"].as_u64().unwrap_or(0);
-        assert!(total_rows > 10, "expected >10 data rows, got {total_rows}");
-    }
-    let body_lines = md.lines().filter(|l| !l.trim().is_empty()).count();
-    assert!(
-        body_lines > 20,
-        "xlsx path emitted only {body_lines} non-empty lines"
+        matches!(err, alchemize::AlchemizeError::UnsupportedFormat(_)),
+        "{err:?}"
     );
 }
 
@@ -201,12 +196,12 @@ async fn real_rtf_without_engine_reports_unsupported() {
 #[tokio::test]
 async fn real_rust_source_fenced_verbatim() {
     let (md, meta) = convert("real.rs").await;
-    assert!(md.starts_with("```rust\n"), "missing rust fence");
-    assert!(md.trim_end().ends_with("```"));
+    assert!(md.starts_with("````rust\n"), "missing rust fence");
+    assert!(md.trim_end().ends_with("````"));
     assert!(md.contains("pub mod"), "source body missing");
     // Verbatim preservation: the fence body equals the file bytes.
     let original = std::fs::read_to_string(real("real.rs")).unwrap();
-    assert_eq!(md, format!("```rust\n{original}\n```\n"));
+    assert_eq!(md, format!("````rust\n{original}\n````\n"));
     assert_eq!(meta["source_format"], "code");
 }
 
@@ -273,4 +268,63 @@ async fn real_mp4_degraded_or_extracted() {
     // extraction attempted. Both paths must produce markdown.
     assert!(!result.markdown.is_empty());
     assert_eq!(result.content_type, alchemize::domain::ContentType::Video);
+}
+
+// -- detect_format on real archives (ZIP header-name scanner) -----------------
+
+#[test]
+fn detect_format_reads_real_archives_from_header_names() {
+    use alchemize::domain::input::{InputFormat, detect_format};
+
+    let cases = [
+        ("real.docx", InputFormat::Docx),
+        ("real.pptx", InputFormat::Pptx),
+        // ODF family collapses to Odt (the format carries odt/ods/odp).
+        ("real.odt", InputFormat::Odt),
+        ("real.odp", InputFormat::Odt),
+    ];
+    for (name, expected) in cases {
+        let bytes = std::fs::read(real(name)).unwrap();
+        let input = Input::bytes(bytes, name.to_string());
+        assert_eq!(detect_format(&input), Some(expected), "{name}");
+    }
+
+    for (dir, name, expected) in [
+        ("epub", "sample.epub", InputFormat::Epub),
+        ("xlsx", "sample.xlsx", InputFormat::Xlsx),
+    ] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(dir)
+            .join(name);
+        let bytes = std::fs::read(&path).unwrap();
+        let input = Input::bytes(bytes, name.to_string());
+        assert_eq!(detect_format(&input), Some(expected), "{dir}/{name}");
+    }
+}
+
+// -- containers feature: nested members dispatch through the assembled registry
+
+#[cfg(feature = "containers")]
+#[tokio::test]
+async fn real_tar_nested_members_convert_through_engines() {
+    // `real.tar` holds real.png + real.md + main.rs. With the registry slot
+    // wired, every member must dispatch to an engine (image → metadata
+    // markdown, text/code → content) instead of degrading to attachments.
+    let path = real("real.tar");
+    assert!(path.is_file(), "real fixture missing: {}", path.display());
+    let alch = AlchemizeBuilder::new().build();
+    let result = alch
+        .convert(&Input::Path(path))
+        .await
+        .expect("tar conversion must not error");
+    let converted = result.metadata["converted_count"].as_u64().unwrap_or(0);
+    let file_count = result.metadata["file_count"].as_u64().unwrap_or(0);
+    assert_eq!(file_count, 3, "expected three members: {}", result.markdown);
+    assert_eq!(
+        converted, file_count,
+        "every member must dispatch to an engine (no attachment fallback): {}",
+        result.markdown
+    );
+    assert!(result.markdown.contains("real.png"), "{}", result.markdown);
 }

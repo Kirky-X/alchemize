@@ -146,35 +146,6 @@ async fn ipynb_array_form_outputs_and_values() {
     assert!(result.markdown.contains("ab"));
 }
 
-// -- xlsx branches (python-generated fixtures; see tests/fixtures) ---------
-
-#[tokio::test]
-async fn xlsx_multi_sheet_markdown_tables() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/xlsx_multi/sample.xlsx");
-    let converter = alchemize::infrastructure::document::XlsxConverter::new();
-    let result = converter.convert(Input::Path(path.clone())).await.unwrap();
-    assert!(
-        result.markdown.contains("## Alpha"),
-        "md: {}",
-        result.markdown
-    );
-    assert!(result.markdown.contains("## Beta"));
-}
-
-#[tokio::test]
-async fn xlsx_hidden_sheet_skipped() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/xlsx_hidden/sample.xlsx");
-    let converter = alchemize::infrastructure::document::XlsxConverter::new();
-    let result = converter.convert(Input::Path(path.clone())).await.unwrap();
-    assert!(
-        result.markdown.contains("no extractable data"),
-        "md: {}",
-        result.markdown
-    );
-}
-
 // -- video branches (no ffmpeg required) ----------------------------------------
 
 #[tokio::test]

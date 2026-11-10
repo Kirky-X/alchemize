@@ -10,7 +10,7 @@ use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 
-use super::shared::detect_encoding;
+use super::shared::{detect_encoding, fence_for};
 
 /// Extensions routed to this converter, with markdown language tags where a
 /// fenced code block applies. `None` = passthrough (no fence).
@@ -156,7 +156,8 @@ impl Converter for TextConverter {
             text
         } else if is_code_family(&ext) {
             let tag = lang_tag(&ext).unwrap_or("text");
-            format!("```{tag}\n{text}\n```\n")
+            let fence = fence_for(&text);
+            format!("{fence}{tag}\n{text}\n{fence}\n")
         } else {
             text
         };
@@ -231,8 +232,8 @@ mod tests {
         let src = "def main():\n    print('hi')";
         let input = Input::bytes(src.as_bytes().to_vec(), "app.py");
         let result = converter.convert(input).await.unwrap();
-        assert!(result.markdown.starts_with("```python\n"));
-        assert!(result.markdown.ends_with("```\n"));
+        assert!(result.markdown.starts_with("````python\n"));
+        assert!(result.markdown.ends_with("````\n"));
         assert!(result.markdown.contains("def main():"));
         assert_eq!(result.metadata["source_format"], "code");
     }
@@ -242,7 +243,7 @@ mod tests {
         let converter = TextConverter::new();
         let input = Input::bytes(b"key: value".to_vec(), "conf.yaml");
         let result = converter.convert(input).await.unwrap();
-        assert!(result.markdown.starts_with("```yaml\n"));
+        assert!(result.markdown.starts_with("````yaml\n"));
     }
 
     #[tokio::test]

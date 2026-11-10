@@ -20,12 +20,22 @@ use crate::infrastructure::document::{CsvConverter, TextConverter};
 ///   not per-converter.
 /// - `vision` / `transcribe`: optional providers; `None` degrades those
 ///   converters to metadata-only markdown.
+/// - `container_registry_slot`: deferred handle the container converters
+///   (tar/tgz/gz/xz/zst/7z) dispatch nested entries through. A caller that
+///   assembles its own registry must fill the slot with
+///   `Arc::downgrade(&registry)` after wrapping the registry in an `Arc`
+///   (the builder does this). If the slot stays empty, nested entries
+///   degrade to attachments with `metadata.registry_wired = false` — the
+///   archive itself still converts.
 pub fn default_converters(
     mineru: &Option<MineruConfig>,
     vision: Option<Arc<dyn VisionProvider>>,
     transcribe: Option<Arc<dyn TranscribeProvider>>,
     video_mode: VideoProcessingMode,
     html_deep: &Option<crate::application::builder::HtmlDeepEngineConfig>,
+    container_registry_slot: &std::sync::Arc<
+        std::sync::OnceLock<std::sync::Weak<crate::application::registry::ConverterRegistry>>,
+    >,
 ) -> Vec<Box<dyn Converter>> {
     let mut engines: Vec<Box<dyn Converter>> = Vec::new();
 
@@ -116,10 +126,10 @@ pub fn default_converters(
     engines.push(Box::new(
         crate::infrastructure::document::EpubConverter::new(),
     ));
-    // Spreadsheets (xlsx/xls/ods).
-    engines.push(Box::new(
-        crate::infrastructure::document::XlsxConverter::new(),
-    ));
+    // Spreadsheets (xlsx/xls/xlsb/ods): unsupported. The calamine backend
+    // was removed because its materialization (shared strings, styles/theme,
+    // ODS repeats and text expansion) cannot be bounded by a pre-check for
+    // untrusted input.
     // Notebooks.
     engines.push(Box::new(
         crate::infrastructure::document::IpynbConverter::new(),
@@ -137,28 +147,37 @@ pub fn default_converters(
     }
 
     // Recursive archive containers (tar/tgz/gz/xz/zst/7z) — feature gated.
+    // Nested conversion dispatches through the assembled registry; the slot
+    // is filled by the builder right after assembly (same post-assembly
+    // wiring as the zip facade). An empty slot degrades entries to
+    // attachments (`registry_wired: false`), so direct callers still work.
     #[cfg(feature = "containers")]
     {
-        let arc = std::sync::Arc::new(crate::application::registry::ConverterRegistry::new());
+        use crate::infrastructure::containers::RegistrySlot;
+        let slot: RegistrySlot = Arc::clone(container_registry_slot);
         engines.push(Box::new(
-            crate::infrastructure::containers::TarConverter::with_arc(arc.clone()),
+            crate::infrastructure::containers::TarConverter::with_registry_slot(Arc::clone(&slot)),
         ));
         engines.push(Box::new(
-            crate::infrastructure::containers::TarGzConverter::with_arc(arc.clone()),
+            crate::infrastructure::containers::TarGzConverter::with_registry_slot(Arc::clone(
+                &slot,
+            )),
         ));
         engines.push(Box::new(
-            crate::infrastructure::containers::GzConverter::with_arc(arc.clone()),
+            crate::infrastructure::containers::GzConverter::with_registry_slot(Arc::clone(&slot)),
         ));
         engines.push(Box::new(
-            crate::infrastructure::containers::XzConverter::with_arc(arc.clone()),
+            crate::infrastructure::containers::XzConverter::with_registry_slot(Arc::clone(&slot)),
         ));
         engines.push(Box::new(
-            crate::infrastructure::containers::ZstConverter::with_arc(arc.clone()),
+            crate::infrastructure::containers::ZstConverter::with_registry_slot(Arc::clone(&slot)),
         ));
         engines.push(Box::new(
-            crate::infrastructure::containers::SevenZConverter::with_arc(arc.clone()),
+            crate::infrastructure::containers::SevenZConverter::with_registry_slot(slot),
         ));
     }
+    #[cfg(not(feature = "containers"))]
+    let _ = container_registry_slot;
 
     // E-mail (eml) — feature gated.
     #[cfg(feature = "eml")]
@@ -188,10 +207,15 @@ pub fn default_converters(
         ));
     }
 
-    // ZipConverter needs a registry for nested conversion: built without it
-    // here (nested support wired when the registry is fully assembled — the
-    // CLI layer constructs zip with a clone of the final registry).
-    let _ = mineru; // wired by the MinerU migration task
+    // ZipConverter is wired at the facade level (`AlchemizeBuilder::build`):
+    // it needs the fully assembled registry for nested conversion and must
+    // stay out of the registry itself — otherwise a nested .zip entry would
+    // recurse without bound.
+    //
+    // Feature-off silencing: `mineru`/`html_deep` are consumed above only
+    // when their cargo feature is compiled in.
+    #[cfg(not(feature = "mineru"))]
+    let _ = mineru;
     #[cfg(not(feature = "html-deep"))]
     let _ = html_deep;
     engines

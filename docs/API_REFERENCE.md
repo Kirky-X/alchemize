@@ -37,7 +37,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 | feature | 门控 API | 默认 |
 | --- | --- | --- |
 | `mineru` | MinerU 引擎注册 + `MineruConfig` 装配 | 关 |
-| `anydoc` | office 全格式引擎（priority 15） | 关 |
 | `asr` | vecboost 转录门面 + Whisper 兼容后端 | 关 |
 | `full` | 以上全部 | 关 |
 
@@ -55,7 +54,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 | `with_video_mode(VideoProcessingMode)` | `AudioOnly` | `Gpu` / `AudioOnly`（抽轨转音频链）/ `Disabled` |
 | `with_asset_mode(AssetMode)` | `Dir` | 资产落盘模式 |
 | `with_no_remote()` | false | `is_remote()==true` 的引擎不进入候选链 |
-| `with_max_file_size(usize)` | 104857600 | ⚠️ 当前引擎装配（`engines.rs`）未消费该值——限制未生效；MinerU precision 客户端自身有 200 MB 上限。预留接口，勿依赖 |
+| `with_max_file_size(usize)` | 104857600 | 输入大小上限（字节）：facade 在任何分发前拦截超限输入；ZIP 转换器用同一上限作为嵌套条目上限。tar/tgz/7z 的内层条目不受此值约束（单条目 64 MiB、整包 256 MiB）；gz/xz/zst 单流解压上限固定 64 MiB。MinerU precision 客户端自身另有 200 MB 上限 |
 | `build()` | — | 组装默认引擎集并返回 `Alchemize` |
 
 `Alchemize` 方法：
@@ -96,6 +95,21 @@ pub struct MineruConfig {
 | `len()` / `is_empty()` | 成员数 |
 | `availability()` | doctor 数据源 |
 | `converters()` | `&dyn Converter` 迭代器 |
+
+`infrastructure::engines::default_converters(...)`（面向自定义装配；签名随 feature 变化）：
+
+```rust
+pub fn default_converters(
+    mineru: &Option<MineruConfig>,
+    vision: Option<Arc<dyn VisionProvider>>,
+    transcribe: Option<Arc<dyn TranscribeProvider>>,
+    video_mode: VideoProcessingMode,
+    html_deep: &Option<HtmlDeepEngineConfig>,
+    container_registry_slot: &Arc<OnceLock<Weak<ConverterRegistry>>>,
+) -> Vec<Box<dyn Converter>>
+```
+
+装配完成后必须执行 `container_registry_slot.set(Arc::downgrade(&registry))`；否则 tar/tgz/gz/xz/zst/7z 的内层条目降级为附件（`metadata.registry_wired=false`）。`AlchemizeBuilder::build()` 已包含这一步。返回列表中不包含任何电子表格引擎（xlsx/xls/xlsb/ods 不支持）。
 
 ### 输入与格式检测
 
@@ -229,11 +243,6 @@ URL 校验拒绝的六类原因：`InvalidScheme`（非 HTTPS）、`LoopbackAddr
 - 内部契约：agent/precision 双客户端按文件大小选择（factory）；轮询退避经 limiteron；响应体积分级限量；下载 URL 过 `ValidatedFileUrl` SSRF 校验。
 - 环境变量：`ALCHEMIZE_MINERU_URL`（端点）、`MINERU_API_TOKEN`（precision bearer token）。
 
-### anydoc（`anydoc` 特性）
-
-- 装配产物：`anydoc` 引擎，priority 15（压过原生 office 解析），覆盖 doc/docm/pps/pot/xlsm/xlsb/odp/rtf/pdf 等全格式，含旧版二进制 Office。
-- 产出 `quality=local_full`；图片字节按文档序导出，经自研 `anydoc_render`（消费公开的 `anydoc::model`）渲染为 GFM 引用。
-
 ### ASR（`asr` 特性）
 
 - 装配产物：转录提供方接入 audio/video 引擎。默认 provider 为 vecboost 门面（Qwen3-ASR ONNX 三件套 + silero VAD，本地推理）；Whisper 兼容云端后端仅在显式注入配置时激活。
@@ -275,8 +284,8 @@ async fn main() -> Result<(), alchemize::AlchemizeError> {
 ### 引擎偏好
 
 ```rust
-// 把 anydoc 提到队首；名称未命中静默回落默认链
-let result = alch.convert_pref(&input, Some("anydoc")).await?;
+// 把 pdf 引擎提到队首；名称未命中静默回落默认链
+let result = alch.convert_pref(&input, Some("pdf")).await?;
 ```
 
 ### 资产模式
@@ -349,7 +358,7 @@ impl TranscribeProvider for MyAsr {
 
 ### 安全注意事项
 
-- 凭据只经环境变量（`MINERU_API_TOKEN`）注入，不写入任何配置文件或日志。
+- 凭据来自环境变量（`MINERU_API_TOKEN`）或 `MineruConfig::api_token`；三通路脱敏，不写入日志。
 - 打印/序列化 `MineruConfig` 安全（三通路脱敏），但自定义类型含敏感字段时应效仿手工 `Debug` + 单测钉住的做法。
 - 不可信环境开启 `with_no_remote()`，进程零网络出口。
 
@@ -357,7 +366,8 @@ impl TranscribeProvider for MyAsr {
 
 - `metadata` 为 `Null`：直接经 `Converter` 实现产出（未过注册表）才会出现；门面路径必注入 `converter`。
 - 引擎没出现在 `availability()`：feature 未编译或（MinerU）未配置端点——根本未注册。
-- zip 输入报 `UnsupportedFormat("zip")`：编译时未开 zip 递归支持（门面在 `zip` 特性缺省时返回该错误）。
+- zip 输入报 `UnsupportedFormat("zip")`：仅当直接调用 `default_converters` 自建注册表（未走 `AlchemizeBuilder`）时出现——zip 转换器在门面层接线，不在注册表内（避免嵌套 zip 自递归）。
+- 容器（tar/tgz/gz/xz/zst/7z）内层文件全部降级为附件、`metadata.registry_wired` 为 `false`：直接调用 `default_converters` 后没有回填容器注册表槽。装配完成后须执行 `slot.set(Arc::downgrade(&registry))`；`AlchemizeBuilder::build()` 已自动完成。
 
 ## 📚 相关文档
 
