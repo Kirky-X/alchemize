@@ -1,0 +1,128 @@
+# Rust Release：tag (v*) 触发 → 多平台构建 → GitHub Release → 条件发布 crates.io
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write  # 创建 GitHub Release
+
+jobs:
+  # 前置校验两段式（借鉴 cargo-release dry-run / semantic-release Verify Conditions）：
+  # tag 打错或版本不一致在这里失败，不进入构建与发布
+  verify:
+    name: Verify tag ↔ Cargo.toml version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      # 正则不含 build metadata（v1.2.3+build.5 拒绝）——9 语言模板同一约定，改需同步
+      - name: Tag format (v<semver>)
+        run: |
+          echo "${GITHUB_REF_NAME}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
+            || { echo "::error::tag 须形如 v1.2.3 或 v1.2.3-rc.1，实际: ${GITHUB_REF_NAME}"; exit 1; }
+      - name: Version consistency
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          MANIFEST_VERSION="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          if [ "$TAG_VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与 Cargo.toml version ${MANIFEST_VERSION} 不一致——先 bump 版本再打 tag"
+            exit 1
+          fi
+          echo "OK: tag ${GITHUB_REF_NAME} ↔ Cargo.toml ${MANIFEST_VERSION}"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: swatinem/rust-cache@v2
+      - name: Build release
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          STAGE=target/release-stage
+          mkdir -p "$STAGE"
+          cp "target/${{ matrix.target }}/release/${{ github.event.repository.name }}" "$STAGE/" 2>/dev/null || true
+          cp README.md LICENSE* "$STAGE/" 2>/dev/null || true
+          tar czf "${{ github.event.repository.name }}-${{ matrix.target }}.tar.gz" -C "$STAGE" .
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          STAGE=target/release-stage
+          mkdir -p "$STAGE"
+          cp "target/${{ matrix.target }}/release/${{ github.event.repository.name }}.exe" "$STAGE/" 2>/dev/null || true
+          cp README.md LICENSE* "$STAGE/" 2>/dev/null || true
+          7z a "${{ github.event.repository.name }}-${{ matrix.target }}.zip" "$STAGE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            *.tar.gz
+            *.zip
+
+  github-release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Generate checksums.txt（下载侧可校验完整性；产物签名/出处证明见 references/registry-secrets.md）
+        run: |
+          cd artifacts
+          find . -type f ! -name 'checksums.txt' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > checksums.txt
+          cat checksums.txt
+      - name: Create Release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**/*
+
+  # 仅当配置了 CARGO_REGISTRY_TOKEN 才发布到 crates.io；否则跳过，不报错。
+  # 条件放 step 级：job 级 if 的可用 context 不含 env（恒 false 静默 no-op），
+  # step 级 if 可以读 env context。
+  publish-crates:
+    name: Publish to crates.io (条件)
+    needs: github-release
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@v4
+        if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
+      - name: cargo publish
+        if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
+            echo "CARGO_REGISTRY_TOKEN not set — skipping crates.io publish (no error)"
+            exit 0
+          fi
+          cargo publish --locked
+        # token 由 step env 注入、cargo 原生读取；不写进 --token 参数
+        # （避免 token 出现在 runner 进程 argv）。

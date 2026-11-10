@@ -1,0 +1,51 @@
+# cargo-deny 配置 — `cargo deny check` 按此校验 漏洞/许可证/禁用源/重复依赖。
+# 完整字段见: https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+db-urls = ["https://github.com/RustSec/advisory-db"]
+yanked = "deny"
+# 本文件是 advisory 忽略清单的单一事实源：CI 的 audit-check ignore 由本文件
+# grep 生成（ci.yml security job），`.cargo/audit.toml` 为同步镜像（cargo-audit
+# 只加载该路径或 ~/.cargo/audit.toml，仓库根目录同名文件不会被读取）。
+# 约束：下方注释只允许出现被 ignore 的 RUSTSEC 编号（会被 grep 命中）。
+# 每条 ignore 必须带"复核日期"，到期重新评估是否仍需忽略。
+# 临时接受（基于 Cargo.lock 实锁版本）：
+# - libsqlite3-sys RUSTSEC-2026-0459 (CVE-2026-119375, medium)：修复需 libsqlite3-sys
+#   >=0.39，但 limiteron 0.3.0-rc.10 → dbnexus → sea-orm 2.0 → sqlx 0.9 链把
+#   libsqlite3-sys 封顶在 <0.38（native links 冲突），本仓 rusqlite 天花板 0.39/0.37
+#   已是可达上限。解除条件：limiteron 发布升级 sqlx 链的新版后，本仓 bump
+#   limiteron + rusqlite（≥0.40）。复核：随 limiteron 新版。
+# - paste RUSTSEC-2024-0436 (unmaintained)：biblatex + tokenizers（vecboost 树）
+#   间接依赖（paste 1.0.15），无安全升级路径。复核：2026-12。
+# - adler RUSTSEC-2025-0056 (unmaintained)：miniz_oxide 0.3/0.4 旧版传递依赖
+#   钉死（上游要求 <0.8），无升级路径。复核：2026-12。
+# - bincode RUSTSEC-2025-0141 (unmaintained)：character_converter（vecboost 树）
+#   1.3.3 间接依赖，bincode 2.x 为 API 破坏性上游变更。复核：2026-12。
+# - number_prefix RUSTSEC-2025-0119 (unmaintained)：indicatif（vecboost 进度条树）
+#   0.4.0 间接依赖，无安全升级路径。复核：2026-12，随 vecboost 上游更换进度条复评。
+ignore = [
+    "RUSTSEC-2026-0459",
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2025-0056",
+    "RUSTSEC-2025-0141",
+    "RUSTSEC-2025-0119",
+]
+
+[licenses]
+# 允许的宽松许可证；新增非宽松许可证需在此放行
+allow = [
+    "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause", "BSD-2-Clause", "ISC",
+    "Unicode-3.0", "Unicode-DFS-2016",
+    "Zlib", "CC0-1.0", "MPL-2.0", "0BSD",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

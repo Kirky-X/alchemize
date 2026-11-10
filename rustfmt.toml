@@ -1,0 +1,3 @@
+# rustfmt 配置 — `cargo fmt` 按此格式化。
+edition = "2021"
+max_width = 100

@@ -42,13 +42,10 @@ struct Hop {
     filter: &'static str,
 }
 
-fn hop_for(ext: &str) -> Hop {
-    match ext {
-        // Word 97-2003 and RTF both round-trip through WordprocessingML.
-        _ => Hop {
-            target: "docx",
-            filter: "Office Open XML Text",
-        },
+fn hop_for(_ext: &str) -> Hop {
+    Hop {
+        target: "docx",
+        filter: "Office Open XML Text",
     }
 }
 
@@ -251,9 +248,9 @@ mod tests {
         assert_eq!(p.supported_extensions(), &["ppt", "pps", "pot"]);
     }
 
-    #[test]
-    fn availability_degrades_without_soffice() {
-        let _serial = crate::test_support::env_lock();
+    #[tokio::test]
+    async fn availability_degrades_without_soffice() {
+        let _serial = crate::test_support::env_lock().await;
         let saved = std::env::var("PATH").ok();
         unsafe { std::env::set_var("PATH", "/nonexistent-dir") };
         match LegacyOfficeConverter::new().availability() {
@@ -278,7 +275,7 @@ mod tests {
     async fn missing_soffice_errors_instead_of_silently_degrading() {
         // availability() reports Unavailable, so the registry skips this
         // engine; a direct convert() call must still fail loudly.
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         let saved = std::env::var("PATH").ok();
         unsafe { std::env::set_var("PATH", "/nonexistent-dir") };
         let err = LegacyOfficeConverter::new()

@@ -174,7 +174,7 @@ fn extract_all(
     let assets = namer.into_assets();
     let mut page_refs: BTreeMap<u32, Vec<String>> = BTreeMap::new();
     for (page, entry) in &extraction.positions {
-        if let Some(r) = entry_ref.get(*entry as usize)
+        if let Some(r) = entry_ref.get(*entry)
             && !r.is_empty()
         {
             page_refs.entry(*page).or_default().push(r.clone());
@@ -270,12 +270,10 @@ fn extract(
         for line in &lines {
             if let Some(pb) = prev_bottom {
                 let gap = line.top - pb;
-                if gap > median_size * 1.6 {
-                    if !para.is_empty() {
-                        markdown.push_str(para.trim_end());
-                        markdown.push_str("\n\n");
-                        para.clear();
-                    }
+                if gap > median_size * 1.6 && !para.is_empty() {
+                    markdown.push_str(para.trim_end());
+                    markdown.push_str("\n\n");
+                    para.clear();
                 }
             }
             let is_heading =
@@ -326,17 +324,20 @@ mod tests {
     /// Serializes env-var mutation: parallel tests share the process
     /// environment, so the missing-library tests flipping
     /// ALCHEMIZE_PDFIUM_PATH would race with the real-library probe.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    ///
+    /// Async-aware (`tokio::sync::Mutex`): some tests intentionally hold the
+    /// guard across `await` points (the pdfium engine reads the env var
+    /// lazily during conversion), and a std guard held across `await` both
+    /// blocks the executor and fails `clippy::await_holding_lock`.
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    async fn env_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().await
     }
 
-    #[test]
-    fn missing_library_reports_unavailable_with_hint() {
-        let _env = env_guard();
+    #[tokio::test]
+    async fn missing_library_reports_unavailable_with_hint() {
+        let _env = env_guard().await;
         let saved = std::env::var(ENV_PDFIUM_PATH).ok();
         unsafe { std::env::set_var(ENV_PDFIUM_PATH, "/nonexistent/libpdfium.dylib") };
         let conv = PdfiumConverter::new();
@@ -366,7 +367,7 @@ mod tests {
 
     #[tokio::test]
     async fn convert_without_library_errors_cleanly() {
-        let _env = env_guard();
+        let _env = env_guard().await;
         let saved = std::env::var(ENV_PDFIUM_PATH).ok();
         unsafe { std::env::set_var(ENV_PDFIUM_PATH, "/nonexistent/libpdfium.dylib") };
         let conv = PdfiumConverter::new();
@@ -379,7 +380,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires pdfium library (ALCHEMIZE_PDFIUM_PATH or ~/.cache/alchemize/lib)"]
     async fn real_pdf_extracts_text() {
-        let _env = env_guard();
+        let _env = env_guard().await;
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/real/real.pdf");
         let conv = PdfiumConverter::new();
@@ -399,7 +400,7 @@ mod tests {
     #[ignore = "requires pdfium library (ALCHEMIZE_PDFIUM_PATH or ~/.cache/alchemize/lib)"]
     async fn image_pdf_produces_asset_and_reference() {
         use lopdf::{Stream, dictionary};
-        let _env = env_guard();
+        let _env = env_guard().await;
         // 4x4 JPEG via the image crate (png feature set includes jpeg).
         let img = image::DynamicImage::ImageRgb8(image::ImageBuffer::from_fn(8, 8, |x, y| {
             image::Rgb([(x as u8) * 30, (y as u8) * 30, 255u8])

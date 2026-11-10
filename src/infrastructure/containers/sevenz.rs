@@ -231,7 +231,7 @@ mod fixture_tests {
         let (registry, _slot) = registry_with_text_and_slot();
         let bytes = sevenz_bytes(&[
             ("notes.txt", b"hello from 7z".as_slice()),
-            ("blob.bin", &[0x00, 0xFF, 0x10].as_slice()),
+            ("blob.bin", [0x00, 0xFF, 0x10].as_slice()),
         ]);
         let result = registry
             .convert(&Input::bytes(bytes, "bundle.7z"))

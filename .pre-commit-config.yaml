@@ -1,0 +1,50 @@
+# pre-commit 配置（pre-commit framework）。启用: uv tool install pre-commit && pre-commit install
+# 与 lefthook.yml 功能等价，二选一即可（切换前先卸载旧的）。
+repos:
+  # 通用质量 hooks（语言无关）
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        # 语料 fixture 按字节保真：文本规则改写会污染用例（同 CodeNexus fuzz/corpus 惯例）
+        exclude: "^tests/fixtures/"
+      - id: end-of-file-fixer
+        exclude: "^tests/fixtures/"
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      - id: detect-private-key
+
+  # 拼写检查 —— 只检查不写：hook 默认 --write-changes 会静默改码
+  # （曾把 FlateDecode→FlatDecode、ODF→OF、café→calfé，见 deny.toml/typos 历史）。
+  # 领域词白名单见 .typos.toml。
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.28.0
+    hooks:
+      - id: typos
+        args: [--diff]
+
+  # Rust 专属（local，用本机 cargo）
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: bash -c 'cargo fmt --all -- --check'
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy (-D warnings)
+        entry: bash -c 'cargo clippy --all-targets --all-features -- -D warnings'
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-deny
+        name: cargo deny check (license/advisory/ban)
+        entry: >-
+          bash -c 'if ! command -v cargo-deny >/dev/null 2>&1; then echo "→ cargo-deny 未安装: cargo install cargo-deny && cargo deny init"; exit 1; fi; cargo deny check'
+        language: system
+        files: 'Cargo\.(toml|lock)'
+        pass_filenames: false

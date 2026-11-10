@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn reset_clears_state() {
         let mut dedup = FrameDeduplicator::new();
-        dedup.last_hash = Some(average_hash(&vec![0u8; 8 * 8 * 3], 8, 8));
+        dedup.last_hash = Some(average_hash(&[0u8; 8 * 8 * 3], 8, 8));
         dedup.last_accepted_frame = Some(vec![1, 2, 3]);
         dedup.reset();
         assert!(dedup.last_hash.is_none());

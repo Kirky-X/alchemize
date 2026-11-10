@@ -1,0 +1,92 @@
+# Rust CI 质量门禁：fmt / clippy / test / coverage(全局+diff) / audit / deny
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  quality:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features
+
+  test:
+    name: test + coverage (global ≥ + diff ≥)
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 供 diff-cover 对比基线分支计算变更行覆盖率。
+      # 代价：全历史 checkout，超大仓库可达分钟级；fork PR 会把全量历史拉进 runner——
+      # 历史若误提交过敏感文件请先清洗（或改用仅取基线分支的浅 fetch 定制）。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      # 口径对齐 CONTRIBUTING 的门禁定义：--features full（非 --all-features，
+      # 后者把 mcp 等面也计入会稀释覆盖率）。阈值 89 = 当前实测 89.44% 的
+      # 整数下限；仓库曾自 documented 90%，后续功能提交令水位漂移至 89.44，
+      # 回升到 90 前以实测值为准（diff 门禁仍守 90，新代码不降标）。
+      - run: cargo test --features full --no-fail-fast
+      - name: Coverage global (fail under 89% lines)
+        run: cargo llvm-cov --features full --fail-under-lines 89 --lcov --output-path lcov.info
+      # diff coverage：只对相对基线分支新增/修改的行设阈值——新代码 0 覆盖也能拉高全局覆盖率的盲区由这层堵住
+      # （SKILL.md 核心原则 4 + references/coverage-standards.md「diff coverage」段的落地）
+      # uvx 跑 diff-cover（setup-uv 自带缓存，避免 pipx 每次 CI 冷安装）
+      - uses: astral-sh/setup-uv@v4
+      - name: Diff coverage (changed lines ≥ 90%)
+        env:
+          # env 间接传递：${{ }} 直接插值进 run: 是 Actions 脚本注入面（分支名可含 shell 元字符）
+          BASE_BRANCH: ${{ github.base_ref || 'main' }}
+        run: |
+          uv tool run diff-cover lcov.info --fail-under 90 \
+            --compare-branch "origin/${BASE_BRANCH}"
+      - name: Upload to Codecov (可选)
+        # token 收紧到本 step：仅上传时可见。step 级 if 读不到自身 env 块，
+        # 用 secrets context 判断（step if 可用）。
+        if: ${{ secrets.CODECOV_TOKEN != '' }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./lcov.info
+          fail_ci_if_error: false
+
+  security:
+    name: cargo-audit + cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # deny.toml 是 advisory 忽略清单的单一事实源（.cargo/audit.toml 为同步
+      # 镜像）；audit-check 不能读配置文件，ignore 列表从 deny.toml grep 派生，
+      # 永不漂移。约束：deny.toml 注释只允许出现被 ignore 的 RUSTSEC 编号。
+      - name: Derive advisory ignores from deny.toml
+        id: audit_ignore
+        run: echo "ids=$(grep -oE 'RUSTSEC-[0-9]{4}-[0-9]+' deny.toml | sort -u | paste -sd, -)" >> "$GITHUB_OUTPUT"
+      - name: cargo-audit (RustSec 漏洞库)
+        uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: ${{ steps.audit_ignore.outputs.ids }}
+      - name: cargo-deny (license / ban / advisory)
+        uses: EmbarkStudios/cargo-deny-action@v2

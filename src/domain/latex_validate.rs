@@ -74,7 +74,7 @@ pub fn check_delimiter_parity(md: &str) -> Vec<LatexWarning> {
             _ => i += 1,
         }
     }
-    if singles % 2 != 0 {
+    if !singles.is_multiple_of(2) {
         vec![LatexWarning {
             rule: "delimiter_parity",
             detail: format!(
@@ -135,7 +135,7 @@ pub fn check_environment_closure(md: &str) -> Vec<LatexWarning> {
 /// no partner anywhere is an orphan.
 pub fn check_orphan_display_fences(md: &str) -> Vec<LatexWarning> {
     let count = count_unescaped_display(md);
-    if count % 2 != 0 {
+    if !count.is_multiple_of(2) {
         vec![LatexWarning {
             rule: "orphan_display_fence",
             detail: format!("odd number of `$$` fences ({count})"),

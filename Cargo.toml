@@ -146,7 +146,7 @@ sevenz-rust2 = { version = "0.25", default-features = false, features = [
 
 # 结构化数据（feature data）
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "lz4", "zstd", "flate2-rust_backend", "brotli"], optional = true }
-rusqlite = { version = "0.37", default-features = false, features = ["bundled"], optional = true }
+rusqlite = { version = "0.39", default-features = false, features = ["bundled"], optional = true }
 biblatex = { version = "0.12", default-features = false, optional = true }
 
 # 邮件（feature eml）：mail-parser 是活跃维护的 MIME 解析器（mail crate 的

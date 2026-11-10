@@ -77,6 +77,13 @@ impl Input {
         }
     }
 
+    /// Whether the input is known to be empty (0 bytes / metadata reports 0).
+    /// `None` (unknown size) is not "empty" — callers let the read fail
+    /// naturally. Companion to [`Input::len`] (`clippy::len_without_is_empty`).
+    pub fn is_empty(&self) -> bool {
+        matches!(self.len(), Some(0))
+    }
+
     /// Return the file extension (lowercase, without dot).
     ///
     /// Priority: explicit extension field > extension from filename.
@@ -585,7 +592,7 @@ mod tests {
             v.extend_from_slice(payload);
             v
         }
-        let odf = {
+        let of = {
             // First local header: stored `mimetype` entry with the ODF
             // vendor prefix as its content.
             let mut v = b"PK\x03\x04".to_vec();
@@ -596,7 +603,7 @@ mod tests {
         };
         let cases = [
             (b"%PDF-1.7 header".to_vec(), InputFormat::Pdf),
-            (odf, InputFormat::Odt),
+            (of, InputFormat::Odt),
             (pkg(b"word/document.xml"), InputFormat::Docx),
             (pkg(b"ppt/slides/slide1.xml"), InputFormat::Pptx),
             (pkg(b"xl/workbook.xml"), InputFormat::Xlsx),
@@ -901,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn detect_magic_bytes_odf_zip() {
+    fn detect_magic_bytes_of_zip() {
         // ODF zip: stored `mimetype` entry first, content begins with the
         // OASIS vendor prefix (name and content adjacent in the header).
         let mut data = b"PK\x03\x04".to_vec();

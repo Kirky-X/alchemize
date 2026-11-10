@@ -6,3 +6,40 @@ specmark/
 # 本地 OCR 扫描报告与运行日志（证据保留在本地，不入 git）
 logs/
 .zcode/
+
+# autoresearch 等本地实验数据（.auto/log.jsonl、measure.sh、checks.sh）
+.auto/
+
+# macOS 系统残留（外置盘上 Finder 会生成 ._ AppleDouble 边车文件）
+.DS_Store
+._*
+
+# Windows 系统残留（公开仓库跨平台克隆）
+Thumbs.db
+desktop.ini
+
+# 编辑器/IDE 本地状态（个人偏好，不入库）
+.idea/
+.vscode/
+*.swp
+*~
+
+# 本地密钥与环境变量（仅放行 example 模板）
+.env*
+!.env.example
+
+# 覆盖率与性能剖析产物（cargo-llvm-cov / flamegraph；criterion 落在 target/ 内）
+lcov.info
+cobertura.xml
+codecov.json
+*.profraw
+flamegraph.svg
+perf.data*
+
+# --- rust ---
+**/*.rs.bk
+
+# 注: Cargo.lock — 二进制项目应提交(已默认)；库项目如需忽略请取消下行注释
+# Cargo.lock
+*.swo
+*.log

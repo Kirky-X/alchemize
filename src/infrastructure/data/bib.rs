@@ -100,10 +100,10 @@ fn render_entry(entry: &Entry) -> String {
         .ok()
         .map(|v| v.format_verbatim())
         .or_else(|| entry.book_title().ok().map(|v| v.format_verbatim()));
-    if let Some(venue) = venue {
-        if !venue.trim().is_empty() {
-            line.push_str(&format!(" {venue}."));
-        }
+    if let Some(venue) = venue
+        && !venue.trim().is_empty()
+    {
+        line.push_str(&format!(" {venue}."));
     }
 
     line
@@ -163,10 +163,10 @@ fn first_year_in(text: &str) -> Option<i32> {
             start = None;
         }
     }
-    if let Some(s) = start {
-        if bytes.len() - s == 4 {
-            return text[s..].parse().ok();
-        }
+    if let Some(s) = start
+        && bytes.len() - s == 4
+    {
+        return text[s..].parse().ok();
     }
     None
 }

@@ -1,0 +1,23 @@
+# typos 领域词白名单 —— 下列"疑似拼写错误"实为刻意命名：
+#   ODF/odf = OpenDocument Format；flate/FlateDecode/flate2 = zlib 封装、PDF 流
+#   过滤器名与 crate 名；multline = LaTeX 多行公式环境名；caf = café 测试语料
+#   的词元；unparseable = 正确拼法。
+# 只检查不写改动：.pre-commit-config.yaml 的 typos hook 带 args: [--diff]。
+# 语料目录整体排除：真实语料含斯洛伐克语等非英语内容，拼写检查只会误报
+[files]
+extend-exclude = ["tests/fixtures/"]
+
+[default.extend-words]
+fo = "fo"   # XSL-FO 命名空间前缀（ODF XML 属性）
+ODF = "ODF"
+Odf = "Odf"
+odf = "odf"
+Flate = "Flate"
+flate = "flate"
+FlateDecode = "FlateDecode"
+flate2 = "flate2"
+multline = "multline"
+caf = "caf"
+unparseable = "unparseable"
+# DecodeParms/Parms = PDF 流过滤器解码参数字典（PDF 规范词）
+Parms = "Parms"

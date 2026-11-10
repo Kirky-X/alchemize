@@ -1,0 +1,10 @@
+# cargo-audit 镜像配置 — 与 deny.toml [advisories].ignore 保持同步（deny.toml 是单一事实源）。
+# cargo-audit 只读取此路径或 ~/.cargo/audit.toml，仓库根目录的同名文件不会被加载。
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0459",
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2025-0056",
+    "RUSTSEC-2025-0141",
+    "RUSTSEC-2025-0119",
+]

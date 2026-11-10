@@ -18,14 +18,19 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Test-only helpers shared by unit tests that touch process-global state.
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::sync::{Mutex, MutexGuard};
+    use tokio::sync::{Mutex, MutexGuard};
 
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     /// Serialize tests that read or write the process-global environment
     /// (`PATH`): `set_var` affects every thread, so unsynchronized swaps make
     /// unrelated tests observe a foreign `PATH`.
-    pub(crate) fn env_lock() -> MutexGuard<'static, ()> {
-        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    ///
+    /// Async-aware (`tokio::sync::Mutex`): some callers intentionally hold
+    /// the guard across `await` points to serialize whole conversions, and a
+    /// std guard held across `await` both blocks the executor and fails
+    /// `clippy::await_holding_lock`.
+    pub(crate) async fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().await
     }
 }

@@ -676,7 +676,7 @@ fn collect_all_text(xml: &[u8]) -> String {
 /// (the DOCX convention) and collect named assets in first-reference
 /// order. Identical bytes reuse the first reference.
 fn rewrite_image_refs(
-    blocks: &mut Vec<Block>,
+    blocks: &mut [Block],
     doc_assets: &[crate::domain::document::Asset],
     refs: &mut HashMap<usize, String>,
     collected: &mut Vec<PptxAsset>,

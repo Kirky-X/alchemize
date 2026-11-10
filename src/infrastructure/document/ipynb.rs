@@ -60,15 +60,15 @@ impl Converter for IpynbConverter {
         let mut markdown_cell_count = 0;
 
         // Add notebook metadata header if available
-        if let Some(ref metadata) = notebook.metadata {
-            if let Some(ref kernel) = metadata.kernelspec {
-                markdown_parts.push(format!(
-                    "# Jupyter Notebook ({})\n\n",
-                    crate::infrastructure::document::shared::escape_markdown_label(
-                        &kernel.display_name
-                    )
-                ));
-            }
+        if let Some(ref metadata) = notebook.metadata
+            && let Some(ref kernel) = metadata.kernelspec
+        {
+            markdown_parts.push(format!(
+                "# Jupyter Notebook ({})\n\n",
+                crate::infrastructure::document::shared::escape_markdown_label(
+                    &kernel.display_name
+                )
+            ));
         }
 
         // Process each cell
@@ -113,18 +113,16 @@ impl Converter for IpynbConverter {
                                             "**Output:**\n{fence}\n{text_content}\n{fence}\n"
                                         ));
                                     }
-                                } else if output.output_type == "execute_result"
-                                    || output.output_type == "display_data"
+                                } else if (output.output_type == "execute_result"
+                                    || output.output_type == "display_data")
+                                    && let Some(data) = output.data
+                                    && let Some(text_plain) = data.get("text/plain")
                                 {
-                                    if let Some(data) = output.data {
-                                        if let Some(text_plain) = data.get("text/plain") {
-                                            let text_content = extract_json_string(text_plain);
-                                            let fence = fence_for(&text_content);
-                                            markdown_parts.push(format!(
-                                                "**Output:**\n{fence}\n{text_content}\n{fence}\n"
-                                            ));
-                                        }
-                                    }
+                                    let text_content = extract_json_string(text_plain);
+                                    let fence = fence_for(&text_content);
+                                    markdown_parts.push(format!(
+                                        "**Output:**\n{fence}\n{text_content}\n{fence}\n"
+                                    ));
                                 }
                             }
                         }
@@ -422,7 +420,7 @@ async fn malformed_cells_fail_with_message() {
 
 #[test]
 fn default_matches_new() {
-    let _ = IpynbConverter::default();
+    let _ = IpynbConverter;
 }
 
 #[tokio::test]

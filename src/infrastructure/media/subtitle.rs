@@ -289,16 +289,15 @@ fn parse_lrc_timestamp(tag: &str) -> Option<u64> {
         return None;
     }
     let hundredths: u64 = frac
-        .map(|f| {
+        .and_then(|f| {
             let f = f.trim();
-            let scaled = if f.len() == 1 {
+
+            if f.len() == 1 {
                 f.parse::<u64>().ok().map(|v| v * 10)
             } else {
                 f.get(..2).and_then(|v| v.parse().ok())
-            };
-            scaled
+            }
         })
-        .flatten()
         .unwrap_or(0);
     Some(minutes * 60_000 + seconds * 1000 + hundredths * 10)
 }

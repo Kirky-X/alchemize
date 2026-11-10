@@ -483,7 +483,7 @@ mod tests {
         let table = parse_styles(styles.as_bytes());
         assert_eq!(table.defaults.italic, Some(true));
         assert!(
-            table.styles.get("NoList").is_none(),
+            !table.styles.contains_key("NoList"),
             "numbering styles must not enter the paragraph table"
         );
         let (props, _, _) = table.resolve_paragraph("P");
@@ -567,7 +567,7 @@ mod tests {
         let (_, _, no_digits) = table.resolve_paragraph("NoDigits");
         assert_eq!(no_digits, Some(2));
         // A style without w:styleId is dropped instead of stored under "".
-        assert!(table.styles.get("").is_none());
+        assert!(!table.styles.contains_key(""));
     }
 
     #[test]

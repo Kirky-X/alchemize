@@ -37,10 +37,10 @@ pub fn default_converters(
         std::sync::OnceLock<std::sync::Weak<crate::application::registry::ConverterRegistry>>,
     >,
 ) -> Vec<Box<dyn Converter>> {
-    let mut engines: Vec<Box<dyn Converter>> = Vec::new();
-
-    // Text family (plain text + code/config fence).
-    engines.push(Box::new(TextConverter::new()));
+    let mut engines: Vec<Box<dyn Converter>> = vec![
+        // Text family (plain text + code/config fence).
+        Box::new(TextConverter::new()),
+    ];
     // Self-hosted deep DOCX parser (priority 18): style cascade, footnotes,
     // merged cells, drawing assets. Above the native docx (10).
     engines.push(Box::new(
@@ -107,12 +107,12 @@ pub fn default_converters(
 
     // MinerU remote tier (config-gated; falls through to local on failure).
     #[cfg(feature = "mineru")]
-    if let Some(cfg) = mineru {
-        if let Ok(conv) = crate::infrastructure::remote::mineru::MinerUConverter::new(
+    if let Some(cfg) = mineru
+        && let Ok(conv) = crate::infrastructure::remote::mineru::MinerUConverter::new(
             crate::infrastructure::remote::mineru::MinerUHttpConfig::from_config(cfg),
-        ) {
-            engines.push(Box::new(conv));
-        }
+        )
+    {
+        engines.push(Box::new(conv));
     }
     engines.push(Box::new(
         crate::infrastructure::document::PptxConverter::new(),

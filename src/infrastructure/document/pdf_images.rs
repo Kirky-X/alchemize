@@ -404,6 +404,12 @@ fn encode_png(samples: Vec<u8>, width: u32, height: u32, channels: usize) -> Opt
     Some(out.into_inner())
 }
 
+/// Resolve an optional dictionary entry into an integer.
+fn int_of(obj: Option<&Object>, doc: &Document) -> Option<i64> {
+    let obj = doc.dereference(obj?).ok()?.1;
+    obj.as_i64().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,14 +500,31 @@ mod tests {
 
     #[test]
     fn flate_samples_reencode_to_png() {
-        // lopdf's own compress() produces the FlateDecode fixture, so this
-        // test exercises the limit-bounded decode path without pulling flate2.
-        let mut s = Stream::new(image_dict(None, "DeviceRGB"), (0..48u8).collect());
-        s.compress().unwrap();
+        // Hand-built zlib stream (stored block): lopdf's own compress() only
+        // sets Filter when it actually shrinks the payload, so a 48-byte
+        // fixture would silently skip compression and never reach the
+        // FlateDecode match arm. A stored-block zlib wrapper is deterministic
+        // and dependency-free, and forces the limit-bounded decode path.
+        let samples: Vec<u8> = (0..48u8).collect(); // 4x4 RGB
+        let mut zlib = vec![0x78, 0x01]; // CMF=deflate/32K, FLG check bits
+        zlib.push(0x00); // non-final stored block
+        zlib.extend_from_slice(&(samples.len() as u16).to_le_bytes());
+        zlib.extend_from_slice(&(!(samples.len() as u16)).to_le_bytes());
+        zlib.extend_from_slice(&samples);
+        let (mut a1, mut a2) = (1u32, 0u32); // adler32
+        for b in &samples {
+            a1 = (a1 + *b as u32) % 65521;
+            a2 = (a2 + a1) % 65521;
+        }
+        zlib.extend_from_slice(&((a2 << 16) | a1).to_be_bytes());
+        let mut s = Stream::new(image_dict(Some("FlateDecode"), "DeviceRGB"), zlib);
+        s.dict.set("Filter", Object::Name(b"FlateDecode".to_vec()));
         let pdf = fixture_pdf(s.dict, s.content);
         let ex = extract_page_images(&pdf);
         assert_eq!(ex.entries.len(), 1, "skipped: {:?}", ex.skipped);
         assert_eq!(ex.entries[0].ext, "png");
+        let decoded = image::load_from_memory(&ex.entries[0].bytes).unwrap();
+        assert_eq!((decoded.dimensions()), (4, 4));
     }
 
     #[test]
@@ -640,10 +663,4 @@ mod tests {
         let decoded = image::load_from_memory(&ex.entries[0].bytes).unwrap();
         assert_eq!((decoded.dimensions()), (4, 4));
     }
-}
-
-/// Resolve an optional dictionary entry into an integer.
-fn int_of(obj: Option<&Object>, doc: &Document) -> Option<i64> {
-    let obj = doc.dereference(obj?).ok()?.1;
-    obj.as_i64().ok()
 }

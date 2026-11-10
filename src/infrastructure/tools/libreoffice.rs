@@ -171,9 +171,9 @@ impl LibreOfficeRunner {
 mod tests {
     use super::*;
 
-    #[test]
-    fn probe_reports_unavailable_with_empty_path() {
-        let _serial = lock_path();
+    #[tokio::test]
+    async fn probe_reports_unavailable_with_empty_path() {
+        let _serial = lock_path().await;
         // Simulate a machine without LibreOffice: empty PATH.
         let saved = std::env::var("PATH").ok();
         unsafe { std::env::set_var("PATH", "/nonexistent-dir") };
@@ -188,9 +188,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn on_path_matches_which_program() {
-        let _serial = lock_path();
+    #[tokio::test]
+    async fn on_path_matches_which_program() {
+        let _serial = lock_path().await;
         assert_eq!(LibreOfficeTool::on_path(), which_program("soffice"));
     }
 
@@ -206,8 +206,10 @@ mod tests {
     }
 
     /// PATH is process-global: serialize with the other env-mutating tests.
-    fn lock_path() -> std::sync::MutexGuard<'static, ()> {
-        crate::test_support::env_lock()
+    /// Async-aware: callers hold the guard across `await` points
+    /// (clippy::await_holding_lock).
+    async fn lock_path() -> tokio::sync::MutexGuard<'static, ()> {
+        crate::test_support::env_lock().await
     }
 
     /// Install a fake `soffice` script on PATH; returns the guard that
@@ -249,7 +251,7 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn convert_reports_stderr_when_soffice_fails() {
-        let _serial = lock_path();
+        let _serial = lock_path().await;
         let tmp = tempfile::tempdir().unwrap();
         let _guard = fake_soffice(tmp.path(), "#!/bin/sh\necho boom >&2\nexit 3\n");
         let runner = LibreOfficeRunner::new().unwrap();
@@ -272,7 +274,7 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn convert_errors_when_output_is_missing() {
-        let _serial = lock_path();
+        let _serial = lock_path().await;
         let tmp = tempfile::tempdir().unwrap();
         // Exits 0 but writes nothing.
         let _guard = fake_soffice(tmp.path(), "#!/bin/sh\nexit 0\n");
@@ -297,7 +299,7 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn convert_succeeds_and_names_output_after_input_stem() {
-        let _serial = lock_path();
+        let _serial = lock_path().await;
         let tmp = tempfile::tempdir().unwrap();
         // A fake soffice that copies a prepared payload to <outdir>/<stem>.docx.
         let payload = tmp.path().join("payload.docx");
@@ -330,10 +332,10 @@ mod tests {
         assert_eq!(std::fs::read(produced).unwrap(), b"PKfake-docx");
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(unix)]
-    fn probe_accepts_a_working_binary_and_rejects_a_broken_one() {
-        let _serial = lock_path();
+    async fn probe_accepts_a_working_binary_and_rejects_a_broken_one() {
+        let _serial = lock_path().await;
         let tmp = tempfile::tempdir().unwrap();
         {
             let _guard = fake_soffice(tmp.path(), "#!/bin/sh\necho 'LibreOffice 25.2'\n");

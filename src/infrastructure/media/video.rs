@@ -366,15 +366,13 @@ impl VideoConverter {
         let mut descriptions = Vec::new();
         for i in 0..frame_count {
             let timestamp = i as f64 * interval;
-            if let Ok(frame_data) = self.extract_frame(video_bytes, timestamp).await {
-                if let Ok(desc) = provider
+            if let Ok(frame_data) = self.extract_frame(video_bytes, timestamp).await
+                && let Ok(desc) = provider
                     .describe(&frame_data, crate::domain::result::DetailLevel::Low)
                     .await
-                {
-                    if !desc.trim().is_empty() {
-                        descriptions.push(format!("Frame @ {:.1}s: {}", timestamp, desc));
-                    }
-                }
+                && !desc.trim().is_empty()
+            {
+                descriptions.push(format!("Frame @ {:.1}s: {}", timestamp, desc));
             }
         }
 
@@ -586,7 +584,7 @@ mod tests {
 
     #[tokio::test]
     async fn gpu_mode_describes_key_frames() {
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         let dir = tempfile::tempdir().unwrap();
         let _path = fake_ffmpeg(dir.path(), None);
         let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::Gpu, true);
@@ -615,7 +613,7 @@ mod tests {
 
     #[tokio::test]
     async fn frame_provider_failure_is_skipped_without_dropping_audio() {
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         let dir = tempfile::tempdir().unwrap();
         let _path = fake_ffmpeg(dir.path(), None);
         let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::Gpu, true);
@@ -635,7 +633,7 @@ mod tests {
 
     #[tokio::test]
     async fn frame_extraction_failure_is_skipped() {
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         let dir = tempfile::tempdir().unwrap();
         let _path = fake_ffmpeg(dir.path(), Some(7));
         let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::Gpu, true);
@@ -650,7 +648,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_transcript_without_frames_reports_no_text() {
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         let dir = tempfile::tempdir().unwrap();
         let _path = fake_ffmpeg(dir.path(), None);
         let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::Gpu, true);
@@ -669,7 +667,7 @@ mod tests {
 
     #[tokio::test]
     async fn audio_extracted_without_transcriber_is_reported() {
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         let dir = tempfile::tempdir().unwrap();
         let _path = fake_ffmpeg(dir.path(), None);
         let converter = converter_with_ffmpeg_flag(VideoProcessingMode::AudioOnly, true);
@@ -686,7 +684,7 @@ mod tests {
 
     #[tokio::test]
     async fn ffmpeg_extraction_failure_degrades_to_metadata() {
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         // PATH stripped to an empty dir: the ffmpeg spawn fails inside
         // extract_audio and the converter degrades — deterministic on any host.
         let empty_dir = tempfile::tempdir().unwrap();
@@ -703,7 +701,7 @@ mod tests {
 
     #[tokio::test]
     async fn gpu_mode_without_ffmpeg_still_degrades() {
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         // PATH stripped to an empty dir: the ffmpeg spawn fails
         // deterministically on any host.
         let empty_dir = tempfile::tempdir().unwrap();
@@ -718,7 +716,7 @@ mod tests {
 
     #[tokio::test]
     async fn ffmpeg_extraction_success_with_transcriber() {
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         // Fake ffmpeg on PATH: emits a canned WAV; stub transcriber runs.
         let dir = tempfile::tempdir().unwrap();
         let wav: Vec<u8> = {
@@ -772,7 +770,7 @@ mod tests {
 
     #[tokio::test]
     async fn audioonly_with_provider_and_ffmpeg_missing_stubs_not_called() {
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         let empty_dir = tempfile::tempdir().unwrap();
         let restore = PathRestore(Some(std::env::var("PATH").unwrap_or_default()));
         unsafe { std::env::set_var("PATH", empty_dir.path()) };
@@ -805,7 +803,7 @@ mod tests {
 
     #[tokio::test]
     async fn transcription_failure_surfaces_audio_unavailable() {
-        let _serial = crate::test_support::env_lock();
+        let _serial = crate::test_support::env_lock().await;
         let dir = tempfile::tempdir().unwrap();
         let _path = fake_ffmpeg(dir.path(), None);
         let mut converter = converter_with_ffmpeg_flag(VideoProcessingMode::AudioOnly, true);

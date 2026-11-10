@@ -614,10 +614,10 @@ mod tests {
             "Count" => 6_i64,
         });
         for id in doc.objects.keys().cloned().collect::<Vec<_>>() {
-            if let Ok(d) = doc.get_object_mut(id).and_then(Object::as_dict_mut) {
-                if d.get(b"Type").and_then(Object::as_name).ok() == Some(b"Page".as_slice()) {
-                    d.set("Parent", Object::Reference(pages_id));
-                }
+            if let Ok(d) = doc.get_object_mut(id).and_then(Object::as_dict_mut)
+                && d.get(b"Type").and_then(Object::as_name).ok() == Some(b"Page".as_slice())
+            {
+                d.set("Parent", Object::Reference(pages_id));
             }
         }
         let catalog_id = doc.add_object(dictionary! {

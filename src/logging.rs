@@ -67,15 +67,17 @@ mod tests {
     use super::*;
 
     // Serializes the env-mutating tests: ALCHEMIZE_LOG is process-global.
-    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // Async-aware (`tokio::sync::Mutex`): guards are held across `await`
+    // points in async tests (clippy::await_holding_lock).
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
-        LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    async fn env_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        LOCK.lock().await
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn unset_env_is_silent() {
-        let _g = env_guard();
+        let _g = env_guard().await;
         unsafe {
             std::env::remove_var("ALCHEMIZE_LOG");
         }
@@ -84,7 +86,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn off_and_empty_are_silent() {
-        let _g = env_guard();
+        let _g = env_guard().await;
         unsafe {
             std::env::set_var("ALCHEMIZE_LOG", "off");
         }
@@ -97,7 +99,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn invalid_level_stays_off() {
-        let _g = env_guard();
+        let _g = env_guard().await;
         unsafe {
             std::env::set_var("ALCHEMIZE_LOG", "loud");
         }
@@ -106,7 +108,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn trimmed_lowercase_level_installs_and_shuts_down() {
-        let _g = env_guard();
+        let _g = env_guard().await;
         unsafe {
             std::env::set_var("ALCHEMIZE_LOG", "  DEBUG  ");
         }

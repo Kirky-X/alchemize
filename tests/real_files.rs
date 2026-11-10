@@ -49,7 +49,7 @@ async fn real_pdf_extracts_license_text() {
     assert!(
         lower.contains("licen") || lower.contains("apple") || lower.contains("copyright"),
         "no recognizable license vocabulary; first 500 chars: {}",
-        &md.chars().take(500).collect::<String>()
+        md.chars().take(500).collect::<String>()
     );
     // Page structure from the local extractor.
     assert!(
@@ -131,7 +131,7 @@ async fn real_html_extracts_license_body_without_css() {
         assert!(
             !md.contains(css_marker),
             "CSS leaked into markdown ({css_marker}): {}",
-            &md.chars().take(300).collect::<String>()
+            md.chars().take(300).collect::<String>()
         );
     }
 }
@@ -322,7 +322,10 @@ async fn real_odp_extracts_slides_and_assets() {
 async fn real_heic_decodes_to_png_via_os() {
     let path = real("real.heic");
     let alch = AlchemizeBuilder::new().build();
-    let result = alch.convert(&Input::Path(path)).await.expect("heic must convert");
+    let result = alch
+        .convert(&Input::Path(path))
+        .await
+        .expect("heic must convert");
     assert!(
         result.markdown.contains("![real.heic](images/"),
         "decoded asset reference missing: {}",
@@ -337,9 +340,9 @@ async fn real_heic_decodes_to_png_via_os() {
 #[tokio::test]
 async fn real_image_family_degrades_without_vision() {
     let cases = [
-        ("real.gif", 520),     // WRF tools asset (sibling project janvi)
-        ("real.jpg", 17480),   // macOS desktop-picture thumbnail
-        ("real.webp", 30320),  // Google WebP gallery official sample (VP8 550×368)
+        ("real.gif", 520),    // WRF tools asset (sibling project janvi)
+        ("real.jpg", 17480),  // macOS desktop-picture thumbnail
+        ("real.webp", 30320), // Google WebP gallery official sample (VP8 550×368)
     ];
     let alch = AlchemizeBuilder::new().build();
     for (name, bytes) in cases {
@@ -389,7 +392,11 @@ fn real_mp3_ogg_flac_headers_are_genuine() {
     let mp3 = std::fs::read(real("real.mp3")).unwrap();
     assert_eq!(&mp3[0..3], b"ID3", "mp3 must start with an ID3 tag");
     let ogg = std::fs::read(real("real.ogg")).unwrap();
-    assert_eq!(&ogg[0..4], b"OggS", "ogg must start with the OggS capture pattern");
+    assert_eq!(
+        &ogg[0..4],
+        b"OggS",
+        "ogg must start with the OggS capture pattern"
+    );
     assert!(
         ogg.windows(7).any(|w| w == b"\x01vorbis"),
         "first Vorbis identification header missing"
@@ -411,7 +418,10 @@ async fn real_csv_converts_to_markdown_table() {
     // All 80 data rows of the source survive the table conversion.
     let rows = md.lines().filter(|l| l.starts_with("| row |")).count();
     assert_eq!(rows, 80, "expected all 80 data rows, got {rows}");
-    assert!(md.contains("https://github.com"), "real site values missing");
+    assert!(
+        md.contains("https://github.com"),
+        "real site values missing"
+    );
 }
 
 // -- TSV (real repo status ledger from .github; public-repo rows only —
@@ -420,8 +430,14 @@ async fn real_csv_converts_to_markdown_table() {
 #[tokio::test]
 async fn real_tsv_converts_to_markdown_table() {
     let (md, _) = convert("real.tsv").await;
-    assert!(md.contains("| repo | slug | default_branch |"), "header missing");
-    assert!(md.contains("| CalNexus | Kirky-X/CalNexus |"), "first row missing");
+    assert!(
+        md.contains("| repo | slug | default_branch |"),
+        "header missing"
+    );
+    assert!(
+        md.contains("| CalNexus | Kirky-X/CalNexus |"),
+        "first row missing"
+    );
     assert!(md.contains("Kirky-X/alchemize"), "own repo row missing");
     let rows = md
         .lines()
@@ -452,7 +468,10 @@ async fn real_ipynb_renders_markdown_and_code_cells() {
         &md[..md.len().min(300)]
     );
     assert!(md.contains("```ipython"), "code cell fence missing");
-    assert!(md.contains("Launching the Jupyter Notebook"), "section missing");
+    assert!(
+        md.contains("Launching the Jupyter Notebook"),
+        "section missing"
+    );
     assert!(md.chars().count() > 1000, "ipynb body too short");
 }
 
@@ -481,16 +500,23 @@ async fn real_zip_members_convert_through_facade() {
     assert_eq!(
         converted, 26,
         "expected 27 members, 26 converted (attachments: {:?}): {}",
-        result.metadata["attachments"],
-        result.markdown
+        result.metadata["attachments"], result.markdown
     );
     assert_eq!(
         result.metadata["attachments"],
         serde_json::json!(["kueiku/LICENSE"]),
         "the extensionless member must be the only attachment"
     );
-    assert!(result.markdown.contains("kueiku/LICENSE"), "{}", result.markdown);
-    assert!(result.markdown.contains("MIT License"), "{}", result.markdown);
+    assert!(
+        result.markdown.contains("kueiku/LICENSE"),
+        "{}",
+        result.markdown
+    );
+    assert!(
+        result.markdown.contains("MIT License"),
+        "{}",
+        result.markdown
+    );
 }
 
 // -- data feature: parquet/sqlite/bib (structured-data engines) --------------
@@ -521,8 +547,14 @@ async fn real_sqlite_reports_schema_and_rows() {
 async fn real_bib_converts_reference_entries() {
     let (md, _) = convert("real.bib").await;
     assert!(md.contains("knuth1974"), "entry key missing");
-    assert!(md.contains("Computer Programming as an Art"), "entry title missing");
-    assert!(md.contains("Attention Is All You Need"), "later entry missing");
+    assert!(
+        md.contains("Computer Programming as an Art"),
+        "entry title missing"
+    );
+    assert!(
+        md.contains("Attention Is All You Need"),
+        "later entry missing"
+    );
 }
 
 // -- detect_format on real archives (ZIP header-name scanner) -----------------

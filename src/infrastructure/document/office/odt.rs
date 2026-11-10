@@ -799,14 +799,14 @@ impl<'a> OdfWalker<'a> {
             }
             "table-row" => self.close_row(),
             "table" => {
-                if let Some(t) = self.tables.pop() {
-                    if !t.grid.is_empty() {
-                        self.push_block(Block::Table(Table {
-                            grid: t.grid,
-                            header_rows: t.header_rows.max(1),
-                            kind: TableKind::Data,
-                        }));
-                    }
+                if let Some(t) = self.tables.pop()
+                    && !t.grid.is_empty()
+                {
+                    self.push_block(Block::Table(Table {
+                        grid: t.grid,
+                        header_rows: t.header_rows.max(1),
+                        kind: TableKind::Data,
+                    }));
                 }
             }
             "table-header-rows" => {
@@ -1245,10 +1245,11 @@ fn normalize_odf_href(href: &str) -> String {
 /// Extension for the sha8-named file: the package part's extension first,
 /// media-type subtype second.
 fn asset_ext(part: &str, media_type: &str) -> String {
-    if let Some((_, ext)) = part.rsplit_once('.') {
-        if !ext.is_empty() && !ext.contains('/') {
-            return ext.to_lowercase();
-        }
+    if let Some((_, ext)) = part.rsplit_once('.')
+        && !ext.is_empty()
+        && !ext.contains('/')
+    {
+        return ext.to_lowercase();
     }
     let sub = media_type.rsplit('/').next().unwrap_or("bin");
     if sub.is_empty() || sub == "octet-stream" {
@@ -1301,8 +1302,10 @@ pub(crate) fn parse_odf_styles(xml: &[u8]) -> HashMap<String, OdfStyleDef> {
                 match local.as_str() {
                     "style" | "list-style" => {
                         let name = attr(&e, "name").unwrap_or_default();
-                        let mut def = OdfStyleDef::default();
-                        def.parent = attr(&e, "parent-style-name");
+                        let def = OdfStyleDef {
+                            parent: attr(&e, "parent-style-name"),
+                            ..Default::default()
+                        };
                         if !name.is_empty() {
                             current = Some((name, def));
                         }
@@ -2090,7 +2093,7 @@ mod tests {
 
     #[test]
     fn default_constructor_matches_new() {
-        let _ = OdtConverter::default();
+        let _ = OdtConverter;
     }
 
     #[tokio::test]

@@ -43,13 +43,13 @@ pub(super) async fn read_limited_bytes(
 
     // Content-Length preflight: reject oversized responses before downloading.
     let content_length = resp.content_length();
-    if let Some(cl) = content_length {
-        if cl > max_bytes {
-            return Err(AlchemizeError::ResponseTooLarge {
-                actual: cl,
-                limit: max_bytes,
-            });
-        }
+    if let Some(cl) = content_length
+        && cl > max_bytes
+    {
+        return Err(AlchemizeError::ResponseTooLarge {
+            actual: cl,
+            limit: max_bytes,
+        });
     }
 
     // Pre-allocate based on Content-Length (capped) to avoid ~23 reallocs on

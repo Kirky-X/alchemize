@@ -317,12 +317,11 @@ impl MineruPrecisionClient {
             .map_err(|e| AlchemizeError::MineruConversion(format!("failed to read result: {e}")))?;
 
         // If it looks like JSON, try to extract markdown field
-        if text.trim_start().starts_with('{') {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                if let Some(md) = json.get("markdown").and_then(|v| v.as_str()) {
-                    return Ok(md.to_string());
-                }
-            }
+        if text.trim_start().starts_with('{')
+            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
+            && let Some(md) = json.get("markdown").and_then(|v| v.as_str())
+        {
+            return Ok(md.to_string());
         }
 
         Ok(text)

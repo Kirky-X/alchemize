@@ -1,0 +1,13 @@
+# CODEOWNERS — 默认审阅者。GitHub 据此在 PR 自动请求 review。
+# 文件规则语法同 .gitignore：每行 <glob> <@user/@team>...
+# 详见: https://docs.github.com/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+#
+
+# 默认：仓库内所有文件
+*                           @Kirky-X
+
+# 示例：按目录细分
+# /src/core/                @Kirky-X @core-reviewer
+# /docs/                    @docs-team
+# /.github/                 @Kirky-X
+# /Cargo.toml /Cargo.lock   @Kirky-X

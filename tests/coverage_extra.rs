@@ -290,7 +290,7 @@ fn builder_surface_availability_and_engines() {
     let names = alch.engines();
     for expected in ["text", "docx-deep", "pdf", "image", "audio", "subtitle"] {
         assert!(
-            names.iter().any(|n| *n == expected),
+            names.contains(&expected),
             "engine {expected} missing from {names:?}"
         );
     }

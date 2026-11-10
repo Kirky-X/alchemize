@@ -83,8 +83,7 @@ fn render_blocks(blocks: &[Block], out: &mut String) {
 }
 
 fn render_list(list: &List, depth: usize, out: &mut String) {
-    let mut ordinal = list.start;
-    for item in &list.items {
+    for (ordinal, item) in (list.start..).zip(list.items.iter()) {
         // GFM only distinguishes bullets from ordered lists, but the ordinal
         // itself can still reflect the source family (a/b/c, i/ii/iii).
         let marker = match list.marker {
@@ -117,7 +116,6 @@ fn render_list(list: &List, depth: usize, out: &mut String) {
                 }
             }
         }
-        ordinal += 1;
     }
     out.push('\n');
 }
@@ -253,7 +251,7 @@ fn render_table(table: &crate::domain::document::Table, out: &mut String) {
     for _ in 0..cols {
         out.push_str("---|");
     }
-    out.push_str("\n");
+    out.push('\n');
     for row in rows {
         out.push_str("| ");
         out.push_str(&row.join(" | "));
