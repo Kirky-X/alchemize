@@ -82,7 +82,7 @@ flowchart TB
 | `application/ports.rs` | 四个端口 trait + `Availability` + `Transcript`（VAD 段级转录，明确不含说话人归属）+ `which_program()` PATH 探测 |
 | `application/registry.rs` | 优先级降序注册、fallback 链尝试、attempts 记录、`metadata.converter` 注入 |
 | `application/builder.rs` | `AlchemizeBuilder` → `Alchemize` 门面（convert / convert_pref / availability / engines / asset_sink_for）；zip 门面特判 |
-| `infrastructure/document/` | text（纯文本 + ~45 扩展名代码围栏）、csv（分隔符自探测）、html-deep（自研迭代状态机 → htmd 兜底，feature `html-deep`）、html、epub、docx/pptx（原生 XML）、latex-source（pandoc 探测 + 围栏兜底）、pdf（lopdf + TOC 剔除/结构启发）、gfm_render（自研 GFM 渲染器）、shared（detect_encoding：UTF-8 → CJK 优先探测 → lossy 兜底） |
+| `infrastructure/document/` | text（纯文本 + ~45 扩展名代码围栏）、csv（分隔符自探测）、html-deep（自研迭代状态机 → htmd 兜底，feature `html`）、html、epub、docx/pptx（原生 XML）、latex-source（pandoc 探测 + 围栏兜底）、pdf（lopdf + TOC 剔除/结构启发）、gfm_render（自研 GFM 渲染器）、shared（detect_encoding：UTF-8 → CJK 优先探测 → lossy 兜底） |
 | `infrastructure/media/` | image / audio / video（ffmpeg 抽轨）/ subtitle（srt/vtt/ass/ssa 原生解析）/ timeline / dedup（视频帧去重） |
 | `infrastructure/remote/mineru/` | 云端 PDF 后端（见[特性门控模块](#特性门控模块)） |
 | `infrastructure/tools/` | pandoc 外部二进制探测（构建时缺席、运行时探测） |
@@ -91,15 +91,15 @@ flowchart TB
 
 | feature | 模块 | 说明 |
 | --- | --- | --- |
-| `mineru` | `infrastructure/remote/mineru/` | 云端 PDF：`client`/`factory`（按文件大小选 agent/precision 客户端）、`backoff`（limiteron 轮询退避）、`http_limit`（响应体积分级上限）、`validated_url`（SSRF 校验）、`wrapper`（Converter 适配，priority 5 链尾） |
-| `asr` | `infrastructure/media/asr/` | `vecboost.rs`（自研 transcribe 门面：Qwen3-ASR ONNX 三件套 + silero VAD，path 依赖兄弟仓）与 `whisper_api.rs`（Whisper 兼容云端后端，仅显式注入激活） |
-| `html-deep` | `infrastructure/document/html_deep/` | 自研迭代状态机（HTML→Markdown）+ htmd 兜底，priority 15 压过 html(10)；`--extract-main`/`--base-url` |
+| `pdf-cloud` | `infrastructure/remote/mineru/` | 云端 PDF：`client`/`factory`（按文件大小选 agent/precision 客户端）、`backoff`（limiteron 轮询退避）、`http_limit`（响应体积分级上限）、`validated_url`（SSRF 校验）、`wrapper`（Converter 适配，priority 5 链尾） |
+| `audio` | `infrastructure/media/asr/` | `vecboost.rs`（自研 transcribe 门面：Qwen3-ASR ONNX 三件套 + silero VAD，path 依赖兄弟仓）与 `whisper_api.rs`（Whisper 兼容云端后端，仅显式注入激活） |
+| `html` | `infrastructure/document/html_deep/` | 自研迭代状态机（HTML→Markdown）+ htmd 兜底，priority 15 压过 html(10)；`--extract-main`/`--base-url` |
 
 feature 关闭的引擎根本不出现在 `engines.rs` 装配列表中；`mineru` 还需配置端点（`ALCHEMIZE_MINERU_URL` 或库 API `with_mineru`）才注册。
 
 ### crate 组织
 
-alchemize 为**单 crate**（`[package]` + `[lib]` + `[[bin]] alch`），无 workspace 子成员、无子 crate。与兄弟仓的关系是 path 依赖：`vecboost`（feature `asr` 下）——发布顺序约束为 vecboost 先于 alchemize 发到 crates.io。
+alchemize 为**单 crate**（`[package]` + `[lib]` + `[[bin]] alch`），无 workspace 子成员、无子 crate。与兄弟仓的关系是 path 依赖：`vecboost`（feature `audio` 下）——发布顺序约束为 vecboost 先于 alchemize 发到 crates.io。
 
 ## 🌊 数据流
 

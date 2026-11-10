@@ -5,5 +5,5 @@
 
 pub mod pandoc;
 
-#[cfg(feature = "libreoffice")]
+#[cfg(feature = "legacy-office")]
 pub mod libreoffice;

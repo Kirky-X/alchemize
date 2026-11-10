@@ -48,29 +48,38 @@ required-features = ["mcp"]
 # 本仓必须开启同名 feature，否则 alch 命令树为空（forms/doctor/convert 不可达）
 default = ["cli"]
 cli = []
-# MinerU 云端 PDF 高保真（HTTP 客户端）
-mineru = ["dep:reqwest", "dep:limiteron", "dep:futures", "reqwest/multipart", "reqwest/stream"]
-# ASR：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
-asr = ["dep:vecboost", "dep:reqwest", "reqwest/multipart"]
-# pdfium 本地高保真 PDF 引擎（动态库运行时加载）。图片提取走 lopdf 结构
+# 云端 PDF 高保真（MinerU HTTP 客户端）
+pdf-cloud = ["dep:reqwest", "dep:limiteron", "dep:futures", "reqwest/multipart", "reqwest/stream"]
+# 音频转写：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
+audio = ["dep:vecboost", "dep:reqwest", "reqwest/multipart"]
+# 本地 PDF 高保真（pdfium 动态库运行时加载）。图片提取走 lopdf 结构
 # 遍历（pdfium-render 0.5.9 安全层不暴露图片对象句柄）；image 用于样本→PNG
 # 重编码——image 已在依赖树内（pdfium-render 传递引用），零新增外部代码。
 # lopdf 为无条件依赖（兜底档文本抽取 + 结构遍历共用），不在此声明。
-pdfium = ["dep:pdfium-render", "dep:image"]
-# LibreOffice headless 旧格式引擎（外部 soffice 二进制）
-libreoffice = []
-# 归档容器族（tar/tgz/gz/xz/zst/7z）
-containers = ["dep:tar", "dep:flate2", "dep:xz2", "dep:zstd", "dep:sevenz-rust2"]
-# 结构化数据引擎（parquet/sqlite/bib）
-data = ["dep:parquet", "dep:rusqlite", "dep:biblatex"]
+pdf-local = ["dep:pdfium-render", "dep:image"]
+# 旧格式引擎（doc/ppt/rtf，外部 soffice 二进制）
+legacy-office = []
+# 归档容器族按格式隔离：每个格式一个 feature。
+# 组合格式 .tgz 需 tar+gzip 同时开启（TarGzConverter 走 cfg(all)）。
+tar = ["dep:tar"]
+gzip = ["dep:flate2"]
+xz = ["dep:xz2"]
+zstd = ["dep:zstd"]
+sevenz = ["dep:sevenz-rust2"]
+# 结构化数据格式按格式隔离：每个格式一个 feature。
+parquet = ["dep:parquet"]
+sqlite = ["dep:rusqlite"]
+bibtex = ["dep:biblatex"]
 # 邮件（eml）
-eml = ["dep:mail-parser"]
+email = ["dep:mail-parser"]
 # MCP 工具面：sdforge rmcp stdio 服务（alch-mcp）；CLI 封装（cli feature）恒在
 mcp = ["sdforge/mcp"]
-# html-deep 自研引擎：迭代状态机主链 + dom_smoothie 主内容提取 + htmd 兜底；
-# icu_properties（Unicode P/S 分类，已在依赖树内）
-html-deep = ["dep:scraper", "dep:dom_smoothie", "dep:ego_tree", "dep:regex", "dep:url", "dep:icu_properties"]
-full = ["mineru", "asr", "html-deep", "containers", "data", "eml", "libreoffice", "pdfium"]
+# html 自研引擎：迭代状态机主链 + dom_smoothie 主内容提取 + htmd 兜底；
+# icu_properties（Unicode P/S 分类，已在依赖树内）。
+# htmd 基础 html 转换无条件编译：本 feature off 时 html 能力仍在（落 htmd 链）。
+html = ["dep:scraper", "dep:dom_smoothie", "dep:ego_tree", "dep:regex", "dep:url", "dep:icu_properties"]
+# 全能力伞面：14 个转换能力 feature 全集合。
+full = ["pdf-cloud", "audio", "html", "tar", "gzip", "xz", "zstd", "sevenz", "parquet", "sqlite", "bibtex", "email", "legacy-office", "pdf-local"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false, features = ["std"] }

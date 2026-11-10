@@ -36,8 +36,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 | feature | 门控 API | 默认 |
 | --- | --- | --- |
-| `mineru` | MinerU 引擎注册 + `MineruConfig` 装配 | 关 |
-| `asr` | vecboost 转录门面 + Whisper 兼容后端 | 关 |
+| `pdf-cloud` | MinerU 引擎注册 + `MineruConfig` 装配 | 关 |
+| `audio` | vecboost 转录门面 + Whisper 兼容后端 | 关 |
 | `full` | 以上全部 | 关 |
 
 ## 🧱 核心 API
@@ -48,9 +48,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 | Builder 方法 | 默认 | 说明 |
 | --- | --- | --- |
-| `with_mineru(MineruConfig)` | 无 | 配置后且 feature `mineru` 开启时注册 `mineru` 引擎（priority 5，链尾） |
+| `with_mineru(MineruConfig)` | 无 | 配置后且 feature `pdf-cloud` 开启时注册 `mineru` 引擎（priority 5，链尾） |
 | `with_vision_provider(Arc<dyn VisionProvider>)` | 无 | 图片描述/OCR；不注入则图片转元数据 markdown，无内置兜底 |
-| `with_transcribe_provider(Arc<dyn TranscribeProvider>)` | 无 | 音频引擎转录；feature `asr` 下默认用 vecboost 门面 |
+| `with_transcribe_provider(Arc<dyn TranscribeProvider>)` | 无 | 音频引擎转录；feature `audio` 下默认用 vecboost 门面 |
 | `with_video_mode(VideoProcessingMode)` | `AudioOnly` | `Gpu` / `AudioOnly`（抽轨转音频链）/ `Disabled` |
 | `with_asset_mode(AssetMode)` | `Dir` | 资产落盘模式 |
 | `with_no_remote()` | false | `is_remote()==true` 的引擎不进入候选链 |
@@ -69,7 +69,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 | `is_no_remote` | `fn is_no_remote(&self) -> bool` | 构建时是否排除了云端引擎 |
 | `asset_sink_for` | `fn asset_sink_for(&self, output_root: &Path) -> Box<dyn AssetSink>` | 按资产模式构造 sink（Dir → `<root>/images/`） |
 
-`MineruConfig`（feature `mineru`）：
+`MineruConfig`（feature `pdf-cloud`）：
 
 ```rust
 pub struct MineruConfig {
@@ -236,20 +236,20 @@ URL 校验拒绝的六类原因：`InvalidScheme`（非 HTTPS）、`LoopbackAddr
 
 ## 🚪 特性门控 API
 
-### MinerU（`mineru` 特性）
+### MinerU（`pdf-cloud` 特性）
 
 - 注册条件：`with_mineru(MineruConfig)` 且 feature 编译开启；CLI 侧由 `ALCHEMIZE_MINERU_URL` 触发。
 - 装配产物：`mineru` 引擎（仅 `pdf` 扩展名），priority 5 链尾，产出 `quality=api`。
 - 内部契约：agent/precision 双客户端按文件大小选择（factory）；轮询退避经 limiteron；响应体积分级限量；下载 URL 过 `ValidatedFileUrl` SSRF 校验。
 - 环境变量：`ALCHEMIZE_MINERU_URL`（端点）、`MINERU_API_TOKEN`（precision bearer token）。
 
-### ASR（`asr` 特性）
+### ASR（`audio` 特性）
 
 - 装配产物：转录提供方接入 audio/video 引擎。默认 provider 为 vecboost 门面（Qwen3-ASR ONNX 三件套 + silero VAD，本地推理）；Whisper 兼容云端后端仅在显式注入配置时激活。
 - 模型探测：`ALCHEMIZE_TRANSCRIBE_MODELS` → 缺省 `~/.cache/alchemize/models/transcribe/`（布局 `qwen3-conv_frontend.onnx`、`qwen3-encoder.int8.onnx`、`qwen3-decoder.int8.onnx`、`silero_vad.onnx`、`tokenizer/`）；`ORT_DYLIB_PATH` 指向 onnxruntime 动态库。缺失时 provider 自述 `Unavailable` 并附获取指引，不自动联网。
 - 测试专用：`ALCHEMIZE_ASR_TEST_WAV`（集成测试输入路径）。
 
-### HtmlDeep（`html-deep` 特性）
+### HtmlDeep（`html` 特性）
 
 - 装配产物：`html-deep` 引擎（exts html/htm，priority 15 压过 html/htmd）——本仓自研迭代状态机（`src/infrastructure/document/html_deep/engine/`，Apache-2.0）→ htmd 兜底转换链。
 - 链语义：自研引擎主路径 →（主输出空且有可见文本）htmd 兜底（复用既有 html 引擎，含 math 保真）→ 双失败 `Err(Other)` 诚实上报；纯脚本/空壳页的空输出是正确抑制。
@@ -259,7 +259,7 @@ URL 校验拒绝的六类原因：`InvalidScheme`（非 HTTPS）、`LoopbackAddr
 
 ### MCP（`mcp` 特性）
 
-- 装配产物：`alch-mcp` 二进制——`sdforge::mcp::serve_stdio(build())` 承载 convert / doctor / formats 三个 MCP 工具（`#[forge(tool_name)]` 注册，参数 schema 由端点签名生成），stdio 传输——传输面无网络出口（convert 工具本身的网络能力随 mineru 特性）。
+- 装配产物：`alch-mcp` 二进制——`sdforge::mcp::serve_stdio(build())` 承载 convert / doctor / formats 三个 MCP 工具（`#[forge(tool_name)]` 注册，参数 schema 由端点签名生成），stdio 传输——传输面无网络出口（convert 工具本身的网络能力随 `pdf-cloud` 特性）。
 - CLI 同源：三个端点同时以 `cli = true` 注册进 `alch`（CliBuilder + 自定义 runner，退出码 0/1/2/3 契约见主 spec cli-output）。
 - 注意：根级内置全局 `--format text|json`（sdforge 输出格式）；convert 的扩展名覆盖参数名为 `input_format`，CLI 侧由 runner 在 convert 语境把 `--format` 归一为 `--input_format`。
 

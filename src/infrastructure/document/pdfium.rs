@@ -14,7 +14,7 @@
 //! → system library; missing → Unavailable with a fetch hint (no silent
 //! degradation, no network).
 
-#![cfg(feature = "pdfium")]
+#![cfg(feature = "pdf-local")]
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

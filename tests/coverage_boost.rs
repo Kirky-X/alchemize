@@ -35,9 +35,9 @@ fn builder_mineru_engine_registered_when_configured() {
         .with_mineru(MineruConfig::default())
         .build();
     let has_mineru = alch.engines().iter().any(|e| e.contains("mineru"));
-    #[cfg(feature = "mineru")]
+    #[cfg(feature = "pdf-cloud")]
     assert!(has_mineru);
-    #[cfg(not(feature = "mineru"))]
+    #[cfg(not(feature = "pdf-cloud"))]
     assert!(!has_mineru);
 }
 

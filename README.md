@@ -136,29 +136,29 @@ alch formats
 | 类别 | 扩展名 | 引擎（priority） | 需要的 feature |
 | --- | --- | --- | --- |
 | Word（OOXML） | docx | docx-deep(18) → docx(10) | — |
-| Word（旧版） | doc, rtf | legacy-office(15，LibreOffice) | `libreoffice` |
+| Word（旧版） | doc, rtf | legacy-office(15，LibreOffice) | `legacy-office` |
 | OpenDocument 文本 | odt | odt-deep(18) | — |
-| 演示文稿 | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `libreoffice`（仅旧二进制） |
+| 演示文稿 | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `legacy-office`（仅旧二进制） |
 | 电子表格 | —（不支持） | 表格解析器已移除：calamine 的物化面（共享字符串、styles/theme、ODS 重复与文本展开）无法在不可信输入上被前置校验约束；xlsx/xls/xlsb/ods 不再支持 | — |
-| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdfium` / `mineru` |
-| 网页 / 电子书 | html, htm / epub | html(htmd) → html-deep(15) / epub | `html-deep`（html-deep） |
+| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdf-local` / `pdf-cloud` |
+| 网页 / 电子书 | html, htm / epub | html(htmd) → html-deep(15) / epub | `html`（html-deep） |
 | 纯文本 / 代码 | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 代码扩展 | text（围栏化） | — |
 | 表格文本 | csv, tsv, psv | csv（分隔符自探测） | — |
 | 标记语言 | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | — |
 | 笔记本 | ipynb | ipynb | — |
 | 图片 | png, jpg, jpeg, gif, webp, bmp, tif, tiff, svg / heic, heif | image（Vision 可选） / heic（sips 或元数据） | — |
-| 音频 | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio（ASR 可选） | `asr` |
-| 视频 | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video（ffmpeg + ASR/Vision 可选） | `asr`（转录） |
+| 音频 | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio（ASR 可选） | `audio` |
+| 视频 | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video（ffmpeg + ASR/Vision 可选） | `audio`（转录） |
 | 字幕 | srt, vtt, ass, ssa, lrc | subtitle | — |
-| 邮件 | eml | eml | `eml` |
-| 结构化数据 | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `data` |
-| 归档 | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip 递归 / tar 族递归 / 7z 递归 | `containers`（除 zip） |
+| 邮件 | eml | eml | `email` |
+| 结构化数据 | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `parquet` / `sqlite` / `bibtex` |
+| 归档 | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip 递归 / tar 族递归 / 7z 递归 | `tar`/`gzip`/`xz`/`zstd`/`sevenz`（除 zip） |
 
 ### 🧭 核心概念
 
 - **注册表与 fallback 链**：同扩展名的引擎按 `priority()` 降序尝试，前序失败自动降级，`Unavailable` 引擎跳过并记录原因。
 - **质量分层**：每次产出标注 `api`（云端高保真）/ `local_full`（本地全功能）/ `local_fallback`（本地降级），与实际引擎名一起记录在 `metadata` 与 stderr 摘要行。
-- **本地优先**：PDF 链为 pdfium(20，可选 feature) → pdf-extract(10) → MinerU(5 链尾，配置端点后)——云端只在本地链失败后兜底。
+- **本地优先**：PDF 链为 pdfium(20，`pdf-local` feature) → pdf-extract(10) → MinerU(5 链尾，配置端点后)——云端只在本地链失败后兜底。
 
 ---
 
@@ -169,23 +169,23 @@ alch formats
 | 预设 | 命令 | 适用场景 |
 | --- | --- | --- |
 | 最小化 | `cargo build` | 纯本地转换，零外部服务依赖 |
-| 推荐 | `cargo build --features containers,data,eml,libreoffice` | + 归档/结构化数据/邮件/旧版 Office（soffice 存在时生效） |
+| 推荐 | `cargo build --features tar,gzip,xz,zstd,sevenz,parquet,sqlite,bibtex,email,legacy-office` | + 归档/结构化数据/邮件/旧版 Office（soffice 存在时生效） |
 | 生产 | `cargo build --features full` | + MinerU 云端 PDF + 本地 ASR + html-deep |
 
 ### 📋 功能矩阵
 
 | feature | 引入 | 说明 |
 | --- | --- | --- |
-| `mineru` | MinerU 云端 PDF 引擎（reqwest/limiteron） | 端点经 `ALCHEMIZE_MINERU_URL` 配置后才注册 |
-| `pdfium` | 本地 PDF 高保真引擎（pdfium-render） | 运行时探测动态库；缺失降级到 pdf-extract。嵌入图提取走 lopdf 结构遍历（DCT/JPX 直通，样本重编码 PNG，不支持项显性计数） |
-| `libreoffice` | 旧版二进制 Office 引擎（外部 soffice） | doc/rtf→docx、ppt/pps/pot→pptx 后进深解析链；缺席自动降级 |
-| `containers` | 归档容器族（tar/tgz/gz/xz/zst/7z） | 递归转换，魔数检测内层格式 |
-| `data` | 结构化数据引擎（parquet/sqlite/bib） | parquet 流式 10 万行截断、sqlite 只读、biblatex 条目 |
-| `eml` | 邮件引擎（mail-parser） | 头部/正文/附件清单 |
-| `asr` | vecboost 转录门面 + Whisper 兼容 API | Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
+| `pdf-cloud` | MinerU 云端 PDF 引擎（reqwest/limiteron） | 端点经 `ALCHEMIZE_MINERU_URL` 配置后才注册 |
+| `pdf-local` | 本地 PDF 高保真引擎（pdfium-render） | 运行时探测动态库；缺失降级到 pdf-extract。嵌入图提取走 lopdf 结构遍历（DCT/JPX 直通，样本重编码 PNG，不支持项显性计数） |
+| `legacy-office` | 旧版二进制 Office 引擎（外部 soffice） | doc/rtf→docx、ppt/pps/pot→pptx 后进深解析链；缺席自动降级 |
+| `tar`/`gzip`/`xz`/`zstd`/`sevenz` | 归档容器族，按格式拆分的五个 feature（tar/tgz/gz/xz/zst/7z；`.tgz` 需 `tar`+`gzip`） | 递归转换，魔数检测内层格式 |
+| `parquet`/`sqlite`/`bibtex` | 结构化数据引擎，按格式拆分的三个 feature（parquet/sqlite/bib） | parquet 流式 10 万行截断、sqlite 只读、biblatex 条目 |
+| `email` | 邮件引擎（mail-parser） | 头部/正文/附件清单 |
+| `audio` | vecboost 转录门面 + Whisper 兼容 API | Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
 | `mcp` | MCP 工具面（`alch-mcp` stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；CLI 封装（sdforge）恒在 |
-| `html-deep` | html-deep 自研引擎（迭代状态机 → htmd 兜底） | 主内容提取（`--extract-main`）与链接绝对化（`--base-url`）；含 LaTeX 数学的页面自动路由 htmd 保真 |
-| `full` | 以上全部（`mineru`+`asr`+`html-deep`+`containers`+`data`+`eml`+`libreoffice`） | |
+| `html` | html-deep 自研引擎（迭代状态机 → htmd 兜底） | 主内容提取（`--extract-main`）与链接绝对化（`--base-url`）；含 LaTeX 数学的页面自动路由 htmd 保真 |
+| `full` | 以上全部（`pdf-cloud`+`pdf-local`+`audio`+`email`+`legacy-office`+`html`+`tar`/`gzip`/`xz`/`zstd`/`sevenz`+`parquet`/`sqlite`/`bibtex`，共 14 个） | |
 
 默认 `default = ["cli"]`（CLI 封装恒在）——feature 关闭的引擎根本不参与编译。
 

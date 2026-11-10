@@ -137,7 +137,7 @@ async fn real_html_extracts_license_body_without_css() {
 }
 
 /// Whether a `soffice` binary is on PATH (legacy RTF needs it).
-#[cfg(feature = "libreoffice")]
+#[cfg(feature = "legacy-office")]
 fn soffice_available() -> bool {
     std::env::var("PATH")
         .map(|p| {
@@ -151,7 +151,7 @@ fn soffice_available() -> bool {
 
 // -- RTF (real macOS License.rtf; legacy-office needs soffice) ----------------
 
-#[cfg(feature = "libreoffice")]
+#[cfg(feature = "legacy-office")]
 #[tokio::test]
 async fn real_rtf_via_legacy_office() {
     let path = real("real.rtf");
@@ -185,7 +185,7 @@ async fn real_rtf_via_legacy_office() {
     );
 }
 
-#[cfg(not(feature = "libreoffice"))]
+#[cfg(not(feature = "legacy-office"))]
 #[tokio::test]
 async fn real_rtf_without_engine_reports_unsupported() {
     let path = real("real.rtf");
@@ -521,7 +521,7 @@ async fn real_zip_members_convert_through_facade() {
 
 // -- data feature: parquet/sqlite/bib (structured-data engines) --------------
 
-#[cfg(feature = "data")]
+#[cfg(feature = "parquet")]
 #[tokio::test]
 async fn real_parquet_converts_sensor_table() {
     let (md, _) = convert("real.parquet").await;
@@ -533,7 +533,7 @@ async fn real_parquet_converts_sensor_table() {
     assert!(md.contains("sensor-001"), "real rows missing");
 }
 
-#[cfg(feature = "data")]
+#[cfg(feature = "sqlite")]
 #[tokio::test]
 async fn real_sqlite_reports_schema_and_rows() {
     let (md, _) = convert("real.sqlite").await;
@@ -542,7 +542,7 @@ async fn real_sqlite_reports_schema_and_rows() {
     assert!(md.contains("schema_version"), "real row values missing");
 }
 
-#[cfg(feature = "data")]
+#[cfg(feature = "bibtex")]
 #[tokio::test]
 async fn real_bib_converts_reference_entries() {
     let (md, _) = convert("real.bib").await;
@@ -603,7 +603,7 @@ fn detect_format_reads_real_archives_from_header_names() {
 
 // -- containers feature: nested members dispatch through the assembled registry
 
-#[cfg(feature = "containers")]
+#[cfg(feature = "tar")]
 #[tokio::test]
 async fn real_tar_nested_members_convert_through_engines() {
     // `real.tar` holds real.png + real.md + main.rs. With the registry slot

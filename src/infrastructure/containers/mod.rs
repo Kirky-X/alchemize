@@ -1,6 +1,15 @@
-#![cfg(feature = "containers")]
+#![cfg(any(
+    feature = "tar",
+    feature = "gzip",
+    feature = "xz",
+    feature = "zstd",
+    feature = "sevenz"
+))]
 
 //! Recursive archive container converters (tar/tgz/gz/xz/zst/7z).
+//!
+//! Per-format features (capability-named): tar / gzip / xz / zstd / sevenz.
+//! The combined `.tgz` format requires both `tar` and `gzip`.
 //!
 //! Shared skeleton: [`ContainerBase`] holds the [`ConverterRegistry`] used to
 //! convert extracted entries, enforces decompression-bomb safety limits, and
@@ -9,8 +18,11 @@
 //!
 //! This module declares the shared surface; implementations live in `base.rs`.
 
+#[cfg(feature = "sevenz")]
 pub mod sevenz;
+#[cfg(any(feature = "gzip", feature = "xz", feature = "zstd"))]
 pub mod single;
+#[cfg(feature = "tar")]
 pub mod tar;
 
 mod base;
@@ -19,9 +31,18 @@ pub(crate) use base::{
     acquire_depth, charge_chain_bytes, check_entry_size, check_total_bytes, fallback_entry,
     is_metadata_entry, read_limited, with_depth_scope,
 };
+#[cfg(feature = "sevenz")]
 pub use sevenz::SevenZConverter;
-pub use single::{GzConverter, XzConverter, ZstConverter};
-pub use tar::{TarConverter, TarGzConverter};
+#[cfg(feature = "gzip")]
+pub use single::GzConverter;
+#[cfg(feature = "xz")]
+pub use single::XzConverter;
+#[cfg(feature = "zstd")]
+pub use single::ZstConverter;
+#[cfg(feature = "tar")]
+pub use tar::TarConverter;
+#[cfg(all(feature = "tar", feature = "gzip"))]
+pub use tar::TarGzConverter;
 
 use std::sync::{Arc, OnceLock};
 

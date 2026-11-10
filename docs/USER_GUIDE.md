@@ -88,8 +88,8 @@ alch formats
 | `html` / `epub` / `ipynb` | html/htm、epub、ipynb | 结构化文本解析 |
 | `docx` / `pptx` | OOXML 族 | 原生 XML（表格 xlsx/xls/xlsb/ods 不支持） |
 | `pdf` | pdf | pdf-extract 文本 + TOC 剔除/结构启发 |
-| `html-deep`（feature `html-deep`） | html/htm | 自研迭代状态机 → htmd 兜底；`--extract-main` 主内容提取、`--base-url` 链接绝对化；含 `<math` 自动路由 htmd 保真 |
-| `mineru`（feature+配置） | pdf | 云端高保真，链尾 |
+| `html-deep`（feature `html`） | html/htm | 自研迭代状态机 → htmd 兜底；`--extract-main` 主内容提取、`--base-url` 链接绝对化；含 `<math` 自动路由 htmd 保真 |
+| `mineru`（feature `pdf-cloud`+配置） | pdf | 云端高保真，链尾 |
 | `latex-source` | tex/latex | pandoc 探测，缺失时围栏兜底 |
 | `image` / `audio` / `video` / `subtitle` | 图片/音频/视频/字幕族 | 见下文进阶用法 |
 | `zip`（facade） | zip | 递归容器，嵌套 zip 不支持 |
@@ -138,7 +138,7 @@ alch convert paper.pdf
 
 ### 🔢 ASR 模型 bundle
 
-feature `asr` 的本地转录（Qwen3-ASR + silero VAD）需要模型 bundle 与 onnxruntime 动态库：
+feature `audio` 的本地转录（Qwen3-ASR + silero VAD）需要模型 bundle 与 onnxruntime 动态库：
 
 1. 目录布局：`qwen3-conv_frontend.onnx`、`qwen3-encoder.int8.onnx`、`qwen3-decoder.int8.onnx`、`silero_vad.onnx`、`tokenizer/`。
 2. `ALCHEMIZE_TRANSCRIBE_MODELS` 指向该目录（不设置则探测 `~/.cache/alchemize/models/transcribe/`）。
@@ -182,7 +182,7 @@ srt/vtt/ass/ssa 原生解析（aspasia），输出时间码列表，不经 ffmpe
 
 图片视觉与音频转录都是端口：`with_vision_provider(Arc<dyn VisionProvider>)`、`with_transcribe_provider(Arc<dyn TranscribeProvider>)`。不注入时对应转换降级为元数据 markdown（含尺寸/时长/哈希），无内置云兜底。
 
-### 🧲 主内容提取与链接绝对化（feature `html-deep`）
+### 🧲 主内容提取与链接绝对化（feature `html`）
 
 ```bash
 # 只转正文（readability 提取，去导航/页脚噪声；失败诚实回退全页）
@@ -212,7 +212,7 @@ cargo build --release --features mcp   # 产出 alch-mcp
 # { "command": "/path/to/alch-mcp" }
 ```
 
-`alch-mcp` 经 sdforge（rmcp，stdio 传输——传输面无网络出口，convert 工具本身的网络能力随 mineru 特性）把 convert / doctor / formats 暴露为 MCP 工具，参数 schema 由端点签名生成；与 CLI 共享同一份端点定义。
+`alch-mcp` 经 sdforge（rmcp，stdio 传输——传输面无网络出口，convert 工具本身的网络能力随 `pdf-cloud` 特性）把 convert / doctor / formats 暴露为 MCP 工具，参数 schema 由端点签名生成；与 CLI 共享同一份端点定义。
 
 ### 🔭 作为库集成
 

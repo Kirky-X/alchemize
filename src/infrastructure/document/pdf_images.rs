@@ -14,7 +14,7 @@
 //!   reason recorded in `Extraction::skipped` — surfaced in conversion
 //!   metadata, never silently dropped.
 
-#![cfg(feature = "pdfium")]
+#![cfg(feature = "pdf-local")]
 
 use std::collections::HashMap;
 

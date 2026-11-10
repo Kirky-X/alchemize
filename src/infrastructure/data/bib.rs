@@ -1,4 +1,4 @@
-#![cfg(feature = "data")]
+#![cfg(feature = "bibtex")]
 
 //! BibTeX / BibLaTeX bibliography converter (T026).
 

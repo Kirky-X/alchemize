@@ -55,14 +55,14 @@ cargo install --path . --features full   # 或 cargo build --release
 
 ```bash
 cargo build                        # 最小化：纯本地，零外部服务
-cargo build --features mineru      # 云端 PDF 高保真（还需配置端点）
-cargo build --features asr         # 本地转录（还需模型 bundle + ORT 库）
+cargo build --features pdf-cloud   # 云端 PDF 高保真（还需配置端点）
+cargo build --features audio       # 本地转录（还需模型 bundle + ORT 库）
 cargo build --features full        # 全量
 ```
 
 ### ❓ 不同特性组合的依赖数量差别有多大？
 
-default 档无任何网络/云相关依赖（reqwest/limiteron/futures 均为可选）；`mineru` 引入 reqwest+limiteron+futures；`asr` 引入 vecboost（ort/ONNX 栈，path 依赖）。特性关闭的引擎不参与编译，二进制更小、审计面更小。
+default 档无任何网络/云相关依赖（reqwest/limiteron/futures 均为可选）；`pdf-cloud` 引入 reqwest+limiteron+futures；`audio` 引入 vecboost（ort/ONNX 栈，path 依赖）。特性关闭的引擎不参与编译，二进制更小、审计面更小。
 
 ### ❓ 系统要求是什么？
 
@@ -94,7 +94,7 @@ alch doctor && alch formats         # 先看引擎与格式
 | 手写文档 / 结构即内容 | 不开（readability 启发式可能裁掉需要的结构） |
 | 法律/合同全量存档 | 不开或先对比（提取产出为正文 markdown：段落/图片保留，页面级排版变平） |
 
-安全网：提取失败或无正文可提时**自动回退全页转换**，开着不会丢内容。两条路径可由质量标签区分——提取路径 `local_fallback`、全页路径 `local_full`（stderr 摘要与 `quality` 字段）。实测明细见[用户指南 · 主内容提取](USER_GUIDE.md#-主内容提取与链接绝对化feature-html-deep)。
+安全网：提取失败或无正文可提时**自动回退全页转换**，开着不会丢内容。两条路径可由质量标签区分——提取路径 `local_fallback`、全页路径 `local_full`（stderr 摘要与 `quality` 字段）。实测明细见[用户指南 · 主内容提取](USER_GUIDE.md#-主内容提取与链接绝对化feature-html)。
 
 ### ❓ Alchemize 安全吗？
 

@@ -136,29 +136,29 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | Category | Extensions | Engine (priority) | Feature |
 | --- | --- | --- | --- |
 | Word (OOXML) | docx | docx-deep(18) → docx(10) | — |
-| Word (legacy) | doc, rtf | legacy-office(15, LibreOffice) | `libreoffice` |
+| Word (legacy) | doc, rtf | legacy-office(15, LibreOffice) | `legacy-office` |
 | OpenDocument text | odt | odt-deep(18) | — |
-| Presentations | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `libreoffice` (legacy binary only) |
+| Presentations | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `legacy-office` (legacy binary only) |
 | Spreadsheets | — (not supported) | The spreadsheet parser was removed: calamine materialization (shared strings, styles/theme, ODS repeats and text expansion) cannot be bounded by a pre-check; xlsx/xls/xlsb/ods are unsupported | — |
-| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdfium` / `mineru` |
-| Web / e-book | html, htm / epub | html(htmd) → html-deep(15) / epub | `html-deep` (html-deep) |
+| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdf-local` / `pdf-cloud` |
+| Web / e-book | html, htm / epub | html(htmd) → html-deep(15) / epub | `html` (html-deep) |
 | Plain text / code | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 code extensions | text (fenced) | — |
 | Tabular text | csv, tsv, psv | csv (delimiter sensing) | — |
 | Markup languages | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | — |
 | Notebooks | ipynb | ipynb | — |
 | Images | png, jpg, jpeg, gif, webp, bmp, tif, tiff, svg / heic, heif | image (optional Vision) / heic (sips or metadata) | — |
-| Audio | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio (optional ASR) | `asr` |
-| Video | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video (ffmpeg + optional ASR/Vision) | `asr` (transcription) |
+| Audio | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio (optional ASR) | `audio` |
+| Video | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video (ffmpeg + optional ASR/Vision) | `audio` (transcription) |
 | Subtitles | srt, vtt, ass, ssa, lrc | subtitle | — |
-| E-mail | eml | eml | `eml` |
-| Structured data | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `data` |
-| Archives | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip recursion / tar family / 7z | `containers` (all but zip) |
+| E-mail | eml | eml | `email` |
+| Structured data | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `parquet` / `sqlite` / `bibtex` |
+| Archives | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip recursion / tar family / 7z | `tar`/`gzip`/`xz`/`zstd`/`sevenz` (all but zip) |
 
 ### 🧭 Core Concepts
 
 - **Registry & fallback chain**: engines for an extension are tried in descending `priority()`; on failure the next engine takes over; `Unavailable` engines are skipped with the reason recorded.
 - **Quality tiers**: every output is labeled `api` (cloud high-fidelity) / `local_full` (full local) / `local_fallback` (degraded local), recorded in `metadata` and the stderr summary line together with the actual engine name.
-- **Local first**: the PDF chain is pdfium(20, optional feature) → pdf-extract(10) → MinerU(5, chain tail once configured) — the cloud is only a fallback after the local chain fails.
+- **Local first**: the PDF chain is pdfium(20, `pdf-local` feature) → pdf-extract(10) → MinerU(5, chain tail once configured) — the cloud is only a fallback after the local chain fails.
 
 ---
 
@@ -169,23 +169,23 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | Preset | Command | Use case |
 | --- | --- | --- |
 | Minimal | `cargo build` | pure local conversion, zero external services |
-| Recommended | `cargo build --features containers,data,eml,libreoffice` | + archives / structured data / e-mail / legacy Office (needs soffice) |
+| Recommended | `cargo build --features tar,gzip,xz,zstd,sevenz,parquet,sqlite,bibtex,email,legacy-office` | + archives / structured data / e-mail / legacy Office (needs soffice) |
 | Production | `cargo build --features full` | + MinerU cloud PDF + local ASR + html-deep |
 
 ### 📋 Feature Matrix
 
 | feature | Pulls in | Notes |
 | --- | --- | --- |
-| `mineru` | MinerU cloud PDF engine (reqwest/limiteron) | registered only after the endpoint is configured via `ALCHEMIZE_MINERU_URL` |
-| `pdfium` | local high-fidelity PDF engine (pdfium-render) | probes the dynamic library at runtime; falls back to pdf-extract. Embedded images come from a lopdf structure walk (DCT/JPX passthrough, samples re-encoded to PNG, unsupported items counted explicitly) |
-| `libreoffice` | legacy binary Office engine (external soffice) | doc/rtf→docx and ppt/pps/pot→pptx, then the deep chain; degrades when absent |
-| `containers` | archive family (tar/tgz/gz/xz/zst/7z) | recursive conversion, magic-byte detection of the inner format |
-| `data` | structured data engines (parquet/sqlite/bib) | streaming parquet with a 100k-row cap, read-only sqlite, biblatex entries |
-| `eml` | e-mail engine (mail-parser) | headers / body / attachment list |
-| `asr` | vecboost transcription facade + Whisper-compatible API | Qwen3-ASR ONNX + silero VAD, path dependency on sibling crate vecboost |
+| `pdf-cloud` | MinerU cloud PDF engine (reqwest/limiteron) | registered only after the endpoint is configured via `ALCHEMIZE_MINERU_URL` |
+| `pdf-local` | local high-fidelity PDF engine (pdfium-render) | probes the dynamic library at runtime; falls back to pdf-extract. Embedded images come from a lopdf structure walk (DCT/JPX passthrough, samples re-encoded to PNG, unsupported items counted explicitly) |
+| `legacy-office` | legacy binary Office engine (external soffice) | doc/rtf→docx and ppt/pps/pot→pptx, then the deep chain; degrades when absent |
+| `tar`/`gzip`/`xz`/`zstd`/`sevenz` | archive family, split into five per-format features (tar/tgz/gz/xz/zst/7z; `.tgz` needs `tar`+`gzip`) | recursive conversion, magic-byte detection of the inner format |
+| `parquet`/`sqlite`/`bibtex` | structured data engines, split into three per-format features (parquet/sqlite/bib) | streaming parquet with a 100k-row cap, read-only sqlite, biblatex entries |
+| `email` | e-mail engine (mail-parser) | headers / body / attachment list |
+| `audio` | vecboost transcription facade + Whisper-compatible API | Qwen3-ASR ONNX + silero VAD, path dependency on sibling crate vecboost |
 | `mcp` | MCP tool surface (`alch-mcp` stdio server) | convert/doctor/formats exposed as MCP tools; CLI wrapping (sdforge) always on |
-| `html-deep` | html-deep engine (native iterative state machine → htmd fallback) | main-content extraction (`--extract-main`) and link absolutization (`--base-url`); pages with LaTeX math auto-route to htmd for fidelity |
-| `full` | all of the above (`mineru`+`asr`+`html-deep`+`containers`+`data`+`eml`+`libreoffice`) | |
+| `html` | html-deep engine (native iterative state machine → htmd fallback) | main-content extraction (`--extract-main`) and link absolutization (`--base-url`); pages with LaTeX math auto-route to htmd for fidelity |
+| `full` | all of the above (`pdf-cloud`+`pdf-local`+`audio`+`email`+`legacy-office`+`html`+`tar`/`gzip`/`xz`/`zstd`/`sevenz`+`parquet`/`sqlite`/`bibtex`, 14 in total) | |
 
 Default is `default = ["cli"]` (CLI wrapping always on) — engines behind disabled features are not compiled at all.
 

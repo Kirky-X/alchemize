@@ -5,7 +5,7 @@
 //! math 保真路由、主内容提取、链接绝对化。引擎行为契约
 //! 见 specmark/specs/html-deep/spec.md。
 
-#![cfg(feature = "html-deep")]
+#![cfg(feature = "html")]
 
 use alchemize::application::builder::{AlchemizeBuilder, AssetMode, HtmlDeepEngineConfig};
 use alchemize::application::ports::Converter;

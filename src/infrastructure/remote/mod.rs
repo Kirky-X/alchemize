@@ -3,5 +3,5 @@
 
 //! Remote service clients.
 
-#[cfg(feature = "mineru")]
+#[cfg(feature = "pdf-cloud")]
 pub mod mineru;

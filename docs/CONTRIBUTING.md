@@ -52,10 +52,10 @@ cargo build --features full
 
 | feature | 引入 | 说明 |
 | --- | --- | --- |
-| `mineru` | MinerU 云端 PDF 引擎 | 需 `ALCHEMIZE_MINERU_URL` 配置端点才注册 |
-| `asr` | vecboost 转录门面（Qwen3-ASR ONNX + silero VAD） | 需模型 bundle + `ORT_DYLIB_PATH` |
+| `pdf-cloud` | MinerU 云端 PDF 引擎 | 需 `ALCHEMIZE_MINERU_URL` 配置端点才注册 |
+| `audio` | vecboost 转录门面（Qwen3-ASR ONNX + silero VAD） | 需模型 bundle + `ORT_DYLIB_PATH` |
 | `mcp` | MCP 工具面（alch-mcp，rmcp stdio） | CLI 封装（sdforge cli）恒在 |
-| `html-deep` | html-deep 自研引擎（`document/html_deep/engine/`） | scraper/ego-tree/dom_smoothie/icu_properties 同批可选 |
+| `html` | html-deep 自研引擎（`document/html_deep/engine/`） | scraper/ego-tree/dom_smoothie/icu_properties 同批可选 |
 | `full` | 以上全部 | |
 
 ### 构建与测试

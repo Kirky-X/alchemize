@@ -63,7 +63,7 @@ pub fn default_converters(
     // pdfium 本地高保真 PDF（spec R-self-002：PDF 链 priority 20 顶层）。
     // 动态库缺失时 availability=Unavailable，registry 跳过并记录原因，
     // 落到下方 lopdf extract_text 档。
-    #[cfg(feature = "pdfium")]
+    #[cfg(feature = "pdf-local")]
     engines.push(Box::new(
         crate::infrastructure::document::PdfiumConverter::new(),
     ));
@@ -106,7 +106,7 @@ pub fn default_converters(
     ));
 
     // MinerU remote tier (config-gated; falls through to local on failure).
-    #[cfg(feature = "mineru")]
+    #[cfg(feature = "pdf-cloud")]
     if let Some(cfg) = mineru
         && let Ok(conv) = crate::infrastructure::remote::mineru::MinerUConverter::new(
             crate::infrastructure::remote::mineru::MinerUHttpConfig::from_config(cfg),
@@ -136,7 +136,7 @@ pub fn default_converters(
     ));
 
     // Legacy Office (doc/ppt/rtf) through LibreOffice — feature gated at 15.
-    #[cfg(feature = "libreoffice")]
+    #[cfg(feature = "legacy-office")]
     {
         engines.push(Box::new(
             crate::infrastructure::document::LegacyOfficeConverter::new(),
@@ -146,58 +146,78 @@ pub fn default_converters(
         ));
     }
 
-    // Recursive archive containers (tar/tgz/gz/xz/zst/7z) — feature gated.
-    // Nested conversion dispatches through the assembled registry; the slot
-    // is filled by the builder right after assembly (same post-assembly
-    // wiring as the zip facade). An empty slot degrades entries to
-    // attachments (`registry_wired: false`), so direct callers still work.
-    #[cfg(feature = "containers")]
+    // Recursive archive containers — per-format features (capability-named):
+    // tar / gzip / xz / zstd / sevenz. The combined `.tgz` format requires
+    // both `tar` and `gzip` (cfg(all)). Nested conversion dispatches through
+    // the assembled registry; the slot is filled by the builder right after
+    // assembly (same post-assembly wiring as the zip facade). An empty slot
+    // degrades entries to attachments (`registry_wired: false`), so direct
+    // callers still work.
+    #[cfg(any(
+        feature = "tar",
+        feature = "gzip",
+        feature = "xz",
+        feature = "zstd",
+        feature = "sevenz"
+    ))]
     {
         use crate::infrastructure::containers::RegistrySlot;
         let slot: RegistrySlot = Arc::clone(container_registry_slot);
+        #[cfg(feature = "tar")]
         engines.push(Box::new(
             crate::infrastructure::containers::TarConverter::with_registry_slot(Arc::clone(&slot)),
         ));
+        #[cfg(all(feature = "tar", feature = "gzip"))]
         engines.push(Box::new(
             crate::infrastructure::containers::TarGzConverter::with_registry_slot(Arc::clone(
                 &slot,
             )),
         ));
+        #[cfg(feature = "gzip")]
         engines.push(Box::new(
             crate::infrastructure::containers::GzConverter::with_registry_slot(Arc::clone(&slot)),
         ));
+        #[cfg(feature = "xz")]
         engines.push(Box::new(
             crate::infrastructure::containers::XzConverter::with_registry_slot(Arc::clone(&slot)),
         ));
+        #[cfg(feature = "zstd")]
         engines.push(Box::new(
             crate::infrastructure::containers::ZstConverter::with_registry_slot(Arc::clone(&slot)),
         ));
+        #[cfg(feature = "sevenz")]
         engines.push(Box::new(
             crate::infrastructure::containers::SevenZConverter::with_registry_slot(slot),
         ));
     }
-    #[cfg(not(feature = "containers"))]
+    #[cfg(not(any(
+        feature = "tar",
+        feature = "gzip",
+        feature = "xz",
+        feature = "zstd",
+        feature = "sevenz"
+    )))]
     let _ = container_registry_slot;
 
     // E-mail (eml) — feature gated.
-    #[cfg(feature = "eml")]
+    #[cfg(feature = "email")]
     engines.push(Box::new(
         crate::infrastructure::document::EmlConverter::new(),
     ));
 
-    // Structured data engines (parquet/sqlite/bib) — feature gated.
-    #[cfg(feature = "data")]
-    {
-        engines.push(Box::new(
-            crate::infrastructure::data::ParquetConverter::new(),
-        ));
-        engines.push(Box::new(crate::infrastructure::data::SqliteConverter::new()));
-        engines.push(Box::new(crate::infrastructure::data::BibConverter::new()));
-    }
+    // Structured data engines — per-format features (capability-named).
+    #[cfg(feature = "parquet")]
+    engines.push(Box::new(
+        crate::infrastructure::data::ParquetConverter::new(),
+    ));
+    #[cfg(feature = "sqlite")]
+    engines.push(Box::new(crate::infrastructure::data::SqliteConverter::new()));
+    #[cfg(feature = "bibtex")]
+    engines.push(Box::new(crate::infrastructure::data::BibConverter::new()));
 
-    // html-deep：自研引擎主 + htmd 兜底转换链（feature html-deep 门控，
+    // html：自研引擎主 + htmd 兜底转换链（feature html 门控，
     // priority 15 压过 html/htmd 的 10；base_url/extract_main 显式选项）。
-    #[cfg(feature = "html-deep")]
+    #[cfg(feature = "html")]
     if let Some(cfg) = html_deep {
         engines.push(Box::new(
             crate::infrastructure::document::html_deep::HtmlDeepConverter::new(
@@ -212,11 +232,11 @@ pub fn default_converters(
     // stay out of the registry itself — otherwise a nested .zip entry would
     // recurse without bound.
     //
-    // Feature-off silencing: `mineru`/`html_deep` are consumed above only
+    // Feature-off silencing: `pdf-cloud`/`html_deep` are consumed above only
     // when their cargo feature is compiled in.
-    #[cfg(not(feature = "mineru"))]
+    #[cfg(not(feature = "pdf-cloud"))]
     let _ = mineru;
-    #[cfg(not(feature = "html-deep"))]
+    #[cfg(not(feature = "html"))]
     let _ = html_deep;
     engines
 }

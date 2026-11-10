@@ -337,9 +337,9 @@ impl AlchemizeBuilder {
 
         // html-deep：feature html-deep 编译即注册（默认配置）；with_html_deep 仅
         // 定制 base_url/extract_main——「编译即可用」的注册语义。
-        #[cfg(feature = "html-deep")]
+        #[cfg(feature = "html")]
         let html_deep = Some(self.html_deep.clone().unwrap_or_default());
-        #[cfg(not(feature = "html-deep"))]
+        #[cfg(not(feature = "html"))]
         let html_deep = self.html_deep.clone();
 
         // Container converters dispatch nested entries through the assembled
@@ -560,7 +560,7 @@ mod tests {
 
     /// html-deep feature 下同样逐字节相等，且两端口溯源均为 html-deep 引擎
     /// （math 路由语料的兜底 htmd 输出也以顶层转换器名义入库）。
-    #[cfg(feature = "html-deep")]
+    #[cfg(feature = "html")]
     #[tokio::test]
     async fn facade_sync_matches_async_byte_for_byte_html_deep() {
         let corpora = [

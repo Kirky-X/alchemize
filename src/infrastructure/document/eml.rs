@@ -5,7 +5,7 @@
 //! Uses `mail-parser` rather than the `mail` crate: `mail` pulls
 //! `mail-internals` with an unfixed use-after-free (RUSTSEC-2023-0054).
 
-#![cfg(feature = "eml")]
+#![cfg(feature = "email")]
 
 use async_trait::async_trait;
 

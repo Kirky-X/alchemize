@@ -1,4 +1,4 @@
-#![cfg(feature = "containers")]
+#![cfg(feature = "tar")]
 
 //! TAR archive converter with recursive extraction (T020).
 
@@ -100,10 +100,12 @@ impl Converter for TarConverter {
 /// detects the inner tar and recurses into [`TarConverter`] via the registry.
 /// This converter handles `.tgz` directly and `.tar.gz` when an explicit
 /// extension override names it.
+#[cfg(feature = "gzip")]
 pub struct TarGzConverter {
     base: ContainerBase,
 }
 
+#[cfg(feature = "gzip")]
 impl TarGzConverter {
     /// Create with a deferred registry slot (builder wiring: filled once the
     /// enclosing registry is assembled). If the slot stays empty, entries
@@ -123,6 +125,7 @@ impl TarGzConverter {
 }
 
 #[async_trait]
+#[cfg(feature = "gzip")]
 impl Converter for TarGzConverter {
     fn name(&self) -> &'static str {
         "tar-gz"
@@ -341,6 +344,7 @@ mod tests {
         assert_eq!(result.metadata["file_count"], 0);
     }
 
+    #[cfg(feature = "gzip")]
     #[tokio::test]
     async fn convert_tgz_roundtrip() {
         let converter = TarGzConverter::with_arc(registry_with_text());

@@ -7,6 +7,23 @@ alchemize 所有显著变更记录于此文件。
 
 ## [Unreleased]
 
+### 破坏性变更
+
+- **Cargo feature 重命名为能力名并按格式拆分**：8 个 feature 调整——6 个重命名 + 2 个按格式拆分；`full` 伞面成员同步为新 14 名集合；不保留旧名别名，旧 `--features` 组合需按新名更新。
+
+| 旧 feature | 新 feature |
+| --- | --- |
+| `html-deep` | `html` |
+| `pdfium` | `pdf-local` |
+| `mineru` | `pdf-cloud` |
+| `asr` | `audio` |
+| `libreoffice` | `legacy-office` |
+| `eml` | `email` |
+| `containers`（拆分） | `tar` / `gzip` / `xz` / `zstd` / `sevenz`（`.tgz` 需 `tar`+`gzip`） |
+| `data`（拆分） | `parquet` / `sqlite` / `bibtex` |
+
+- `full` 伞面成员更新为：`pdf-cloud`+`pdf-local`+`audio`+`email`+`legacy-office`+`html`+`tar`+`gzip`+`xz`+`zstd`+`sevenz`+`parquet`+`sqlite`+`bibtex`（14 个）。
+
 ### 新增
 
 - **PDF 解压炸弹防护**：vendor `lopdf 0.42.0` 分叉（`third_party/lopdf`，`[patch.crates-io]` 接入，MIT 随包携带）给 FlateDecode/LZWDecode 流解压加每流 64 MiB 输出上限（对齐容器族 `MAX_ENTRY_BYTES`），单一收口覆盖 parse 阶段 ObjStm/XRefStm 与 pdf-extract 内容流/ICC 流全部路径；`decompress_predictor` 增加 DecodeParms 几何护栏；分叉线程本位违规标记供宿主在 pdf-extract 吞错后显性拒绝（`AlchemizeError::Pdf`），转换器与 CLI 端到端验证 100 MB 膨胀炸弹被拒（峰值 RSS 79 MB）。

@@ -32,14 +32,14 @@ fn build_alch(
         builder = builder.with_no_remote();
     }
     if base_url.is_some() || extract_main {
-        #[cfg(feature = "html-deep")]
+        #[cfg(feature = "html")]
         {
             builder = builder.with_html_deep(alchemize::HtmlDeepEngineConfig {
                 base_url,
                 extract_main,
             });
         }
-        #[cfg(not(feature = "html-deep"))]
+        #[cfg(not(feature = "html"))]
         {
             let _ = (&base_url, &extract_main);
             eprintln!(

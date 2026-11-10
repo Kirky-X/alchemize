@@ -251,7 +251,7 @@ async fn accuracy_odt_pptx_content_preserved() {
     }
 }
 
-#[cfg(feature = "data")]
+#[cfg(all(feature = "parquet", feature = "sqlite", feature = "bibtex"))]
 #[tokio::test]
 async fn accuracy_bib_sqlite_parquet_contents() {
     let (md, _) = convert("real.bib").await;

@@ -435,7 +435,7 @@ impl HtmlDeepConverter {
     }
 }
 
-#[cfg(all(test, feature = "html-deep"))]
+#[cfg(all(test, feature = "html"))]
 mod tests {
     use super::*;
     use crate::application::ports::Converter as _;

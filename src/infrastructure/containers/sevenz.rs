@@ -1,4 +1,4 @@
-#![cfg(feature = "containers")]
+#![cfg(feature = "sevenz")]
 
 //! 7z archive converter with recursive extraction (T027).
 //!

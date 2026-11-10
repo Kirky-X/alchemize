@@ -1,4 +1,4 @@
-#![cfg(feature = "data")]
+#![cfg(feature = "sqlite")]
 
 //! SQLite database converter — schema and sample rows as markdown (T025).
 //!

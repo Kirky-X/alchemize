@@ -1,4 +1,4 @@
-#![cfg(feature = "containers")]
+#![cfg(any(feature = "gzip", feature = "xz", feature = "zstd"))]
 
 //! Single-file compressed stream converters: gz / xz / zst (T021).
 //!
@@ -26,20 +26,24 @@ use crate::infrastructure::containers::{
 };
 
 /// Converts gzip-compressed single files (`.gz`).
+#[cfg(feature = "gzip")]
 pub struct GzConverter {
     base: ContainerBase,
 }
 
 /// Converts xz-compressed single files (`.xz`).
+#[cfg(feature = "xz")]
 pub struct XzConverter {
     base: ContainerBase,
 }
 
 /// Converts zstd-compressed single files (`.zst`).
+#[cfg(feature = "zstd")]
 pub struct ZstConverter {
     base: ContainerBase,
 }
 
+#[cfg(feature = "gzip")]
 impl GzConverter {
     /// Create with a deferred registry slot (builder wiring: filled once the
     /// enclosing registry is assembled). If the slot stays empty, the payload
@@ -58,6 +62,7 @@ impl GzConverter {
     }
 }
 
+#[cfg(feature = "xz")]
 impl XzConverter {
     /// Create with a deferred registry slot (builder wiring: filled once the
     /// enclosing registry is assembled). If the slot stays empty, the payload
@@ -76,6 +81,7 @@ impl XzConverter {
     }
 }
 
+#[cfg(feature = "zstd")]
 impl ZstConverter {
     /// Create with a deferred registry slot (builder wiring: filled once the
     /// enclosing registry is assembled). If the slot stays empty, the payload
@@ -94,6 +100,7 @@ impl ZstConverter {
     }
 }
 
+#[cfg(feature = "gzip")]
 fn gz_decompress(bytes: &[u8]) -> Result<Vec<u8>, AlchemizeError> {
     read_limited(
         flate2::read::GzDecoder::new(Cursor::new(bytes)),
@@ -102,6 +109,7 @@ fn gz_decompress(bytes: &[u8]) -> Result<Vec<u8>, AlchemizeError> {
     )
 }
 
+#[cfg(feature = "xz")]
 fn xz_decompress(bytes: &[u8]) -> Result<Vec<u8>, AlchemizeError> {
     read_limited(
         xz2::read::XzDecoder::new(Cursor::new(bytes)),
@@ -110,6 +118,7 @@ fn xz_decompress(bytes: &[u8]) -> Result<Vec<u8>, AlchemizeError> {
     )
 }
 
+#[cfg(feature = "zstd")]
 fn zst_decompress(bytes: &[u8]) -> Result<Vec<u8>, AlchemizeError> {
     let decoder = zstd::stream::read::Decoder::new(Cursor::new(bytes))
         .map_err(|e| AlchemizeError::other(format!("zst: failed to start decoder: {e}")))?;
@@ -293,6 +302,7 @@ fn finish_inner(
 }
 
 #[async_trait]
+#[cfg(feature = "gzip")]
 impl Converter for GzConverter {
     fn name(&self) -> &'static str {
         "gz"
@@ -308,6 +318,7 @@ impl Converter for GzConverter {
 }
 
 #[async_trait]
+#[cfg(feature = "xz")]
 impl Converter for XzConverter {
     fn name(&self) -> &'static str {
         "xz"
@@ -323,6 +334,7 @@ impl Converter for XzConverter {
 }
 
 #[async_trait]
+#[cfg(feature = "zstd")]
 impl Converter for ZstConverter {
     fn name(&self) -> &'static str {
         "zst"
@@ -351,45 +363,59 @@ mod tests {
         Arc::new(registry)
     }
 
+    #[cfg(feature = "gzip")]
     fn gz_bytes(data: &[u8]) -> Vec<u8> {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         encoder.write_all(data).unwrap();
         encoder.finish().unwrap()
     }
 
+    #[cfg(feature = "xz")]
     fn xz_bytes(data: &[u8]) -> Vec<u8> {
         let mut encoder = xz2::write::XzEncoder::new(Vec::new(), 1);
         encoder.write_all(data).unwrap();
         encoder.finish().unwrap()
     }
 
+    #[cfg(feature = "zstd")]
     fn zst_bytes(data: &[u8]) -> Vec<u8> {
         let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 1).unwrap();
         encoder.write_all(data).unwrap();
         encoder.finish().unwrap()
     }
 
+    #[cfg(feature = "gzip")]
     #[test]
-    fn supported_extensions_and_names() {
+    fn supported_extensions_and_names_gz() {
         assert_eq!(
             GzConverter::with_arc(Arc::new(ConverterRegistry::new())).supported_extensions(),
             &["gz"]
         );
         assert_eq!(
+            GzConverter::with_arc(Arc::new(ConverterRegistry::new())).name(),
+            "gz"
+        );
+    }
+
+    #[cfg(feature = "xz")]
+    #[test]
+    fn supported_extensions_and_names_xz() {
+        assert_eq!(
             XzConverter::with_arc(Arc::new(ConverterRegistry::new())).supported_extensions(),
             &["xz"]
         );
         assert_eq!(
-            ZstConverter::with_arc(Arc::new(ConverterRegistry::new())).supported_extensions(),
-            &["zst"]
-        );
-        assert_eq!(
-            GzConverter::with_arc(Arc::new(ConverterRegistry::new())).name(),
-            "gz"
-        );
-        assert_eq!(
             XzConverter::with_arc(Arc::new(ConverterRegistry::new())).name(),
             "xz"
+        );
+    }
+
+    #[cfg(feature = "zstd")]
+    #[test]
+    fn supported_extensions_and_names_zst() {
+        assert_eq!(
+            ZstConverter::with_arc(Arc::new(ConverterRegistry::new())).supported_extensions(),
+            &["zst"]
         );
         assert_eq!(
             ZstConverter::with_arc(Arc::new(ConverterRegistry::new())).name(),
@@ -409,6 +435,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gzip")]
     async fn gz_routes_by_filename_to_text() {
         let converter = GzConverter::with_arc(registry());
         let result = converter
@@ -423,6 +450,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gzip")]
     async fn gz_routes_by_filename_to_csv() {
         let converter = GzConverter::with_arc(registry());
         let csv = b"a,b\n1,2\n".as_slice();
@@ -435,6 +463,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gzip")]
     async fn gz_magic_assist_when_filename_hint_unknown() {
         // PNG payload under a name the registry cannot match by extension.
         let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
@@ -450,6 +479,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gzip")]
     async fn gz_fallback_for_binary_payload() {
         let converter = GzConverter::with_arc(registry());
         let binary: Vec<u8> = (0..=255u8).collect();
@@ -464,6 +494,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "xz")]
     async fn xz_routes_by_filename() {
         let converter = XzConverter::with_arc(registry());
         let result = converter
@@ -476,6 +507,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "xz")]
     async fn xz_invalid_bytes_error() {
         let converter = XzConverter::with_arc(registry());
         let err = converter
@@ -486,6 +518,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "zstd")]
     async fn zst_routes_by_filename() {
         let converter = ZstConverter::with_arc(registry());
         let result = converter
@@ -498,6 +531,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "zstd")]
     async fn zst_invalid_bytes_error() {
         let converter = ZstConverter::with_arc(registry());
         let err = converter
@@ -508,6 +542,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(all(feature = "gzip", feature = "tar"))]
     async fn gz_nested_tar_recursion() {
         // A tar.gz routes gz -> tar through the registry when both are wired.
         let mut registry = ConverterRegistry::new();
@@ -539,6 +574,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gzip")]
     async fn gzip_bomb_rejected_not_oome() {
         // 100MB of zeros compress to a few hundred KB; decompression must
         // stop at the 64MB limit with an explicit error.
@@ -562,6 +598,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "gzip")]
     async fn gz_unwired_slot_degrades_without_error() {
         // Direct `default_converters` callers may never fill the slot; the
         // stream must still convert into a fenced block, flagged in metadata.
@@ -576,6 +613,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(all(feature = "gzip", feature = "tar"))]
     async fn gz_depth_chain_propagates_depth_rejection() {
         // gz -> tar -> tar -> tar: the 4th container exceeds MAX_DEPTH. The
         // gz wrapper must not swallow the rejection (or inline the tar bytes

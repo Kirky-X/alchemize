@@ -3,7 +3,7 @@
 
 //! Whisper-compatible HTTP transcription backend (feature `asr`).
 
-#![cfg(feature = "asr")]
+#![cfg(feature = "audio")]
 
 use async_trait::async_trait;
 

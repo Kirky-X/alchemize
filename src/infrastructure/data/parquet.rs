@@ -1,4 +1,4 @@
-#![cfg(feature = "data")]
+#![cfg(feature = "parquet")]
 
 //! Apache Parquet converter — schema + rows rendered as a markdown table (T024).
 

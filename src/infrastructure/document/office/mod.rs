@@ -6,11 +6,11 @@ pub mod odt;
 pub mod omml;
 pub mod pptx_deep;
 
-#[cfg(feature = "libreoffice")]
+#[cfg(feature = "legacy-office")]
 pub mod legacy_office;
 
 pub use docx::DocxDeepConverter;
-#[cfg(feature = "libreoffice")]
+#[cfg(feature = "legacy-office")]
 pub use legacy_office::{LegacyOfficeConverter, LegacyPptConverter};
 pub use odp::OdpConverter;
 pub use odt::OdtConverter;
