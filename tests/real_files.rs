@@ -132,6 +132,7 @@ async fn real_html_extracts_license_body_without_css() {
 }
 
 /// Whether a `soffice` binary is on PATH (legacy RTF needs it).
+#[cfg(feature = "libreoffice")]
 fn soffice_available() -> bool {
     std::env::var("PATH")
         .map(|p| {

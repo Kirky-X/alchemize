@@ -32,7 +32,6 @@ pub fn check_delimiter_parity(md: &str) -> Vec<LatexWarning> {
     let mut singles = 0usize;
     let chars: Vec<char> = md.chars().collect();
     let mut i = 0usize;
-    let mut line = 1usize;
     while i < chars.len() {
         match chars[i] {
             '\\' => {
@@ -40,7 +39,6 @@ pub fn check_delimiter_parity(md: &str) -> Vec<LatexWarning> {
                 continue;
             }
             '\n' => {
-                line += 1;
                 i += 1;
                 continue;
             }
@@ -66,9 +64,6 @@ pub fn check_delimiter_parity(md: &str) -> Vec<LatexWarning> {
                     i += 1;
                 }
                 while i < chars.len() {
-                    if chars[i] == '\n' {
-                        line += 1;
-                    }
                     if chars[i] == '`' && md_fence_at(&chars, i) >= fence_len {
                         i += fence_len;
                         break;

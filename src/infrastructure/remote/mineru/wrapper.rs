@@ -17,7 +17,10 @@ use std::time::Duration;
 use tracing::{debug, info};
 
 use super::TaskStatus;
-use super::http_limit::{MAX_ERROR_RESPONSE_BYTES, read_limited_text, truncate_body};
+use super::http_limit::{
+    MAX_ERROR_RESPONSE_BYTES, MAX_POLL_RESPONSE_BYTES, MAX_SUBMIT_RESPONSE_BYTES,
+    read_limited_json, read_limited_text, truncate_body,
+};
 use super::validated_url::validate_base_url;
 use crate::application::ports::Converter;
 use crate::domain::error::AlchemizeError;
@@ -202,7 +205,9 @@ impl MinerUConverter {
             )));
         }
 
-        let result: TaskSubmitResponse = resp.json().await.map_err(|e| {
+        let result: TaskSubmitResponse = read_limited_json(resp, MAX_SUBMIT_RESPONSE_BYTES)
+            .await
+            .map_err(|e| {
             AlchemizeError::MineruConversion(format!("failed to parse MinerU response: {e}"))
         })?;
 
@@ -233,9 +238,13 @@ impl MinerUConverter {
             )));
         }
 
-        resp.json().await.map_err(|e| {
-            AlchemizeError::MineruConversion(format!("failed to parse MinerU poll response: {e}"))
-        })
+        read_limited_json(resp, MAX_POLL_RESPONSE_BYTES)
+            .await
+            .map_err(|e| {
+                AlchemizeError::MineruConversion(format!(
+                    "failed to parse MinerU poll response: {e}"
+                ))
+            })
     }
 
     /// Submit and poll until completion or timeout with exponential backoff.

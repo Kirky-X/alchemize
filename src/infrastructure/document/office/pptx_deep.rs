@@ -458,7 +458,6 @@ fn parse_slide(
         let event = match reader.read_event_into(&mut buf) {
             Ok(ev) => ev,
             Err(e) => return Err(AlchemizeError::Xml(format!("slide parse error: {e}"))),
-            _ => break,
         };
         match event {
             Event::Eof => break,

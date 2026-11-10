@@ -408,7 +408,7 @@ fn encode_png(samples: Vec<u8>, width: u32, height: u32, channels: usize) -> Opt
 mod tests {
     use super::*;
     use image::GenericImageView;
-    use lopdf::{dictionary, Stream};
+    use lopdf::{Stream, dictionary};
 
     /// Build a minimal valid PDF around one image XObject dict + payload.
     fn fixture_pdf(image_dict: Dictionary, payload: Vec<u8>) -> Vec<u8> {

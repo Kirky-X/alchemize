@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use crate::application::ports::{Availability, Converter};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
-use crate::domain::result::{ContentType, ConversionQuality, ConvertResult, VideoProcessingMode};
+use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 use crate::infrastructure::document::shared::fence_for;
 
 /// Converts LaTeX source files to markdown.
@@ -31,9 +31,6 @@ impl LatexSourceConverter {
                 == Availability::Available,
         }
     }
-
-    #[allow(clippy::needless_pass_by_value)]
-    fn unused(_mode: VideoProcessingMode) {}
 }
 
 impl Default for LatexSourceConverter {
@@ -179,7 +176,7 @@ fn replace_inline_dollar_backtick(md: &str) -> String {
     let chars: Vec<(usize, char)> = md.char_indices().collect();
     let mut ci = 0usize;
     while ci < chars.len() {
-        let (i, ch) = chars[ci];
+        let (_, ch) = chars[ci];
         if ch == '$' && ci + 1 < chars.len() && chars[ci + 1].1 == '`' {
             let start_inner = chars[ci + 1].0 + '`'.len_utf8();
             let mut j = ci + 2;
@@ -544,8 +541,10 @@ mod noise_tests {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::result::ConversionQuality;
 
     #[test]
     fn supported_extensions() {

@@ -538,41 +538,6 @@ fn blip_asset(e: &quick_xml::events::BytesStart, ctx: &mut BodyCtx) -> Option<us
     ctx.asset_for(&rid)
 }
 
-/// Collect the text content of a nested element up to its closing tag.
-fn collect_text_until_end(reader: &mut Reader<&[u8]>, tag: &[u8]) -> String {
-    let mut out = String::new();
-    let mut depth = 1;
-    let mut buf = Vec::new();
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) => {
-                if e.name()
-                    .as_ref()
-                    .ends_with(std::str::from_utf8(tag).unwrap_or("\0"))
-                {
-                    depth += 1;
-                }
-            }
-            Ok(Event::Text(t)) => out.push_str(&String::from_utf8_lossy(t.as_bytes())),
-            Ok(Event::End(e)) => {
-                if e.name()
-                    .as_ref()
-                    .ends_with(std::str::from_utf8(tag).unwrap_or("\0"))
-                {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-            }
-            Ok(Event::Eof) | Err(_) => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

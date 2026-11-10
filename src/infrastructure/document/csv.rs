@@ -130,11 +130,24 @@ impl Converter for CsvConverter {
         }
 
         let mut lines = Vec::new();
-        lines.push(format!("| {} |", header_vec.join(" | ")));
-        lines.push(format!(
-            "|{}|",
-            (0..col_count).map(|_| "---").collect::<Vec<_>>().join("|")
-        ));
+        // Rows are charged against the shared output budget as they are
+        // rendered: a 100 MB CSV of tiny cells must fail closed instead of
+        // materializing a multi-hundred-MB table.
+        let mut output_bytes = 0usize;
+        let mut push_row = |line: String, bytes: &mut usize| -> Result<(), AlchemizeError> {
+            *bytes = bytes.saturating_add(line.len());
+            crate::infrastructure::document::shared::check_output_budget(*bytes)?;
+            lines.push(line);
+            Ok(())
+        };
+        push_row(format!("| {} |", header_vec.join(" | ")), &mut output_bytes)?;
+        push_row(
+            format!(
+                "|{}|",
+                (0..col_count).map(|_| "---").collect::<Vec<_>>().join("|")
+            ),
+            &mut output_bytes,
+        )?;
 
         // Pass 2: emit rows one at a time.
         let mut row_count = 0usize;
@@ -143,7 +156,7 @@ impl Converter for CsvConverter {
                 result.map_err(|e| AlchemizeError::other(format!("CSV parse error: {e}")))?;
             let mut padded: Vec<String> = record.iter().map(|s| s.to_string()).collect();
             padded.resize(col_count, String::new());
-            lines.push(format!("| {} |", padded.join(" | ")));
+            push_row(format!("| {} |", padded.join(" | ")), &mut output_bytes)?;
             row_count += 1;
         }
 

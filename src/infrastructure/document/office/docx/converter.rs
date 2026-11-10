@@ -10,6 +10,7 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 
 use crate::application::ports::{Availability, Converter};
+#[cfg(test)]
 use crate::domain::asset::Asset;
 use crate::domain::document::Document;
 use crate::domain::error::AlchemizeError;

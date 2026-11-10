@@ -580,7 +580,7 @@ mod tests {
     /// guard must reject before the last page.
     #[tokio::test]
     async fn convert_rejects_cumulative_text_budget() {
-        use lopdf::{dictionary, Object, Stream};
+        use lopdf::{Object, Stream, dictionary};
 
         let mut content = Vec::with_capacity(50 * 1024 * 1024 + 32);
         content.extend_from_slice(b"BT /F1 12 Tf 72 700 Td (");

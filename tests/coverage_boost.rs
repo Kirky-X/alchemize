@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use alchemize::application::builder::{Alchemize, AlchemizeBuilder, AssetMode, MineruConfig};
+use alchemize::application::builder::{AlchemizeBuilder, AssetMode, MineruConfig};
 use alchemize::application::ports::Converter as _;
 use alchemize::application::ports::{
     Availability, TranscribeProvider, Transcript, TranscriptSegment, VisionProvider,

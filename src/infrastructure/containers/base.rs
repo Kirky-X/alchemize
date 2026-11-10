@@ -150,13 +150,13 @@ pub(crate) fn read_limited(
 }
 
 /// True for OS metadata entries that must not become document content:
-/// macOS AppleDouble files (`._name`) and resource-fork folders
-/// (`__MACOSX`). Ordinary dotfiles are payload here (a `.env` inside a tar
-/// may be the document); the zip converter additionally drops hidden files,
-/// which is a deliberate difference, not an inconsistency.
+/// macOS AppleDouble files (`._name` basenames) and resource-fork folders
+/// (`__MACOSX` path segments). Ordinary dotfiles are payload here (a `.env`
+/// inside a tar may be the document); the zip converter additionally drops
+/// hidden files, which is a deliberate difference, not an inconsistency.
 pub(crate) fn is_metadata_entry(name: &str) -> bool {
     let basename = name.rsplit(['/', '\\']).next().unwrap_or(name);
-    basename.starts_with("._") || name.contains("__MACOSX")
+    basename.starts_with("._") || name.split(['/', '\\']).any(|seg| seg == "__MACOSX")
 }
 
 /// Fallback rendering for an entry no converter supports.
@@ -192,9 +192,14 @@ pub(crate) fn fallback_entry(
 
     // A depth-limited entry is a nested container, not a text document:
     // always take the attachment path so the rendered reason is visible.
+    // Text containing control characters (ANSI escapes etc.) is treated as
+    // binary — matching the zip converter's inline branch.
     if !depth_limited
         && let Ok(text) = std::str::from_utf8(bytes)
         && !text.trim().is_empty()
+        && !text
+            .chars()
+            .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
     {
         let body = if text.len() > FALLBACK_TEXT_BYTES {
             let mut cut = FALLBACK_TEXT_BYTES;
@@ -509,9 +514,14 @@ mod tests {
         assert!(is_metadata_entry("._notes.txt"));
         assert!(is_metadata_entry("dir/._notes.txt"));
         assert!(is_metadata_entry("__MACOSX/notes.txt"));
+        assert!(is_metadata_entry("deep/__MACOSX/notes.txt"));
         // Ordinary dotfiles are payload, not OS metadata.
         assert!(!is_metadata_entry(".env"));
         assert!(!is_metadata_entry("config/.hidden"));
+        // Substring lookalikes are payload: only an exact path segment is
+        // AppleDouble metadata.
+        assert!(!is_metadata_entry("notes__MACOSX.md"));
+        assert!(!is_metadata_entry("__MACOSX_legacy/notes.txt"));
     }
 
     #[test]
@@ -557,6 +567,15 @@ mod tests {
         let asset = asset.unwrap();
         assert_eq!(asset.filename, "img.dat");
         assert_eq!(asset.bytes, vec![0xFF, 0xD8, 0xFF, 0x00]);
+    }
+
+    #[test]
+    fn fallback_entry_text_with_control_chars_becomes_asset() {
+        // ANSI escape sequences must not ride into the fenced block.
+        let payload = b"ok\x1b[31mred\x1b[0m";
+        let (md, asset) = fallback_entry("term.log", payload, false);
+        assert!(md.contains("Attachment"), "{md}");
+        assert!(asset.is_some());
     }
 
     #[tokio::test]
