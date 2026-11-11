@@ -22,7 +22,7 @@ jobs:
     name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -37,7 +37,7 @@ jobs:
       # fetch-depth: 0 供 diff-cover 对比基线分支计算变更行覆盖率。
       # 代价：全历史 checkout，超大仓库可达分钟级；fork PR 会把全量历史拉进 runner——
       # 历史若误提交过敏感文件请先清洗（或改用仅取基线分支的浅 fetch 定制）。
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
@@ -78,7 +78,7 @@ jobs:
     name: cargo-audit + cargo-deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # deny.toml 是 advisory 忽略清单的单一事实源（.cargo/audit.toml 为同步
       # 镜像）；audit-check 不能读配置文件，ignore 列表从 deny.toml grep 派生，
       # 永不漂移。约束：deny.toml 注释只允许出现被 ignore 的 RUSTSEC 编号。
@@ -105,7 +105,7 @@ jobs:
     name: feature isolation (29 configs)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
       - name: CLI binary baseline + feature-hint regression (default features)
