@@ -39,15 +39,32 @@ fn enabled_features_reflect_this_build() {
 
 /// CLI: converting a pdf in a build without the pdf feature reports the
 /// missing feature on stderr and keeps exit code 2 (unsupported format).
+///
+/// Locale-independent: the expected strings are rendered through the same
+/// catalog the binary uses, under the locale the child process will detect
+/// (the parent's environment), instead of pinning English.
 #[test]
 fn cli_unsupported_format_names_the_missing_feature() {
+    let lang = alchemize::i18n::locale_of_current_process();
+    let tr = |key: &str, args: &[(&str, String)]| alchemize::i18n::translate_for(&lang, key, args);
     let stderr = run_alch_on("doc.pdf", b"%PDF-1.7\n");
+    let expected = tr("unsupported-format", &[("ext", "pdf".into())]);
     assert!(
-        stderr.contains("unsupported format: pdf"),
+        stderr.contains(&expected),
         "stderr must name the format: {stderr}"
     );
+    let expected = tr(
+        "unsupported-format-requires-feature",
+        &[
+            ("ext", "pdf".into()),
+            ("names", "'pdf'".into()),
+            ("plural", String::new()),
+            ("them", "it".into()),
+            ("flags", "pdf".into()),
+        ],
+    );
     assert!(
-        stderr.contains("requires the 'pdf' feature"),
+        stderr.contains(&expected),
         "stderr must name the missing feature: {stderr}"
     );
     assert!(
@@ -71,8 +88,15 @@ fn cli_sanitizes_control_and_bidi_characters_in_the_extension() {
             !stderr.contains(forbidden),
             "raw {forbidden:?} reached stderr for {name:?}: {stderr:?}"
         );
+        // Locale-independent prefix of the diagnostic line.
+        let lang = alchemize::i18n::locale_of_current_process();
+        let expected = alchemize::i18n::translate_for(&lang, "unsupported-format", &[])
+            .split(['：', ':'])
+            .next()
+            .unwrap_or("unsupported format")
+            .to_string();
         assert!(
-            stderr.contains("unsupported format:"),
+            stderr.contains(&expected),
             "diagnostic line missing for {name:?}: {stderr}"
         );
     }

@@ -43,7 +43,8 @@ fn build_alch(
         {
             let _ = (&base_url, &extract_main);
             eprintln!(
-                "warning: --base-url/--extract-main require a build with --features html; options ignored"
+                "{}",
+                alchemize::tr("warning-base-url-extract-main-require-html")
             );
         }
     }
@@ -70,7 +71,7 @@ fn build_alch(
 fn unsupported_format_message(ext: &str) -> String {
     let safe = sanitize_ext(ext);
     match alchemize::domain::feature_map::missing_features(ext) {
-        None => format!("unsupported format: {safe}"),
+        None => alchemize::tr_args("unsupported-format", &[("ext", safe)]),
         Some(missing) => {
             let names = missing
                 .iter()
@@ -79,9 +80,15 @@ fn unsupported_format_message(ext: &str) -> String {
                 .join(" and ");
             let plural = if missing.len() > 1 { "s" } else { "" };
             let them = if missing.len() > 1 { "them" } else { "it" };
-            format!(
-                "unsupported format: {safe}: requires the {names} feature{plural}; this build has {them} disabled, rebuild with --features {}",
-                missing.join(",")
+            alchemize::tr_args(
+                "unsupported-format-requires-feature",
+                &[
+                    ("ext", safe),
+                    ("names", names),
+                    ("plural", plural.to_string()),
+                    ("them", them.to_string()),
+                    ("flags", missing.join(",")),
+                ],
             )
         }
     }
@@ -118,7 +125,10 @@ fn map_error(err: AlchemizeError) -> ApiError {
             }
         }
         AlchemizeError::AllBackendsFailed { ext, attempts } => {
-            eprintln!("all backends failed for {ext}:");
+            eprintln!(
+                "{}",
+                alchemize::tr_args("all-backends-failed-header", &[("ext", ext.clone())])
+            );
             for (engine, reason) in &attempts {
                 eprintln!("  - {engine}: {reason}");
             }
@@ -165,7 +175,10 @@ async fn convert(
     let input_path = PathBuf::from(&input);
     if !input_path.is_file() {
         return Err(ApiError::InvalidInput {
-            message: format!("input file not found: {}", input_path.display()),
+            message: alchemize::tr_args(
+                "input-file-not-found",
+                &[("path", input_path.display().to_string())],
+            ),
             field: Some("input".into()),
             value: None,
         });
@@ -175,7 +188,7 @@ async fn convert(
         Some("inline") => AssetMode::Inline,
         Some(other) => {
             return Err(ApiError::InvalidInput {
-                message: format!("unknown asset mode '{other}' (dir|inline)"),
+                message: alchemize::tr_args("unknown-asset-mode", &[("what", other.to_string())]),
                 field: Some("assets".into()),
                 value: None,
             });
@@ -190,7 +203,10 @@ async fn convert(
     let converted_input = match input_format {
         Some(fmt) => {
             let data = std::fs::read(&input_path).map_err(|e| {
-                map_error(AlchemizeError::Other(format!("failed to read input: {e}")))
+                map_error(AlchemizeError::Other(alchemize::tr_args(
+                    "failed-to-read-input",
+                    &[("source", e.to_string())],
+                )))
             })?;
             Input::Bytes {
                 data,
@@ -234,26 +250,41 @@ async fn convert(
                 if let Err(reason) =
                     alchemize::domain::asset::validate_asset_filename(&asset.filename)
                 {
-                    return Err(map_error(AlchemizeError::Other(format!(
-                        "asset filename rejected by write boundary: {reason}"
+                    return Err(map_error(AlchemizeError::Other(alchemize::tr_args(
+                        "asset-filename-rejected-by-write-boundary",
+                        &[("reason", reason)],
                     ))));
                 }
                 asset_paths.push(asset_dir.join(&asset.filename));
             }
-            std::fs::write(&path, &result.markdown)
-                .map_err(|e| map_error(AlchemizeError::Other(format!("write failed: {e}"))))?;
+            std::fs::write(&path, &result.markdown).map_err(|e| {
+                map_error(AlchemizeError::Other(alchemize::tr_args(
+                    "write-failed",
+                    &[("source", e.to_string())],
+                )))
+            })?;
             for (asset, asset_path) in result.assets.iter().zip(asset_paths) {
                 if let Some(dir) = asset_path.parent() {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 std::fs::write(&asset_path, &asset.bytes).map_err(|e| {
-                    map_error(AlchemizeError::Other(format!("asset write failed: {e}")))
+                    map_error(AlchemizeError::Other(alchemize::tr_args(
+                        "asset-write-failed",
+                        &[("source", e.to_string())],
+                    )))
                 })?;
             }
             eprintln!(
-                "converted {} -> {} [{quality}] (engine: {engine_used})",
-                input_path.display(),
-                path.display(),
+                "{}",
+                alchemize::tr_args(
+                    "converted-to",
+                    &[
+                        ("input", input_path.display().to_string()),
+                        ("output", path.display().to_string()),
+                        ("quality", quality.to_string()),
+                        ("engine", engine_used),
+                    ],
+                )
             );
             // Null 哨兵：CLI runner 据此跳过 stdout 渲染（摘要已走 stderr）。
             Ok(serde_json::Value::Null)

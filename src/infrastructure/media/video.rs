@@ -103,7 +103,7 @@ impl Converter for VideoConverter {
 
         // If ffmpeg is not available, we cannot extract audio or frames.
         if !self.ffmpeg_available {
-            tracing::warn!("ffmpeg not found — video processing degraded to metadata only");
+            tracing::warn!("{}", crate::tr("ffmpeg-not-found-video-degraded"));
             return self.metadata_only_result(&filename, byte_count);
         }
 
@@ -189,7 +189,16 @@ impl Converter for VideoConverter {
                 }
             }
             Err(e) => {
-                tracing::warn!("audio extraction failed for '{filename}': {e}");
+                tracing::warn!(
+                    "{}",
+                    crate::tr_args(
+                        "audio-extraction-failed",
+                        &[
+                            ("filename", filename.to_string()),
+                            ("source", e.to_string())
+                        ]
+                    )
+                );
                 self.metadata_only_result(&filename, byte_count)
             }
         }

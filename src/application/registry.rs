@@ -124,7 +124,7 @@ impl ConverterRegistry {
                 );
                 attempts.push((
                     converter.name().to_string(),
-                    format!("unavailable: {reason}"),
+                    crate::tr_args("unavailable", &[("reason", reason.to_string())]),
                 ));
                 continue;
             }
@@ -168,7 +168,8 @@ impl ConverterRegistry {
                         error_kind = e.kind(),
                         attempt = i + 1,
                         engine = converter.name(),
-                        "converter failed, trying next"
+                        "{}",
+                        crate::tr("converter-failed-trying-next")
                     );
                     attempts.push((converter.name().to_string(), e.to_string()));
                 }
@@ -274,7 +275,7 @@ impl ConverterRegistry {
                 );
                 attempts.push((
                     converter.name().to_string(),
-                    format!("unavailable: {reason}"),
+                    crate::tr_args("unavailable", &[("reason", reason.to_string())]),
                 ));
                 continue;
             }
@@ -318,7 +319,8 @@ impl ConverterRegistry {
                         error_kind = e.kind(),
                         attempt = i + 1,
                         engine = converter.name(),
-                        "converter failed, trying next (sync)"
+                        "{}",
+                        crate::tr("converter-failed-trying-next-sync")
                     );
                     attempts.push((converter.name().to_string(), e.to_string()));
                 }
@@ -777,7 +779,15 @@ mod tests {
                 assert_eq!(ext, "html");
                 assert_eq!(attempts.len(), 1);
                 assert_eq!(attempts[0].0, "down-engine");
-                assert!(attempts[0].1.contains("unavailable"));
+                // The attempt reason is the catalogized `unavailable` message;
+                // assert the localized prefix without pinning a language.
+                let expected = crate::tr_args("unavailable", &[("reason", String::new())]);
+                let prefix = expected
+                    .split(['：', ':'])
+                    .next()
+                    .unwrap_or("unavailable")
+                    .to_string();
+                assert!(attempts[0].1.contains(&prefix));
             }
             other => panic!("expected AllBackendsFailed, got {other:?}"),
         }

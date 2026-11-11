@@ -130,7 +130,7 @@ impl MineruAgentClient {
                 AlchemizeError::MineruConversion(format!("failed to parse MinerU response: {e}"))
             })?;
 
-        info!(task_id = %result.task_id, "MinerU Agent task submitted");
+        info!(task_id = %result.task_id, "{}", crate::tr("mineru-task-submitted"));
         TaskId::new(result.task_id)
     }
 
@@ -178,7 +178,7 @@ impl MineruAgentClient {
                 let status_label = crate::infrastructure::document::shared::sanitize_label(
                     &truncate_body(other.to_string()),
                 );
-                warn!(status = %status_label, "unknown task status");
+                warn!(status = %status_label, "{}", crate::tr("unknown-task-status"));
                 TaskStatus::Failed
             }
         };
@@ -212,7 +212,7 @@ impl MineruClient for MineruAgentClient {
             match status {
                 TaskStatus::Completed => {
                     let content = markdown.unwrap_or_default();
-                    info!(task_id = %task_id, len = content.len(), "MinerU Agent task completed");
+                    info!(task_id = %task_id, len = content.len(), "{}", crate::tr("mineru-task-completed"));
                     return Ok(content);
                 }
                 TaskStatus::Failed => {

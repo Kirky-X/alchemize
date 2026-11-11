@@ -6,6 +6,7 @@
 pub mod application;
 pub mod domain;
 mod feature_assertions;
+pub mod i18n;
 pub mod infrastructure;
 
 pub use application::builder::{Alchemize, AlchemizeBuilder, HtmlDeepEngineConfig, MineruConfig};
@@ -13,6 +14,7 @@ pub use application::registry::ConverterRegistry;
 pub use domain::error::AlchemizeError;
 pub use domain::feature_map::{enabled_features, features_for_extension, missing_features};
 pub use domain::input::{Input, InputFormat, detect_format};
+pub use i18n::{tr, tr_args};
 
 /// Crate version (mirrors Cargo.toml via workspace inheritance).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -74,7 +74,7 @@ fn absoluteize_links(html: &str, base_url: &str) -> String {
         Err(e) => {
             // 诚实降级：base 非法时链接不改写，但操作者必须知道（否则会误以为
             // 链接已绝对化）。
-            tracing::warn!(%e, "html-deep: base_url is not a valid URL; links left unchanged");
+            tracing::warn!(%e, "{}", crate::tr("html-deep-base-url-not-valid"));
             return html.to_string();
         }
     };
@@ -356,11 +356,12 @@ impl HtmlDeepConverter {
                     }
                     // 双产皆空：诚实回退全页（不静默吞）。
                     tracing::warn!(
-                        "html-deep: extraction produced empty output, falling back to full page"
+                        "{}",
+                        crate::tr("html-deep-extraction-empty-fallback-full-page")
                     );
                 }
                 Err(reason) => {
-                    tracing::warn!(reason = %reason, "html-deep: main-content extraction failed, falling back to full page");
+                    tracing::warn!(reason = %reason, "{}", crate::tr("html-deep-main-content-extraction-failed"));
                 }
             }
         }
@@ -420,7 +421,8 @@ impl HtmlDeepConverter {
 
         // 有可见文本而主输出空白：保真异常，htmd 兜底。
         tracing::warn!(
-            "html-deep: primary produced empty output with visible text, falling back to htmd"
+            "{}",
+            crate::tr("html-deep-primary-empty-visible-text-fallback-htmd")
         );
         // 兜底路径的 HtmlConverter 对空输出恒注入占位文本（*HTML document
         // contains no extractable content.*）——「双空」的可观察终态即占位文本

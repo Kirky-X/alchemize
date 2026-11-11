@@ -21,7 +21,10 @@ async fn main() {
     let mut logger = match logging::init_from_env().await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("alch-mcp: logging init failed: {e}");
+            eprintln!(
+                "{}",
+                alchemize::tr_args("alch-mcp-logging-init-failed", &[("source", e.to_string())])
+            );
             None
         }
     };
@@ -34,6 +37,9 @@ async fn main() {
     if let Some(l) = logger.take()
         && let Err(e) = l.shutdown()
     {
-        eprintln!("alch-mcp: log shutdown failed: {e}");
+        eprintln!(
+            "{}",
+            alchemize::tr_args("alch-mcp-log-shutdown-failed", &[("source", e.to_string())])
+        );
     }
 }

@@ -289,6 +289,15 @@ URL 校验拒绝的六类原因：`InvalidScheme`（非 HTTPS）、`LoopbackAddr
 - CLI 同源：三个端点同时以 `cli = true` 注册进 `alch`（CliBuilder + 自定义 runner，退出码 0/1/2/3 契约见主 spec cli-output）。
 - 注意：根级内置全局 `--format text|json`（sdforge 输出格式）；convert 的扩展名覆盖参数名为 `input_format`，CLI 侧由 runner 在 convert 语境把 `--format` 归一为 `--input_format`。
 
+### 国际化（i18n，无条件依赖）
+
+- 覆盖面：`AlchemizeError` 全部变体与 `SecurityViolationType` 的 Display、CLI/MCP 诊断（unsupported-format/写入失败/成功摘要）、runner 消息、tracing 日志正文（registry 回退链、html_deep 降级、字幕/视频解析、MinerU 任务生命周期）。
+- 消息目录：`locales/{en,zh}/messages.ftl` 编译期内嵌（`include_str!`），`OnceLock` 缓存的并发 FluentBundle；查找链 当前语言 → `en` → key 原文。en/zh key 集合一致性由守卫测试锚定。
+- 语言检测：`ALCHEMIZE_LANG` → `LC_ALL` → `LC_MESSAGES` → `LANG` → `sys-locale` → `en`；POSIX 值归一（`zh_CN.UTF-8` → `zh-CN`），`C`/`POSIX` 视为英文。语言主子标签为 `zh` 的均映射中文束。
+- 公开 API：`alchemize::tr(key)`、`alchemize::tr_args(key, args)`、`alchemize::i18n::translate(key, args)`（当前 locale）、`alchemize::i18n::translate_for(lang, key, args)`（显式语言）、`alchemize::i18n::locale_of_current_process()`。
+- 环境变量：`ALCHEMIZE_LANG`（最高优先级语言覆盖；BCP-47 或 POSIX 形式均可）。
+- 实现注意：bundle `set_use_isolating(false)`——Unicode 隔离符会改变英文输出字节，破坏 CLI 输出契约；对用户提供的扩展名的 CWE-150 防护在诊断层 `sanitize_ext`（职责不重叠）。
+
 ## 💡 使用示例
 
 ### 基础转换

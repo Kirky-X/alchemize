@@ -118,9 +118,9 @@ pub trait Converter: Send + Sync {
     /// Implementations do CPU-bound conversion work on the caller's thread;
     /// on an async worker, prefer `spawn_blocking` for large inputs.
     fn convert_sync(&self, _input: &Input) -> Result<ConvertResult, AlchemizeError> {
-        Err(AlchemizeError::NotSyncCapable(format!(
-            "engine '{}' has no synchronous path",
-            self.name()
+        Err(AlchemizeError::NotSyncCapable(crate::tr_args(
+            "engine-has-no-synchronous-path",
+            &[("engine", self.name().to_string())],
         )))
     }
 }
@@ -306,8 +306,23 @@ mod tests {
         let input = Input::bytes(b"<html></html>".to_vec(), "t.html");
         let err = conv.convert_sync(&input).unwrap_err();
         let msg = err.to_string();
+        // Locale-independent: compare against the catalog rendering under
+        // the host locale rather than pinning English text.
+        let lang = crate::i18n::locale::current_locale();
+        let expected = crate::i18n::translate_for(
+            &lang,
+            "synchronous-conversion-not-available",
+            &[(
+                "what",
+                crate::i18n::translate_for(
+                    &lang,
+                    "engine-has-no-synchronous-path",
+                    &[("engine", "async-only".to_string())],
+                ),
+            )],
+        );
         assert!(
-            msg.contains("synchronous conversion not available"),
+            msg.contains(&expected),
             "explicit rejection, not silent: {msg}"
         );
         assert!(

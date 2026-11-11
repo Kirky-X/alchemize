@@ -269,6 +269,14 @@ sdforge = { version = "0.5.0-rc.10", features = ["cli"], optional = true }
 # 未设/off 时零开销）；default-features = false 裁掉 i18n/cache 依赖树。
 inklog = { version = "0.3.0-rc.12", default-features = false, optional = true }
 
+# ── i18n（无条件：用户可见消息国际化，用户决策不做 feature 隔离）
+# Fluent 消息目录（limiteron/inklog/dbnexus 同款口径：常驻编译、并发包）
+fluent-bundle = { version = "0.16", default-features = false }
+# BCP-47 语言标签解析（bundle locale 声明）
+unic-langid = { version = "0.9", default-features = false }
+# 检测链尾段（POSIX 环境变量之后的平台 locale）
+sys-locale = { version = "0.3", default-features = false }
+
 [dev-dependencies]
 http = { version = "1.5", default-features = false, features = ["std"] }
 proptest = { version = "1.0", default-features = false, features = ["std"] }

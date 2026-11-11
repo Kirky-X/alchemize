@@ -211,7 +211,7 @@ impl MinerUConverter {
             AlchemizeError::MineruConversion(format!("failed to parse MinerU response: {e}"))
         })?;
 
-        info!(task_id = %result.task_id, "MinerU task submitted");
+        info!(task_id = %result.task_id, "{}", crate::tr("mineru-task-submitted"));
         Ok(result.task_id)
     }
 
@@ -267,7 +267,7 @@ impl MinerUConverter {
             match status_resp.status {
                 TaskStatus::Completed => {
                     let markdown = status_resp.markdown.unwrap_or_default();
-                    info!(task_id = %task_id, len = markdown.len(), "MinerU task completed");
+                    info!(task_id = %task_id, len = markdown.len(), "{}", crate::tr("mineru-task-completed"));
                     return Ok(markdown);
                 }
                 TaskStatus::Failed => {

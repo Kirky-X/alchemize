@@ -215,7 +215,20 @@ alch formats
 
 **default 行为（破坏性变更）**：`default = ["cli", "text"]` —— 默认构建只编译 CLI 骨架与纯文本转换。`alch convert x.pdf` / `x.docx` 在默认构建下没有候选引擎，返回 `unsupported format`（退出码 2）。需要哪些格式就显式开启对应 feature（如 `--features pdf,docx`）；`--features full` 恢复全部能力。
 
-**依赖说明**：除核心 9 个（`serde`/`serde_json`/`thiserror`/`tracing`/`tokio`/`async-trait`/`anyhow`/`base64`/`sha2`）外，全部依赖 `optional = true` 且只经 feature 的 `dep:` 引用激活；关闭 feature 时对应依赖不进入编译图。版本升级：`base64 0.23`、`sha2 0.11`、`image 0.25`、`pdfium-render 0.9`（绑定选 `pdfium_6295`，运行时 e2e 待更新 pdfium 二进制）、`zstd 0.14`、`icu_properties 2.4`；`rusqlite` 保持 `0.39`（`0.41` 与 limiteron→dbnexus→sqlx 的 `libsqlite3-sys <0.38` 硬冲突）。
+**依赖说明**：除核心 9 个（`serde`/`serde_json`/`thiserror`/`tracing`/`tokio`/`async-trait`/`anyhow`/`base64`/`sha2`）与 i18n 三件（`fluent-bundle`/`unic-langid`/`sys-locale`，见下）外，全部依赖 `optional = true` 且只经 feature 的 `dep:` 引用激活；关闭 feature 时对应依赖不进入编译图。版本升级：`base64 0.23`、`sha2 0.11`、`image 0.25`、`pdfium-render 0.9`（绑定选 `pdfium_6295`，运行时 e2e 待更新 pdfium 二进制）、`zstd 0.14`、`icu_properties 2.4`；`rusqlite` 保持 `0.39`（`0.41` 与 limiteron→dbnexus→sqlx 的 `libsqlite3-sys <0.38` 硬冲突）。
+
+### 🌐 国际化（i18n）
+
+用户可见消息（错误 Display、CLI 诊断、日志正文）通过 **Fluent + ICU**（`fluent-bundle` + `unic-langid` + `sys-locale`）国际化，`locales/{en,zh}/messages.ftl` 编译期内嵌。语言检测链：`ALCHEMIZE_LANG` → `LC_ALL` → `LC_MESSAGES` → `LANG` → 平台 locale → `en`（`C`/`POSIX` 视为英文）。
+
+```console
+$ alch convert /nonexistent.pdf          # 宿主 locale 为 zh 时
+error: Invalid input: 输入文件不存在：/nonexistent.pdf
+$ ALCHEMIZE_LANG=en alch convert /nonexistent.pdf
+error: Invalid input: input file not found: /nonexistent.pdf
+```
+
+三个 i18n 依赖为**无条件依赖**（不做 feature 隔离，用户决策 2026-11-11）；消息 key 即英文原文，缺 key 时原样回退。公开 API：`alchemize::tr(key)` / `alchemize::tr_args(key, args)` / `alchemize::i18n::translate_for(lang, key, args)` / `alchemize::i18n::locale_of_current_process()`。en/zh 双文件的 key 集合一致性由守卫测试 `en_and_zh_key_sets_match` 锚定，新增消息必须两语言同步登记。
 
 ---
 

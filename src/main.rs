@@ -113,7 +113,10 @@ fn main() {
     let mut logger = match runtime.block_on(logging::init_from_env()) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("alch: logging init failed: {e}");
+            eprintln!(
+                "{}",
+                alchemize::tr_args("alch-logging-init-failed", &[("source", e.to_string())])
+            );
             None
         }
     };
@@ -128,7 +131,10 @@ fn main() {
     if let Some(l) = logger.take()
         && let Err(e) = l.shutdown()
     {
-        eprintln!("alch: log shutdown failed: {e}");
+        eprintln!(
+            "{}",
+            alchemize::tr_args("alch-log-shutdown-failed", &[("source", e.to_string())])
+        );
     }
 
     match dispatched {

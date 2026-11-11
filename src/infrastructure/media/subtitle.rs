@@ -93,7 +93,10 @@ impl SubtitleParser {
         let subtitle: SubRipSubtitle = match SubRipSubtitle::from_str(content) {
             Ok(s) => s,
             Err(e) => {
-                tracing::warn!("SRT parse error: {e}");
+                tracing::warn!(
+                    "{}",
+                    crate::tr_args("srt-parse-error", &[("source", e.to_string())])
+                );
                 return Vec::new();
             }
         };
@@ -122,7 +125,10 @@ impl SubtitleParser {
         let subtitle: WebVttSubtitle = match WebVttSubtitle::from_str(content) {
             Ok(s) => s,
             Err(e) => {
-                tracing::warn!("VTT parse error: {e}");
+                tracing::warn!(
+                    "{}",
+                    crate::tr_args("vtt-parse-error", &[("source", e.to_string())])
+                );
                 return Vec::new();
             }
         };
@@ -151,7 +157,10 @@ impl SubtitleParser {
         let subtitle: AssSubtitle = match AssSubtitle::from_str(content) {
             Ok(s) => s,
             Err(e) => {
-                tracing::warn!("ASS parse error: {e}");
+                tracing::warn!(
+                    "{}",
+                    crate::tr_args("ass-parse-error", &[("source", e.to_string())])
+                );
                 return Vec::new();
             }
         };
