@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Coverage boosters: branches not exercised by the golden corpus.
+#![cfg(feature = "full")]
 
 use std::sync::Arc;
 

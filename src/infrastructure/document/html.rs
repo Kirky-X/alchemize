@@ -196,21 +196,7 @@ fn extract_annotation(body: &str) -> Option<String> {
 
 /// Strip tags from a fragment, keeping text content (public: shared by the
 /// LaTeX converter for figcaption bodies).
-pub fn strip_tags(fragment: &str) -> String {
-    let mut out = String::new();
-    let mut rest = fragment;
-    while let Some(lt) = rest.find('<') {
-        out.push_str(&rest[..lt]);
-        match rest[lt..].find('>') {
-            Some(gt) => rest = &rest[lt + gt + 1..],
-            None => {
-                rest = "";
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
+pub use super::shared::strip_tags;
 
 /// Unescape the common XML entities found inside alttext payloads.
 fn unescape_entities(s: &str) -> String {

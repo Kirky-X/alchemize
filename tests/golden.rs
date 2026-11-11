@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Golden fixture tests: each format converts to its expected markdown.
+#![cfg(feature = "full")]
 
 use alchemize::application::builder::{Alchemize, AlchemizeBuilder};
 use alchemize::domain::input::Input;

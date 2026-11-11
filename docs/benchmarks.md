@@ -1,8 +1,8 @@
 # Benchmarks — real files (T030)
 
-Measured with `cargo bench --bench bench_real` on this machine
+Measured with `cargo bench --bench bench_real --features full` on this machine
 (macOS, Apple silicon, release profile). Each fixture is converted **5 times**
-through the full default engine chain; the table reports the **median**
+through the full engine chain (`--features full`); the table reports the **median**
 (`min`/`max` in the raw harness output).
 
 Generated: 2026-11-09.

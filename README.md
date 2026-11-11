@@ -100,23 +100,27 @@
 # 检查 Rust 版本（要求 1.97.1+）
 rustc --version
 
-# 默认特性构建（零外部服务依赖）
+# 默认特性（CLI + 纯文本转换，约 220 crates，其中 157 来自 CLI 骨架，零外部服务依赖；破坏性变更见「特性标志」）
 cargo build --release          # 二进制：target/release/alch
 
-# 全功能（MinerU 云端 + 自研 office 深解析 + 容器/数据/邮件 + LibreOffice + 本地 ASR）
+# 按需开启格式（示例：PDF + Word + HTML；需要哪些格式就开哪些 feature）
+cargo build --release --features pdf,docx,html
+
+# 全功能（全部 28 个转换类 feature：MinerU 云端 + 自研 office 深解析 + 容器/数据/邮件 + LibreOffice + 本地 ASR）
 cargo build --release --features full
 
 # 安装到本地
 cargo install --path . --features full
+# 注意：--no-default-features 时必须带 cli，否则不产出 alch 二进制
 ```
 
 ### 💡 最小示例
 
 ```bash
-# 转换到 stdout
+# 转换到 stdout（PDF 需以 --features pdf 构建）
 alch convert paper.pdf
 
-# 写文件 + 引擎偏好 + 资产模式（父目录自动创建）
+# 写文件 + 引擎偏好 + 资产模式（父目录自动创建；Word 需 --features docx）
 alch convert report.docx -o report.md --engine docx-deep --assets dir|inline
 
 # stderr 摘要行：质量层级与实际引擎一目了然
@@ -135,24 +139,24 @@ alch formats
 
 | 类别 | 扩展名 | 引擎（priority） | 需要的 feature |
 | --- | --- | --- | --- |
-| Word（OOXML） | docx | docx-deep(18) → docx(10) | — |
+| Word（OOXML） | docx | docx-deep(18) → docx(10) | `docx` |
 | Word（旧版） | doc, rtf | legacy-office(15，LibreOffice) | `legacy-office` |
-| OpenDocument 文本 | odt | odt-deep(18) | — |
-| 演示文稿 | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `legacy-office`（仅旧二进制） |
+| OpenDocument 文本 | odt | odt-deep(18) | `odt` |
+| 演示文稿 | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `pptx` / `odp`（旧二进制 `legacy-office`） |
 | 电子表格 | —（不支持） | 表格解析器已移除：calamine 的物化面（共享字符串、styles/theme、ODS 重复与文本展开）无法在不可信输入上被前置校验约束；xlsx/xls/xlsb/ods 不再支持 | — |
-| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdf-local` / `pdf-cloud` |
-| 网页 / 电子书 | html, htm / epub | html(htmd) → html-deep(15) / epub | `html`（html-deep） |
-| 纯文本 / 代码 | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 代码扩展 | text（围栏化） | — |
-| 表格文本 | csv, tsv, psv | csv（分隔符自探测） | — |
-| 标记语言 | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | — |
-| 笔记本 | ipynb | ipynb | — |
-| 图片 | png, jpg, jpeg, gif, webp, bmp, tif, tiff, svg / heic, heif | image（Vision 可选） / heic（sips 或元数据） | — |
-| 音频 | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio（ASR 可选） | `audio` |
-| 视频 | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video（ffmpeg + ASR/Vision 可选） | `audio`（转录） |
-| 字幕 | srt, vtt, ass, ssa, lrc | subtitle | — |
+| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdf` / `pdf-local` / `pdf-cloud` |
+| 网页 / 电子书 | html, htm / epub | html(htmd) → html-deep(15) / epub | `html`（基础链 + 深链） / `epub` |
+| 纯文本 / 代码 | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 代码扩展 | text（围栏化） | `text`（default 成员） |
+| 表格文本 | csv, tsv, psv | csv（分隔符自探测） | `csv` |
+| 标记语言 | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | `latex` / `pandoc` |
+| 笔记本 | ipynb | ipynb | `ipynb` |
+| 图片 | png, jpg, jpeg, gif, webp, bmp, tif, tiff, svg / heic, heif | image（Vision 可选） / heic（sips 或元数据） | `media` / `heic` |
+| 音频 | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio（ASR 可选） | `media`（+`audio` 转录） |
+| 视频 | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video（ffmpeg + ASR/Vision 可选） | `media`（+`audio` 转录） |
+| 字幕 | srt, vtt, ass, ssa, lrc | subtitle | `media` |
 | 邮件 | eml | eml | `email` |
 | 结构化数据 | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `parquet` / `sqlite` / `bibtex` |
-| 归档 | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip 递归 / tar 族递归 / 7z 递归 | `tar`/`gzip`/`xz`/`zstd`/`sevenz`（除 zip） |
+| 归档 | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip 递归 / tar 族递归 / 7z 递归 | `zip` / `tar`/`gzip`/`xz`/`zstd`/`sevenz` |
 
 ### 🧭 核心概念
 
@@ -168,26 +172,50 @@ alch formats
 
 | 预设 | 命令 | 适用场景 |
 | --- | --- | --- |
-| 最小化 | `cargo build` | 纯本地转换，零外部服务依赖 |
-| 推荐 | `cargo build --features tar,gzip,xz,zstd,sevenz,parquet,sqlite,bibtex,email,legacy-office` | + 归档/结构化数据/邮件/旧版 Office（soffice 存在时生效） |
-| 生产 | `cargo build --features full` | + MinerU 云端 PDF + 本地 ASR + html-deep |
+| 最小化（default） | `cargo build` | 仅 CLI + 纯文本/代码围栏（`default = ["cli", "text"]`）；PDF/Office 等需显式开启格式 feature |
+| 常用文档 | `cargo build --features pdf,docx,pptx,odt,odp,html,epub,csv,ipynb,zip` | 文档转换主路径 + zip 递归；按需追加其他格式 |
+| 全功能 | `cargo build --features full` | 全部 28 个转换类 feature（含 MinerU 云端 PDF、本地 ASR、容器/数据/邮件） |
 
 ### 📋 功能矩阵
 
+**格式族（15 个，一格式一 feature）**
+
+| feature | 门控能力 | 说明 |
+| --- | --- | --- |
+| `text` | TextConverter | 纯文本与 ~45 扩展名代码围栏；**default 成员** |
+| `csv` | CsvConverter | csv/tsv/psv 分隔符自探测 |
+| `html` | HtmlConverter（htmd 基础链）+ HtmlDeepConverter（自研深链） | 两条 html 链同属一个 feature；不含 `html` 时 html/htm 转换完全不可用 |
+| `pdf` | PdfConverter（lopdf 文本抽取） | PDF 本地兜底档；pdfium 高保真需另开 `pdf-local` |
+| `docx` | DocxConverter + DocxDeepConverter | OOXML 深解析 + 基础解析（quick-xml + zip） |
+| `pptx` | PptxConverter + PptxDeepConverter | 同上 |
+| `odt` | OdtConverter | 同上 |
+| `odp` | OdpConverter | 同上 |
+| `epub` | EpubConverter | rbook + zip + htmd |
+| `ipynb` | IpynbConverter | 仅核心 serde_json |
+| `zip` | ZipConverter | zip/cbz 一层递归容器（嵌套 zip 显式不支持） |
+| `latex` | LatexSourceConverter | pandoc 探测 + 围栏兜底 |
+| `pandoc` | PandocGenericConverter | org/rst/asciidoc/opml/mediawiki 等通用格式 |
+| `media` | image / audio / video / subtitle 四转换器 | 图片、音视频抽轨、字幕解析；转录后端另开 `audio` |
+| `heic` | HeicConverter | sips 或元数据降级；独立 feature |
+
+**后端 / 数据 / 容器 / 工具面**
+
 | feature | 引入 | 说明 |
 | --- | --- | --- |
+| `pdf-local` | 本地 PDF 高保真引擎（pdfium-render） | 自动带入 `pdf`；运行时探测动态库，缺失降级到 pdf-extract。嵌入图提取走 lopdf 结构遍历（DCT/JPX 直通，样本重编码 PNG，不支持项显性计数） |
 | `pdf-cloud` | MinerU 云端 PDF 引擎（reqwest/limiteron） | 端点经 `ALCHEMIZE_MINERU_URL` 配置后才注册 |
-| `pdf-local` | 本地 PDF 高保真引擎（pdfium-render） | 运行时探测动态库；缺失降级到 pdf-extract。嵌入图提取走 lopdf 结构遍历（DCT/JPX 直通，样本重编码 PNG，不支持项显性计数） |
+| `audio` | vecboost 转录门面 + Whisper 兼容 API | 自动带入 `media`；Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
 | `legacy-office` | 旧版二进制 Office 引擎（外部 soffice） | doc/rtf→docx、ppt/pps/pot→pptx 后进深解析链；缺席自动降级 |
-| `tar`/`gzip`/`xz`/`zstd`/`sevenz` | 归档容器族，按格式拆分的五个 feature（tar/tgz/gz/xz/zst/7z；`.tgz` 需 `tar`+`gzip`） | 递归转换，魔数检测内层格式 |
-| `parquet`/`sqlite`/`bibtex` | 结构化数据引擎，按格式拆分的三个 feature（parquet/sqlite/bib） | parquet 流式 10 万行截断、sqlite 只读、biblatex 条目 |
 | `email` | 邮件引擎（mail-parser） | 头部/正文/附件清单 |
-| `audio` | vecboost 转录门面 + Whisper 兼容 API | Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
-| `mcp` | MCP 工具面（`alch-mcp` stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；CLI 封装（sdforge）恒在 |
-| `html` | html-deep 自研引擎（迭代状态机 → htmd 兜底） | 主内容提取（`--extract-main`）与链接绝对化（`--base-url`）；含 LaTeX 数学的页面自动路由 htmd 保真 |
-| `full` | 以上全部（`pdf-cloud`+`pdf-local`+`audio`+`email`+`legacy-office`+`html`+`tar`/`gzip`/`xz`/`zstd`/`sevenz`+`parquet`/`sqlite`/`bibtex`，共 14 个） | |
+| `parquet`/`sqlite`/`bibtex` | 结构化数据引擎，按格式拆分的三个 feature | parquet 流式 10 万行截断、sqlite 只读、biblatex 条目 |
+| `tar`/`gzip`/`xz`/`zstd`/`sevenz` | 归档容器族，按格式拆分的五个 feature | 递归转换，魔数检测内层格式；`.tgz` 需 `tar`+`gzip` 同时开启 |
+| `cli` | CLI 骨架（sdforge + inklog） | **default 成员**；`[[bin]] alch` 的 required-features 为 `cli` |
+| `mcp` | MCP 工具面（`alch-mcp` stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；不随 default |
+| `full` | 全部 28 个转换类 feature（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | |
 
-默认 `default = ["cli"]`（CLI 封装恒在）——feature 关闭的引擎根本不参与编译。
+**default 行为（破坏性变更）**：`default = ["cli", "text"]` —— 默认构建只编译 CLI 骨架与纯文本转换。`alch convert x.pdf` / `x.docx` 在默认构建下没有候选引擎，返回 `unsupported format`（退出码 2）。需要哪些格式就显式开启对应 feature（如 `--features pdf,docx`）；`--features full` 恢复全部能力。
+
+**依赖说明**：除核心 9 个（`serde`/`serde_json`/`thiserror`/`tracing`/`tokio`/`async-trait`/`anyhow`/`base64`/`sha2`）外，全部依赖 `optional = true` 且只经 feature 的 `dep:` 引用激活；关闭 feature 时对应依赖不进入编译图。版本升级：`base64 0.23`、`sha2 0.11`、`image 0.25`、`pdfium-render 0.9`（绑定选 `pdfium_6295`，运行时 e2e 待更新 pdfium 二进制）、`zstd 0.14`、`icu_properties 2.4`；`rusqlite` 保持 `0.39`（`0.41` 与 limiteron→dbnexus→sqlx 的 `libsqlite3-sys <0.38` 硬冲突）。
 
 ---
 
@@ -237,6 +265,7 @@ use alchemize::{AlchemizeBuilder, Input};
 
 #[tokio::main]
 async fn main() -> Result<(), alchemize::AlchemizeError> {
+    // 依赖库构建时需启用对应格式 feature（如 features = ["pdf"]）；未启用时 convert 返回 UnsupportedFormat
     let alch = AlchemizeBuilder::new().build();
     let result = alch.convert(&Input::Path("paper.pdf".into())).await?;
     println!("engine: {}", result.metadata["converter"]);   // 实际引擎
@@ -269,7 +298,7 @@ flowchart LR
 
 ### 🎯 测试策略
 
-- **双档矩阵**：default 档（无外部服务依赖）与 `--features full` 档全量运行。
+- **三档矩阵**：default 档（仅 core + text，无外部服务依赖）、`--features full` 档（全部转换能力）与 `--all-features` 档（含 cli/mcp）全量运行。
 - **真实文件套件**：12 项真实文件测试硬断言，素材为 9 个仓库内 fixtures 与 1 个外部视频源，不止合成样例。
 - **金样输出**：`tests/golden.rs` 钉住各格式转换产出的文本形态。
 - **CLI e2e**：退出码、stderr 摘要、资产落盘全链路验证。
@@ -277,8 +306,9 @@ flowchart LR
 ### ▶️ 运行命令
 
 ```bash
-cargo test                    # default 档（317 例）
-cargo test --features full    # full 档（396 例）
+cargo test                     # default 档（154 例：仅 core + text）
+cargo test --features full     # full 档（907 例）
+cargo test --all-features      # all-features 档（912 例，含 cli/mcp）
 cargo clippy --all-features   # 零新增告警
 cargo fmt --check             # 格式化零 diff
 cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
@@ -286,10 +316,11 @@ cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
 
 ### 📊 测试规模
 
-| 档位 | 通过 | 失败 | 忽略 |
-| --- | --- | --- | --- |
-| default | 317 | 0 | 0 |
-| full | 396 | 0 | 1（真模型端到端，待 ASR bundle） |
+| 档位 | 用例数 | 覆盖范围 |
+| --- | --- | --- |
+| default（cli+text） | 154 | 仅 core + text 用例 |
+| full | 907 | 全部转换能力（另有 5 例 ignored：真模型 e2e 等） |
+| all-features | 912 | 含 cli/mcp（另有 5 例 ignored：真模型 e2e 等） |
 
 行覆盖率 **90.49%**（门禁 ≥90%）。
 
@@ -331,7 +362,7 @@ cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
 <tr><td align="center">✅</td><td>文档与合规</td><td>七篇文档套件（结构对齐 confers）、双语 README、SPDX 版权头 59/59、覆盖率 90.49%</td></tr>
 <tr><td align="center">✅</td><td>供应链收口</td><td>anydoc 依赖已移除，zip 仅 9.4.1；cargo audit 漏洞归零（仅余 unmaintained 提示）</td></tr>
 <tr><td align="center">🔲</td><td>发布</td><td>首次 crates.io 发布（vecboost 先行）+ crates.io/docs.rs 徽章</td></tr>
-<tr><td align="center">🔲</td><td>CI 与质量</td><td>GitHub Actions 双档矩阵 + codecov 覆盖率徽章</td></tr>
+<tr><td align="center">🔲</td><td>CI 与质量</td><td>GitHub Actions 三档矩阵 + codecov 覆盖率徽章</td></tr>
 <tr><td align="center">🔲</td><td>性能</td><td>criterion 基准 → 补 PERFORMANCE 篇真实数据</td></tr>
 <tr><td align="center">🔲</td><td>ASR 真链路</td><td>模型 bundle 就绪后跑真模型端到端（现以 #[ignore] 标注）</td></tr>
 </table>
@@ -362,7 +393,7 @@ Rust 1.91+，`cargo build --features full` 一键起（依赖兄弟仓 vecboost�
 
 ### 🔧 提交 PR
 
-Conventional Commits（feat/fix/test/docs/chore）；提交前本地门禁：`cargo fmt --check` + `cargo clippy --all-features` 零新增 + 双档测试全绿。
+Conventional Commits（feat/fix/test/docs/chore）；提交前本地门禁：`cargo fmt --check` + `cargo clippy --all-features` 零新增 + 三档测试全绿。
 
 ---
 

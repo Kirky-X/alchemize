@@ -49,7 +49,7 @@ cargo update -d          # 更新漏洞通告数据库
 - 全部源文件带 `SPDX-License-Identifier: Apache-2.0` 两行头（59/59），license 扫描工具可机器识别文件级权属。
 - specmark 规格目录不入库（gitignore），主 specs 作为本地规格真源。
 - CLI/MCP 封装框架 sdforge（MIT，crates.io 版本钉 0.5.0-rc.10）与 rmcp（`mcp` feature 独占）经 `cargo audit` 一并纳管。
-- html-deep 引擎（feature `html`）为本仓自研迭代状态机（Apache-2.0，差分验证对齐记录见仓库历史），依赖 scraper 0.29、dom_smoothie 0.19、icu_properties 2.3（均在依赖树内）；`--base-url` 仅在显式提供时改写链接。
+- html-deep 引擎（feature `html`）为本仓自研迭代状态机（Apache-2.0，差分验证对齐记录见仓库历史），依赖 scraper 0.29、dom_smoothie 0.19、icu_properties 2.4（均在依赖树内）；`--base-url` 仅在显式提供时改写链接。
 - lopdf 0.47（crates.io 直连，MIT）：解压炸弹防护在调用点显式设限——文档解析与逐页文本抽取每页/每流 64 MiB 上限（`LoadOptions::with_max_decompressed_size` + `extract_text_chunks_with_limit`）、图片流 `decompressed_content_with_limit` 64 MiB，另有 256 MiB 全文档累计文本预算（拒绝时峰值 ≈ 预算 + 单页 64 MiB）；超限以 `AlchemizeError::Pdf` 显性拒绝。炸弹类错误（`MemoryLimitExceeded`）由 lopdf 原生传播、无吞错路径；损坏流（非炸弹类解码错误）回退原始压缩字节产出乱码文本——数据完整性由产物质量层兜底，不构成内存风险。
 
 ## 🐛 漏洞报告流程

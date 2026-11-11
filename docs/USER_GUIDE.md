@@ -36,8 +36,11 @@ rustc --version
 git clone https://github.com/Kirky-X/alchemize.git
 cd alchemize
 
-# 默认特性（零外部服务依赖）
+# 默认特性（仅 CLI + 纯文本转换，零外部服务依赖；破坏性变更）
 cargo build --release          # 二进制：target/release/alch
+
+# 按需开启格式（示例：PDF + Word；未开启的格式返回 unsupported，退出码 2）
+cargo build --release --features pdf,docx
 
 # 全功能（MinerU 云端 + 本地 ASR）
 cargo build --release --features full
@@ -46,13 +49,15 @@ cargo build --release --features full
 cargo install --path . --features full
 ```
 
+默认 `default = ["cli", "text"]`：`cargo build` 只编译 CLI 骨架与纯文本/代码围栏转换。要转 PDF、Word、HTML 等格式，必须显式开启对应 feature（见[引擎与扩展名](#-引擎与扩展名)的 feature 列）。
+
 ### 💡 第一步
 
 ```bash
-# 转换到 stdout
+# 转换到 stdout（PDF 需以 --features pdf 构建）
 alch convert paper.pdf
 
-# 写文件（父目录自动创建），stderr 给摘要行
+# 写文件（父目录自动创建），stderr 给摘要行（Word 需 --features docx）
 alch convert report.docx -o report.md
 # converted report.docx -> report.md [local_full] (engine: docx-deep)
 
@@ -81,18 +86,25 @@ alch formats
 
 ### 引擎与扩展名
 
-| 引擎名 | 扩展名 | 说明 |
-| --- | --- | --- |
-| `text` | txt/text/log/md + ~45 代码/配置扩展名 | 围栏代码块（语言标签映射） |
-| `csv` | csv/tsv/psv | 分隔符自探测（采样前 5 个非空行；tsv 强制制表符、psv 强制竖线） |
-| `html` / `epub` / `ipynb` | html/htm、epub、ipynb | 结构化文本解析 |
-| `docx` / `pptx` | OOXML 族 | 原生 XML（表格 xlsx/xls/xlsb/ods 不支持） |
-| `pdf` | pdf | pdf-extract 文本 + TOC 剔除/结构启发 |
-| `html-deep`（feature `html`） | html/htm | 自研迭代状态机 → htmd 兜底；`--extract-main` 主内容提取、`--base-url` 链接绝对化；含 `<math` 自动路由 htmd 保真 |
-| `mineru`（feature `pdf-cloud`+配置） | pdf | 云端高保真，链尾 |
-| `latex-source` | tex/latex | pandoc 探测，缺失时围栏兜底 |
-| `image` / `audio` / `video` / `subtitle` | 图片/音频/视频/字幕族 | 见下文进阶用法 |
-| `zip`（facade） | zip | 递归容器，嵌套 zip 不支持 |
+| 引擎名 | 扩展名 | 需要的 feature | 说明 |
+| --- | --- | --- | --- |
+| `text` | txt/text/log/md + ~45 代码/配置扩展名 | `text`（default 成员） | 围栏代码块（语言标签映射） |
+| `csv` | csv/tsv/psv | `csv` | 分隔符自探测（采样前 5 个非空行；tsv 强制制表符、psv 强制竖线） |
+| `html` / `html-deep` | html/htm | `html` | `html` 为 htmd 基础链、`html-deep` 为自研深链（两条链同属 `html` feature）；深链支持 `--extract-main` 主内容提取与 `--base-url` 链接绝对化，含 `<math` 自动路由 htmd 保真 |
+| `epub` | epub | `epub` | 结构化文本解析 |
+| `ipynb` | ipynb | `ipynb` | 笔记本单元格转 markdown |
+| `docx` / `docx-deep` | docx | `docx` | OOXML 原生 XML（表格 xlsx/xls/xlsb/ods 不支持） |
+| `pptx` / `pptx-deep` | pptx | `pptx` | 同上 |
+| `odt-deep` / `odp-deep` | odt / odp | `odt` / `odp` | OpenDocument 深解析 |
+| `legacy-office` / `legacy-ppt` | doc, rtf / ppt,pps,pot | `legacy-office` | 外部 soffice 转换后进深解析链 |
+| `pdf` | pdf | `pdf` | lopdf 文本抽取 + TOC 剔除/结构启发 |
+| `pdfium` | pdf | `pdf-local` | 本地高保真（自动带入 `pdf`）；动态库缺失降级 |
+| `mineru` | pdf | `pdf-cloud` + 端点配置 | 云端高保真，链尾 |
+| `latex-source` | tex/latex | `latex` | pandoc 探测，缺失时围栏兜底 |
+| `pandoc-generic` | org/rst/adoc/asciidoc/opml/mediawiki 等 | `pandoc` | 通用标记语言 |
+| `image` / `audio` / `video` / `subtitle` | 图片/音频/视频/字幕族 | `media` | 见下文进阶用法；转录后端另开 `audio` |
+| `heic` | heic, heif | `heic` | sips 或元数据降级 |
+| `zip`（facade） | zip, cbz | `zip` | 递归容器，嵌套 zip 不支持 |
 
 ### 资产模式
 

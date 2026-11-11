@@ -100,23 +100,27 @@ Beyond these core capabilities, video track extraction and frame dedup, video pr
 # Check the Rust version (1.97.1+ required)
 rustc --version
 
-# Default features (zero external-service dependencies)
+# Default features (CLI + plain text only, zero external-service dependencies; breaking change — see "Feature Flags")
 cargo build --release          # binary: target/release/alch
 
-# Full build (MinerU cloud + self-hosted office deep parsers + containers/data/e-mail + LibreOffice + local ASR)
+# Opt in per format (example: PDF + Word + HTML; enable only the features you need)
+cargo build --release --features pdf,docx,html
+
+# Full build (all 28 conversion features: MinerU cloud + self-hosted office deep parsers + containers/data/e-mail + LibreOffice + local ASR)
 cargo build --release --features full
 
 # Install locally
 cargo install --path . --features full
+# Note: with --no-default-features you must include `cli`, otherwise no `alch` binary is produced
 ```
 
 ### 💡 Minimal Example
 
 ```bash
-# Convert to stdout
+# Convert to stdout (PDF requires building with --features pdf)
 alch convert paper.pdf
 
-# Write file + engine preference + asset mode (parent dirs auto-created)
+# Write file + engine preference + asset mode (parent dirs auto-created; Word requires --features docx)
 alch convert report.docx -o report.md --engine docx-deep --assets dir|inline
 
 # stderr summary line: quality tier and actual engine at a glance
@@ -135,24 +139,24 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 
 | Category | Extensions | Engine (priority) | Feature |
 | --- | --- | --- | --- |
-| Word (OOXML) | docx | docx-deep(18) → docx(10) | — |
+| Word (OOXML) | docx | docx-deep(18) → docx(10) | `docx` |
 | Word (legacy) | doc, rtf | legacy-office(15, LibreOffice) | `legacy-office` |
-| OpenDocument text | odt | odt-deep(18) | — |
-| Presentations | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `legacy-office` (legacy binary only) |
+| OpenDocument text | odt | odt-deep(18) | `odt` |
+| Presentations | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `pptx` / `odp` (`legacy-office` for legacy binaries) |
 | Spreadsheets | — (not supported) | The spreadsheet parser was removed: calamine materialization (shared strings, styles/theme, ODS repeats and text expansion) cannot be bounded by a pre-check; xlsx/xls/xlsb/ods are unsupported | — |
-| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdf-local` / `pdf-cloud` |
-| Web / e-book | html, htm / epub | html(htmd) → html-deep(15) / epub | `html` (html-deep) |
-| Plain text / code | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 code extensions | text (fenced) | — |
-| Tabular text | csv, tsv, psv | csv (delimiter sensing) | — |
-| Markup languages | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | — |
-| Notebooks | ipynb | ipynb | — |
-| Images | png, jpg, jpeg, gif, webp, bmp, tif, tiff, svg / heic, heif | image (optional Vision) / heic (sips or metadata) | — |
-| Audio | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio (optional ASR) | `audio` |
-| Video | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video (ffmpeg + optional ASR/Vision) | `audio` (transcription) |
-| Subtitles | srt, vtt, ass, ssa, lrc | subtitle | — |
+| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdf` / `pdf-local` / `pdf-cloud` |
+| Web / e-book | html, htm / epub | html(htmd) → html-deep(15) / epub | `html` (base + deep chain) / `epub` |
+| Plain text / code | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 code extensions | text (fenced) | `text` (default member) |
+| Tabular text | csv, tsv, psv | csv (delimiter sensing) | `csv` |
+| Markup languages | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | `latex` / `pandoc` |
+| Notebooks | ipynb | ipynb | `ipynb` |
+| Images | png, jpg, jpeg, gif, webp, bmp, tif, tiff, svg / heic, heif | image (optional Vision) / heic (sips or metadata) | `media` / `heic` |
+| Audio | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio (optional ASR) | `media` (+ `audio` for transcription) |
+| Video | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video (ffmpeg + optional ASR/Vision) | `media` (+ `audio` for transcription) |
+| Subtitles | srt, vtt, ass, ssa, lrc | subtitle | `media` |
 | E-mail | eml | eml | `email` |
 | Structured data | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `parquet` / `sqlite` / `bibtex` |
-| Archives | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip recursion / tar family / 7z | `tar`/`gzip`/`xz`/`zstd`/`sevenz` (all but zip) |
+| Archives | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip recursion / tar family / 7z | `zip` / `tar`/`gzip`/`xz`/`zstd`/`sevenz` |
 
 ### 🧭 Core Concepts
 
@@ -168,26 +172,50 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 
 | Preset | Command | Use case |
 | --- | --- | --- |
-| Minimal | `cargo build` | pure local conversion, zero external services |
-| Recommended | `cargo build --features tar,gzip,xz,zstd,sevenz,parquet,sqlite,bibtex,email,legacy-office` | + archives / structured data / e-mail / legacy Office (needs soffice) |
-| Production | `cargo build --features full` | + MinerU cloud PDF + local ASR + html-deep |
+| Minimal (default) | `cargo build` | CLI + plain text / fenced code only (`default = ["cli", "text"]`); PDF/Office need explicit format features |
+| Common documents | `cargo build --features pdf,docx,pptx,odt,odp,html,epub,csv,ipynb,zip` | Main document path + zip recursion; add more formats as needed |
+| Full | `cargo build --features full` | All 28 conversion features (including MinerU cloud PDF, local ASR, containers/data/e-mail) |
 
 ### 📋 Feature Matrix
 
+**Format family (15, one feature per format)**
+
+| feature | Gates | Notes |
+| --- | --- | --- |
+| `text` | TextConverter | Plain text and ~45 code extensions with fenced code blocks; **default member** |
+| `csv` | CsvConverter | csv/tsv/psv with delimiter sensing |
+| `html` | HtmlConverter (htmd base chain) + HtmlDeepConverter (native deep chain) | Both HTML chains live in one feature; without `html`, html/htm conversion is unavailable |
+| `pdf` | PdfConverter (lopdf text extraction) | Local fallback tier; pdfium high fidelity needs `pdf-local` |
+| `docx` | DocxConverter + DocxDeepConverter | OOXML deep + basic parsing (quick-xml + zip) |
+| `pptx` | PptxConverter + PptxDeepConverter | Same as above |
+| `odt` | OdtConverter | Same as above |
+| `odp` | OdpConverter | Same as above |
+| `epub` | EpubConverter | rbook + zip + htmd |
+| `ipynb` | IpynbConverter | Core serde_json only |
+| `zip` | ZipConverter | One-level zip/cbz recursion (nested zip explicitly unsupported) |
+| `latex` | LatexSourceConverter | pandoc probe + fenced fallback |
+| `pandoc` | PandocGenericConverter | org/rst/asciidoc/opml/mediawiki and friends |
+| `media` | image / audio / video / subtitle converters | Images, audio/video track extraction, subtitle parsing; transcription backend needs `audio` |
+| `heic` | HeicConverter | sips or metadata fallback; standalone feature |
+
+**Backends / data / containers / tool surface**
+
 | feature | Pulls in | Notes |
 | --- | --- | --- |
+| `pdf-local` | local high-fidelity PDF engine (pdfium-render) | Implies `pdf`; probes the dynamic library at runtime, falls back to pdf-extract. Embedded images come from a lopdf structure walk (DCT/JPX passthrough, samples re-encoded to PNG, unsupported items counted explicitly) |
 | `pdf-cloud` | MinerU cloud PDF engine (reqwest/limiteron) | registered only after the endpoint is configured via `ALCHEMIZE_MINERU_URL` |
-| `pdf-local` | local high-fidelity PDF engine (pdfium-render) | probes the dynamic library at runtime; falls back to pdf-extract. Embedded images come from a lopdf structure walk (DCT/JPX passthrough, samples re-encoded to PNG, unsupported items counted explicitly) |
+| `audio` | vecboost transcription facade + Whisper-compatible API | Implies `media`; Qwen3-ASR ONNX + silero VAD, path dependency on sibling crate vecboost |
 | `legacy-office` | legacy binary Office engine (external soffice) | doc/rtf→docx and ppt/pps/pot→pptx, then the deep chain; degrades when absent |
-| `tar`/`gzip`/`xz`/`zstd`/`sevenz` | archive family, split into five per-format features (tar/tgz/gz/xz/zst/7z; `.tgz` needs `tar`+`gzip`) | recursive conversion, magic-byte detection of the inner format |
-| `parquet`/`sqlite`/`bibtex` | structured data engines, split into three per-format features (parquet/sqlite/bib) | streaming parquet with a 100k-row cap, read-only sqlite, biblatex entries |
 | `email` | e-mail engine (mail-parser) | headers / body / attachment list |
-| `audio` | vecboost transcription facade + Whisper-compatible API | Qwen3-ASR ONNX + silero VAD, path dependency on sibling crate vecboost |
-| `mcp` | MCP tool surface (`alch-mcp` stdio server) | convert/doctor/formats exposed as MCP tools; CLI wrapping (sdforge) always on |
-| `html` | html-deep engine (native iterative state machine → htmd fallback) | main-content extraction (`--extract-main`) and link absolutization (`--base-url`); pages with LaTeX math auto-route to htmd for fidelity |
-| `full` | all of the above (`pdf-cloud`+`pdf-local`+`audio`+`email`+`legacy-office`+`html`+`tar`/`gzip`/`xz`/`zstd`/`sevenz`+`parquet`/`sqlite`/`bibtex`, 14 in total) | |
+| `parquet`/`sqlite`/`bibtex` | structured data engines, split into three per-format features | streaming parquet with a 100k-row cap, read-only sqlite, biblatex entries |
+| `tar`/`gzip`/`xz`/`zstd`/`sevenz` | archive family, split into five per-format features | recursive conversion, magic-byte detection of the inner format; `.tgz` needs both `tar` and `gzip` |
+| `cli` | CLI skeleton (sdforge + inklog) | **default member**; `[[bin]] alch` has `required-features = ["cli"]` |
+| `mcp` | MCP tool surface (`alch-mcp` stdio server) | convert/doctor/formats exposed as MCP tools; not part of default |
+| `full` | All 28 conversion features (format family + backends/data/containers; excludes `cli`/`mcp`) | |
 
-Default is `default = ["cli"]` (CLI wrapping always on) — engines behind disabled features are not compiled at all.
+**Default behavior (breaking change)**: `default = ["cli", "text"]` — the default build compiles only the CLI skeleton and plain-text conversion. `alch convert x.pdf` / `x.docx` has no candidate engine in a default build and returns `unsupported format` (exit code 2). Enable the features you need explicitly (e.g. `--features pdf,docx`); `--features full` restores all capabilities.
+
+**Dependencies**: apart from the 9 core crates (`serde`/`serde_json`/`thiserror`/`tracing`/`tokio`/`async-trait`/`anyhow`/`base64`/`sha2`), every dependency is `optional = true` and activated only through a feature's `dep:` reference; disabling a feature keeps its dependencies out of the build graph. Version upgrades: `base64 0.23`, `sha2 0.11`, `image 0.25`, `pdfium-render 0.9` (`pdfium_6295` bindings; runtime e2e awaits a newer pdfium binary), `zstd 0.14`, `icu_properties 2.4`; `rusqlite` stays at `0.39` (`0.41` hard-conflicts with `libsqlite3-sys <0.38` from limiteron→dbnexus→sqlx).
 
 ---
 
@@ -237,6 +265,7 @@ use alchemize::{AlchemizeBuilder, Input};
 
 #[tokio::main]
 async fn main() -> Result<(), alchemize::AlchemizeError> {
+    // Enable the matching format feature in your Cargo.toml (e.g. features = ["pdf"]); otherwise convert returns UnsupportedFormat
     let alch = AlchemizeBuilder::new().build();
     let result = alch.convert(&Input::Path("paper.pdf".into())).await?;
     println!("engine: {}", result.metadata["converter"]);   // actual engine
@@ -269,7 +298,7 @@ Design principles, module layout and data flows in the [🏗️ Architecture doc
 
 ### 🎯 Test Strategy
 
-- **Two-tier matrix**: default tier (no external services) and `--features full` tier, both fully run.
+- **Three-tier matrix**: default tier (core + text only, no external services), `--features full` tier (all conversion capabilities) and `--all-features` tier (including cli/mcp), all fully run.
 - **Real-file suite**: 12 real-file tests with hard assertions, using 9 in-repo fixtures and 1 external video source — not synthetic samples.
 - **Golden outputs**: `tests/golden.rs` pins the textual shape of each format's output.
 - **CLI e2e**: exit codes, stderr summaries, asset writing verified end to end.
@@ -277,8 +306,9 @@ Design principles, module layout and data flows in the [🏗️ Architecture doc
 ### ▶️ Commands
 
 ```bash
-cargo test                    # default tier (317 tests)
-cargo test --features full    # full tier (396 tests)
+cargo test                     # default tier (154 tests: core + text only)
+cargo test --features full     # full tier (907 tests)
+cargo test --all-features      # all-features tier (912 tests, including cli/mcp)
 cargo clippy --all-features   # no new warnings
 cargo fmt --check             # zero format diffs
 cargo llvm-cov --features full # coverage (gate ≥90%)
@@ -286,10 +316,11 @@ cargo llvm-cov --features full # coverage (gate ≥90%)
 
 ### 📊 Test Scale
 
-| Tier | Passed | Failed | Ignored |
-| --- | --- | --- | --- |
-| default | 317 | 0 | 0 |
-| full | 396 | 0 | 1 (real-model e2e, awaiting ASR bundle) |
+| Tier | Test cases | Scope |
+| --- | --- | --- |
+| default (cli+text) | 154 | core + text only |
+| full | 907 | all conversion capabilities (5 ignored: real-model e2e etc.) |
+| all-features | 912 | including cli/mcp (5 ignored: real-model e2e etc.) |
 
 Line coverage **90.49%** (gate ≥90%).
 
@@ -331,7 +362,7 @@ Four defense lines: structured error handling for untrusted input (no panics); S
 <tr><td align="center">✅</td><td>Docs & compliance</td><td>seven-doc suite (structure aligned with confers), bilingual README, SPDX headers 59/59, coverage 90.49%</td></tr>
 <tr><td align="center">✅</td><td>Supply chain</td><td>anydoc dependency removed, zip is 9.4.1 only; cargo audit vulnerabilities at zero (unmaintained notices remain)</td></tr>
 <tr><td align="center">🔲</td><td>Release</td><td>first crates.io publish (vecboost first) + crates.io/docs.rs badges</td></tr>
-<tr><td align="center">🔲</td><td>CI & quality</td><td>GitHub Actions two-tier matrix + codecov coverage badge</td></tr>
+<tr><td align="center">🔲</td><td>CI & quality</td><td>GitHub Actions three-tier matrix + codecov coverage badge</td></tr>
 <tr><td align="center">🔲</td><td>Performance</td><td>criterion benchmarks → real data for a PERFORMANCE doc</td></tr>
 <tr><td align="center">🔲</td><td>ASR real pipeline</td><td>run the real-model e2e once the model bundle is available (currently #[ignore])</td></tr>
 </table>

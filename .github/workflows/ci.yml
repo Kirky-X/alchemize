@@ -100,7 +100,7 @@ jobs:
   # 每配置顺带跑注册在场性测试，执行「feature 关 → 引擎必须缺席」方向
   # （该方向的断言在 full/all-features 下被 cfg 编译掉，只有单 feature 态能验）。
   feature-isolation:
-    name: feature isolation (15 configs)
+    name: feature isolation (29 configs)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,10 +110,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # cli 是 default 成员，--no-default-features 下显式带回，模拟下游最小构建。
-          for f in html pdf-local pdf-cloud audio legacy-office email \
-                   tar gzip xz zstd sevenz parquet sqlite bibtex "tar,gzip"; do
+          # 第一步是真正的下游模拟：不带 cli、只编库。cli 会经 sdforge 顺带把
+          # thiserror/std 等特性统一打开，dev-deps 又会带入 flate2 默认后端——
+          # 只测 "cli,$f" 会掩盖「下游 default-features=false」的编译失败
+          # （架构审查 2×CRITICAL 的逃逸路径）。
+          # 第二步带 cli 并用 --all-targets 编测试目标；第三步跑注册在场性测试，
+          # 执行「feature 关 → 引擎必须缺席」方向（该断言在 full/all-features 下
+          # 被 cfg 编译掉，只有单 feature 态能验）。
+          for f in text csv html pdf pdf-local pdf-cloud docx pptx odt odp \
+                   epub ipynb zip latex pandoc media heic audio legacy-office \
+                   email parquet sqlite bibtex tar gzip xz zstd sevenz "tar,gzip"; do
             echo "::group::feature=$f"
+            cargo check --lib --no-default-features --features "$f"
             cargo check --all-targets --no-default-features --features "cli,$f"
             cargo test --lib --no-default-features --features "cli,$f" \
               feature_gates_register_exactly_the_enabled_engines

@@ -82,20 +82,34 @@ flowchart TB
 | `application/ports.rs` | 四个端口 trait + `Availability` + `Transcript`（VAD 段级转录，明确不含说话人归属）+ `which_program()` PATH 探测 |
 | `application/registry.rs` | 优先级降序注册、fallback 链尝试、attempts 记录、`metadata.converter` 注入 |
 | `application/builder.rs` | `AlchemizeBuilder` → `Alchemize` 门面（convert / convert_pref / availability / engines / asset_sink_for）；zip 门面特判 |
-| `infrastructure/document/` | text（纯文本 + ~45 扩展名代码围栏）、csv（分隔符自探测）、html-deep（自研迭代状态机 → htmd 兜底，feature `html`）、html、epub、docx/pptx（原生 XML）、latex-source（pandoc 探测 + 围栏兜底）、pdf（lopdf + TOC 剔除/结构启发）、gfm_render（自研 GFM 渲染器）、shared（detect_encoding：UTF-8 → CJK 优先探测 → lossy 兜底） |
-| `infrastructure/media/` | image / audio / video（ffmpeg 抽轨）/ subtitle（srt/vtt/ass/ssa 原生解析）/ timeline / dedup（视频帧去重） |
-| `infrastructure/remote/mineru/` | 云端 PDF 后端（见[特性门控模块](#特性门控模块)） |
-| `infrastructure/tools/` | pandoc 外部二进制探测（构建时缺席、运行时探测） |
+| `infrastructure/document/{gfm_render,shared}` | 自研 GFM 渲染器；共享原语（`shared::detect_encoding` 单独门控 `any(text,csv,pandoc,media)`），模块本身无外部依赖、保持无条件 |
 
 ### 特性门控模块
 
+格式模块由对应格式 feature 门控；`office` 聚合模块的门为 `any(docx, pptx, odt, odp, legacy-office)`。
+
 | feature | 模块 | 说明 |
 | --- | --- | --- |
+| `text` | `infrastructure/document/text.rs` | 纯文本 + ~45 扩展名代码围栏（default 成员） |
+| `csv` | `infrastructure/document/csv.rs` | 分隔符自探测 |
+| `html` | `infrastructure/document/html.rs` + `html_deep.rs` | htmd 基础链 + 自研深链（priority 15 压过 html(10)）；`--extract-main`/`--base-url` |
+| `pdf` | `infrastructure/document/pdf.rs` | lopdf 兜底档文本抽取 + TOC 剔除/结构启发 |
+| `docx`/`pptx`/`odt`/`odp` | `infrastructure/document/office/` | OOXML/ODF 深解析与基础解析（模块门 `any(docx,pptx,odt,odp,legacy-office)`） |
+| `epub` | `infrastructure/document/epub.rs` | rbook + zip + htmd |
+| `ipynb` | `infrastructure/document/ipynb.rs` | 笔记本单元格转 markdown |
+| `zip` | `infrastructure/document/zip.rs`（门面层接线） | zip/cbz 递归容器 |
+| `latex`/`pandoc` | `document/latex_source.rs`、`document/pandoc_generic.rs`、`tools/pandoc.rs`（模块门 `any(latex,pandoc)`） | 外部 pandoc 探测 + 围栏兜底；通用标记语言 |
+| `media` | `infrastructure/media/`（image/audio/video/subtitle/timeline/dedup） | 图片、ffmpeg 抽轨、字幕原生解析、帧去重 |
+| `heic` | `infrastructure/media/heic.rs` | sips 或元数据降级（独立 feature） |
+| `pdf-local` | `infrastructure/document/pdfium.rs`、`pdf_images.rs` | pdfium 高保真（自动带入 `pdf`）+ 嵌入图提取 |
 | `pdf-cloud` | `infrastructure/remote/mineru/` | 云端 PDF：`client`/`factory`（按文件大小选 agent/precision 客户端）、`backoff`（limiteron 轮询退避）、`http_limit`（响应体积分级上限）、`validated_url`（SSRF 校验）、`wrapper`（Converter 适配，priority 5 链尾） |
 | `audio` | `infrastructure/media/asr/` | `vecboost.rs`（自研 transcribe 门面：Qwen3-ASR ONNX 三件套 + silero VAD，path 依赖兄弟仓）与 `whisper_api.rs`（Whisper 兼容云端后端，仅显式注入激活） |
-| `html` | `infrastructure/document/html_deep/` | 自研迭代状态机（HTML→Markdown）+ htmd 兜底，priority 15 压过 html(10)；`--extract-main`/`--base-url` |
+| `legacy-office` | `document/office/legacy_office.rs`、`tools/libreoffice.rs` | 旧版二进制 Office（外部 soffice） |
+| `tar`/`gzip`/`xz`/`zstd`/`sevenz` | `infrastructure/containers/` | 容器族；RegistrySlot 弱引用回填 |
+| `parquet`/`sqlite`/`bibtex` | `infrastructure/data/` | parquet / sqlite / biblatex |
+| `email` | `infrastructure/document/eml.rs` | 邮件（mail-parser） |
 
-feature 关闭的引擎根本不出现在 `engines.rs` 装配列表中；`mineru` 还需配置端点（`ALCHEMIZE_MINERU_URL` 或库 API `with_mineru`）才注册。
+feature 关闭的引擎根本不出现在 `engines.rs` 装配列表中（`engines.rs` 的每条注册语句与转换器定义处使用同一 feature 门）；`mineru` 还需配置端点（`ALCHEMIZE_MINERU_URL` 或库 API `with_mineru`）才注册。default 为 `["cli", "text"]`，因此默认构建只有文本转换器。
 
 ### crate 组织
 

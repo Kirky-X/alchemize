@@ -339,7 +339,7 @@ fn extract_zip_contents(
     Ok(Extracted { files, oversize })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "text"))]
 mod tests {
     use super::*;
     use std::io::Write;

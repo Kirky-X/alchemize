@@ -9,6 +9,7 @@
 //! - pdf character recall (vs. a raw pdftotext-style extraction when present)
 //! - formula zero-silent-loss (OMML fallback counter + output presence)
 //! - image sha alignment (asset bytes hash vs. the source media part)
+#![cfg(feature = "full")]
 
 use std::path::PathBuf;
 

@@ -255,6 +255,7 @@ impl ContainerBase {
     /// Test-only: create a base around an already assembled registry. The
     /// caller's `Arc` must outlive the base (the slot holds a weak handle).
     #[cfg(test)]
+    #[allow(dead_code)] // used by feature-gated test modules
     pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         let slot: RegistrySlot = Arc::new(std::sync::OnceLock::new());
         let _ = slot.set(Arc::downgrade(&registry));
@@ -390,7 +391,7 @@ impl ContainerBase {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "text"))]
 mod tests {
     use super::*;
     use crate::infrastructure::document::text::TextConverter;

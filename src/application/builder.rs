@@ -107,7 +107,9 @@ pub struct Alchemize {
     registry: std::sync::Arc<ConverterRegistry>,
     /// ZIP handled at the facade level: it shares the main registry for
     /// nested conversion; zip itself is not a registry member (unbounded
-    /// self-recursion), so nested zips report unsupported.
+    /// self-recursion), so nested zips report unsupported. Absent unless
+    /// the `zip` feature is compiled in.
+    #[cfg(feature = "zip")]
     zip: Option<crate::infrastructure::document::ZipConverter>,
     asset_mode: AssetMode,
     no_remote: bool,
@@ -141,6 +143,7 @@ impl Alchemize {
             )));
         }
         if matches!(input.extension().as_deref(), Some("zip") | Some("cbz")) {
+            #[cfg(feature = "zip")]
             if let Some(ref zip) = self.zip {
                 use crate::application::ports::Converter as _;
                 return zip.convert(input.clone()).await;
@@ -202,7 +205,9 @@ impl Alchemize {
     pub fn availability(
         &self,
     ) -> Vec<(String, Vec<String>, crate::application::ports::Availability)> {
+        #[allow(unused_mut)]
         let mut rows = self.registry.availability();
+        #[cfg(feature = "zip")]
         if self.zip.is_some() {
             rows.push((
                 "zip".to_string(),
@@ -372,14 +377,18 @@ impl AlchemizeBuilder {
         // Fill the container slot with a weak handle to the assembled
         // registry (the strong owner is `Alchemize.registry`).
         let _ = container_registry_slot.set(std::sync::Arc::downgrade(&registry));
-        let zip = crate::infrastructure::document::ZipConverter::with_arc(std::sync::Arc::clone(
-            &registry,
-        ))
-        .with_max_entry_size(self.max_file_size);
+        #[cfg(feature = "zip")]
+        let zip = Some(
+            crate::infrastructure::document::ZipConverter::with_arc(std::sync::Arc::clone(
+                &registry,
+            ))
+            .with_max_entry_size(self.max_file_size),
+        );
 
         Alchemize {
             registry,
-            zip: Some(zip),
+            #[cfg(feature = "zip")]
+            zip,
             asset_mode: self.asset_mode,
             no_remote: self.no_remote,
             max_file_size: self.max_file_size,
@@ -449,6 +458,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "text")]
     #[tokio::test]
     async fn max_file_size_rejects_oversized_bytes_input() {
         let alch = AlchemizeBuilder::new().build();
@@ -463,6 +473,7 @@ mod tests {
         assert!(alch.convert(&ok).await.is_ok());
     }
 
+    #[cfg(feature = "text")]
     #[tokio::test]
     async fn max_file_size_is_configurable() {
         let alch = AlchemizeBuilder::new().with_max_file_size(10).build();
@@ -476,8 +487,8 @@ mod tests {
 
     // -- sync port ------------------------------------------------------------
 
-    /// 同步口正例：内存 Bytes 输入走同步分发（默认构建下 html 引擎声明了
-    /// 同步能力）。
+    /// 同步口正例：内存 Bytes 输入走同步分发（html 引擎声明了同步能力）。
+    #[cfg(feature = "html")]
     #[test]
     fn convert_sync_converts_in_memory_html() {
         let alch = AlchemizeBuilder::new().build();
@@ -502,6 +513,7 @@ mod tests {
     /// 有引擎（pdf/pdfium）但无同步能力的格式：显式拒绝并点名引擎，
     /// 不得静默降级。断言 "pdf" 子串同时覆盖默认态（pdf）与全量态
     /// （pdfium）两种注册面。
+    #[cfg(feature = "pdf")]
     #[test]
     fn convert_sync_rejects_async_only_format_naming_engines() {
         let alch = AlchemizeBuilder::new().build();
@@ -523,6 +535,42 @@ mod tests {
         assert!(matches!(err, AlchemizeError::NotSyncCapable(_)));
     }
 
+    /// zip facade 的在场性：feature 开 → availability 有 zip 行；关 → zip 输入
+    /// 报 UnsupportedFormat（安全审查 LOW：补上 zip 的双向断言）。
+    #[cfg(feature = "zip")]
+    #[test]
+    fn zip_facade_registers_when_feature_on() {
+        let alch = AlchemizeBuilder::new().build();
+        assert!(
+            alch.availability().iter().any(|(name, _, _)| name == "zip"),
+            "zip feature on but availability has no zip row"
+        );
+    }
+
+    #[cfg(not(feature = "zip"))]
+    #[test]
+    fn zip_facade_absent_when_feature_off() {
+        let alch = AlchemizeBuilder::new().build();
+        assert!(
+            alch.availability().iter().all(|(name, _, _)| name != "zip"),
+            "zip feature off but availability lists zip"
+        );
+        let err = futures_block_on_zip(
+            alch.convert(&Input::bytes(vec![0x50, 0x4b, 0x03, 0x04], "x.zip")),
+        )
+        .unwrap_err();
+        assert!(matches!(err, AlchemizeError::UnsupportedFormat(_)));
+    }
+
+    #[cfg(not(feature = "zip"))]
+    fn futures_block_on_zip<F: std::future::Future>(fut: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(fut)
+    }
+
     /// 大小上限守卫先于同步分发，消息含实际大小与上限两数值（与 async 同文案）。
     #[test]
     fn convert_sync_enforces_size_ceiling_before_dispatch() {
@@ -539,6 +587,7 @@ mod tests {
 
     /// 差分语料：基础结构 / 表格链接 / style+script / math。断言 facade 两个
     /// 端口的输出（markdown+quality+metadata，含 converter 溯源）逐字节相等。
+    #[cfg(feature = "html")]
     #[tokio::test]
     async fn facade_sync_matches_async_byte_for_byte() {
         let corpora = [

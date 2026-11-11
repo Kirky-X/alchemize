@@ -36,9 +36,28 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 | feature | 门控 API | 默认 |
 | --- | --- | --- |
+| `text` | TextConverter（纯文本/代码围栏） | **开** |
+| `csv` | CsvConverter | 关 |
+| `html` | HtmlConverter（htmd 基础链）+ HtmlDeepConverter（`HtmlDeepEngineConfig`/`with_html_deep`） | 关 |
+| `pdf` | PdfConverter（lopdf 兜底档） | 关 |
+| `docx` / `pptx` / `odt` / `odp` | 对应 OOXML/ODF 深解析与基础解析转换器 | 关 |
+| `epub` | EpubConverter | 关 |
+| `ipynb` | IpynbConverter | 关 |
+| `zip` | ZipConverter（门面层接线，不入注册表） | 关 |
+| `latex` / `pandoc` | LatexSourceConverter / PandocGenericConverter | 关 |
+| `media` | image / audio / video / subtitle 四个转换器 | 关 |
+| `heic` | HeicConverter | 关 |
+| `pdf-local` | PdfiumConverter（自动带入 `pdf`） | 关 |
 | `pdf-cloud` | MinerU 引擎注册 + `MineruConfig` 装配 | 关 |
-| `audio` | vecboost 转录门面 + Whisper 兼容后端 | 关 |
-| `full` | 以上全部 14 个转换能力 feature 全集合（详见 Cargo.toml） | 关 |
+| `audio` | vecboost 转录门面 + Whisper 兼容后端（自动带入 `media`） | 关 |
+| `legacy-office` | LegacyOffice / LegacyPpt 引擎 | 关 |
+| `email` / `parquet` / `sqlite` / `bibtex` | 对应格式引擎 | 关 |
+| `tar` / `gzip` / `xz` / `zstd` / `sevenz` | 归档容器族 | 关 |
+| `cli` | CLI 骨架（`[[bin]] alch` 的 required-features） | **开** |
+| `mcp` | `alch-mcp` 工具面 | 关 |
+| `full` | 全部 28 个转换类 feature 集合（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | 关 |
+
+`default = ["cli", "text"]`：默认构建只有文本转换器（+ CLI 骨架）。`Alchemize::convert` 在输入格式没有候选引擎时返回 `UnsupportedFormat`（`Err`，CLI 退出码 2）——格式 feature 未启用与扩展名确实不支持，在门面层是同一种终态。
 
 ## 🧱 核心 API
 
@@ -61,7 +80,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 | 方法 | 签名 | 说明 |
 | --- | --- | --- |
-| `convert` | `async fn convert(&self, input: &Input) -> Result<ConvertResult, AlchemizeError>` | 按 fallback 链转换 |
+| `convert` | `async fn convert(&self, input: &Input) -> Result<ConvertResult, AlchemizeError>` | 按 fallback 链转换；格式 feature 未启用时无候选引擎，返回 `UnsupportedFormat` |
 | `convert_pref` | `async fn convert_pref(&self, input: &Input, prefer: Option<&str>) -> Result<ConvertResult, AlchemizeError>` | 指定偏好引擎（名称精确或前缀匹配，大小写不敏感；未命中静默回落 priority 路由） |
 | `availability` | `fn availability(&self) -> Vec<(String, Vec<String>, Availability)>` | 每引擎 `(名称, 扩展名表, 可用性)`，`doctor` 数据源；zip 单列一行 |
 | `engines` | `fn engines(&self) -> Vec<&'static str>` | 已注册引擎名（zip 不在内） |
@@ -236,6 +255,10 @@ URL 校验拒绝的六类原因：`InvalidScheme`（非 HTTPS）、`LoopbackAddr
 
 ## 🚪 特性门控 API
 
+### 格式 feature（15 个）
+
+每个格式一个 feature：`text`（default 成员）、`csv`、`html`、`pdf`、`docx`、`pptx`、`odt`、`odp`、`epub`、`ipynb`、`zip`、`latex`、`pandoc`、`media`、`heic`。关闭的 feature 不编译对应转换器，`default_converters` 返回的引擎列表随启用 feature 变化（函数签名不变）；`AlchemizeBuilder::build()` 只装配已编译引擎。因此对未启用格式调用 `convert` 得到 `UnsupportedFormat`——与「扩展名确实不支持」同一种终态，调用方据 `formats`/feature 面判断属于哪一种。
+
 ### MinerU（`pdf-cloud` 特性）
 
 - 注册条件：`with_mineru(MineruConfig)` 且 feature 编译开启；CLI 侧由 `ALCHEMIZE_MINERU_URL` 触发。
@@ -272,6 +295,7 @@ use alchemize::{AlchemizeBuilder, Input};
 
 #[tokio::main]
 async fn main() -> Result<(), alchemize::AlchemizeError> {
+    // 需在 Cargo.toml 启用对应格式 feature（如 features = ["pdf"]）；未启用时返回 UnsupportedFormat
     let alch = AlchemizeBuilder::new().build();
     let result = alch.convert(&Input::Path("paper.pdf".into())).await?;
     println!("engine: {}", result.metadata["converter"]);

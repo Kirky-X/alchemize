@@ -50,23 +50,34 @@ cargo build --features full
 
 ### 特性标志
 
+`default = ["cli", "text"]`：默认构建只有 CLI 骨架与纯文本转换，其余格式全部按需开启（完整矩阵见 README「特性标志」）。
+
 | feature | 引入 | 说明 |
 | --- | --- | --- |
+| `text`（default） | 纯文本/代码围栏转换器 | 默认构建唯一启用的格式 |
+| 格式族（15） | `csv`/`html`/`pdf`/`docx`/`pptx`/`odt`/`odp`/`epub`/`ipynb`/`zip`/`latex`/`pandoc`/`media`/`heic` | 一格式一 feature；`html` 同时含 htmd 基础链与自研深链 |
 | `pdf-cloud` | MinerU 云端 PDF 引擎 | 需 `ALCHEMIZE_MINERU_URL` 配置端点才注册 |
-| `audio` | vecboost 转录门面（Qwen3-ASR ONNX + silero VAD） | 需模型 bundle + `ORT_DYLIB_PATH` |
-| `mcp` | MCP 工具面（alch-mcp，rmcp stdio） | CLI 封装（sdforge cli）恒在 |
-| `html` | html-deep 自研引擎（`document/html_deep/engine/`） | scraper/ego-tree/dom_smoothie/icu_properties 同批可选 |
-| `full` | 以上全部 | |
+| `pdf-local` | pdfium 高保真 PDF（自动带入 `pdf`） | 需运行时 pdfium 动态库，缺失降级 |
+| `audio` | vecboost 转录门面（自动带入 `media`） | 需模型 bundle + `ORT_DYLIB_PATH` |
+| `legacy-office` / `email` / `parquet` / `sqlite` / `bibtex` | 旧版 Office / 邮件 / 结构化数据 | 各自独立 |
+| `tar`/`gzip`/`xz`/`zstd`/`sevenz` | 归档容器族 | `.tgz` 需 `tar`+`gzip` |
+| `mcp` | MCP 工具面（alch-mcp，rmcp stdio） | 不随 default |
+| `cli`（default） | CLI 骨架（sdforge + inklog） | `[[bin]] alch` 的 required-features |
+| `full` | 全部 28 个转换类 feature（不含 `cli`/`mcp`） | |
 
 ### 构建与测试
 
 ```bash
-cargo build                 # 构建项目
-cargo test                  # 运行全部测试（default 档，448 例）
-cargo test --features full  # full 档（774 例）
+cargo build                     # 默认档：CLI + 文本转换
+cargo test                      # default 档（154 例，core + text）
+cargo test --features full      # full 档（907 例）
+cargo test --all-features       # all-features 档（912 例，含 cli/mcp）
 ```
 
 质量门禁（本地 pre-commit hook + GitHub CI 双层执行，规则见 `.pre-commit-config.yaml` 与 `.github/workflows/ci.yml`）：
+
+- **feature-isolation**：CI 逐个配置执行 `cargo check --all-targets --no-default-features --features "cli,<F>"` 并跑注册在场性测试（开=引擎在场 / 关=引擎缺席），覆盖 29 个配置（28 个单 feature + `.tgz` 的 `tar,gzip` 组合）。单 job 顺序循环共享 target dir。
+- **三档测试**：default / `--features full` / `--all-features` 全绿；fmt 与 `clippy -D warnings` 零告警。
 
 ```bash
 pre-commit run --all-files  # 本地全量：fmt/clippy(-D warnings)/deny/typos/私钥检测
@@ -106,7 +117,7 @@ git branch -d feat/my-engine
 - 新增行为必须带钉住该行为的测试；修缺陷先写暴露缺陷的测试再修。
 - **覆盖率门禁 ≥89%**：`cargo llvm-cov --features full` 度量，当前 89.44%。（曾自 documented ≥90%，后续功能提交令水位漂移；回升 90 前以实测为准，diff 覆盖率门禁仍为 ≥90% 不降标。）
 - 金样输出变更（`tests/golden.rs`）必须在提交说明中写明变更理由。
-- 测试两档都要过：`cargo test`（default 448）与 `cargo test --features full`（full 774）。
+- 测试三档都要过：`cargo test`（default 154，core + text 瘦身档）、`cargo test --features full`（907）与 `cargo test --all-features`（912，含 cli/mcp）。
 
 ## 📐 代码规范
 

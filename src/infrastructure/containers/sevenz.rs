@@ -63,6 +63,7 @@ impl SevenZConverter {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)] // used by feature-gated test modules
     pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
             base: ContainerBase::with_arc(registry),
@@ -153,7 +154,7 @@ fn extract_sevenz(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
     Ok(out)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "text"))]
 mod tests {
     use super::*;
     use crate::application::registry::ConverterRegistry;
@@ -191,7 +192,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "text"))]
 mod fixture_tests {
     use super::*;
     use crate::application::registry::ConverterRegistry;

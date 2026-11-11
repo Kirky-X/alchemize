@@ -3,6 +3,7 @@
 
 //! Coverage supplements: public-API paths that the fixture suite does not
 //! reach. Each test asserts a behaviour, not merely that a line ran.
+#![cfg(feature = "full")]
 
 use alchemize::application::builder::{AlchemizeBuilder, AssetMode};
 use alchemize::domain::asset::Asset as SinkAsset;

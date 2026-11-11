@@ -3,6 +3,7 @@
 
 //! External tool ports (runtime-probed binaries).
 
+#[cfg(any(feature = "latex", feature = "pandoc"))]
 pub mod pandoc;
 
 #[cfg(feature = "legacy-office")]

@@ -23,7 +23,7 @@
 
 ### ❓ Alchemize 可以用于生产环境吗？
 
-可以。测试规模 default 档 317 例、full 档 396 例（0 失败），行覆盖率 90.49%（门禁 ≥90%），真实文件套件 12 项测试（素材：9 个仓库内 fixtures 与 1 个外部视频源）覆盖 PDF/DOCX/XLSX/RTF 等真实文档。安全模型见[安全文档](SECURITY.md)。
+可以。测试规模 default 档 154 例（仅 core + text）、full 档 907 例、all-features 档 912 例，行覆盖率 90.49%（门禁 ≥90%），真实文件套件 12 项测试（素材：9 个仓库内 fixtures 与 1 个外部视频源）覆盖 PDF/DOCX/XLSX/RTF 等真实文档。安全模型见[安全文档](SECURITY.md)。
 
 ### ❓ 支持哪些平台？
 
@@ -46,7 +46,7 @@ Apache-2.0（`LICENSE` 与 Cargo.toml 一致，全部源文件带 SPDX 头）。
 ### ❓ 如何安装？
 
 ```bash
-cargo install --path . --features full   # 或 cargo build --release
+cargo install --path . --features full   # 或 cargo build --release（默认仅 CLI + 文本转换）
 ```
 
 详见[用户指南](USER_GUIDE.md#-安装)。
@@ -54,15 +54,29 @@ cargo install --path . --features full   # 或 cargo build --release
 ### ❓ 如何选择合适的特性组合？
 
 ```bash
-cargo build                        # 最小化：纯本地，零外部服务
-cargo build --features pdf-cloud   # 云端 PDF 高保真（还需配置端点）
-cargo build --features audio       # 本地转录（还需模型 bundle + ORT 库）
-cargo build --features full        # 全量
+cargo build                        # 最小构建：仅文本/代码围栏（default = cli + text）
+cargo build --features pdf,docx    # 需要哪些格式就开哪些格式 feature
+cargo build --features pdf,pdf-cloud # PDF 本地链 + MinerU 云端兜底（还需配置端点）
+cargo build --features audio       # 本地转录（自动带入 media；还需模型 bundle + ORT 库）
+cargo build --features full        # 全量（28 个转换类 feature）
 ```
+
+### ❓ 为什么默认不能转 pdf/docx？
+
+这是 `dependency-feature-gating` 引入的破坏性变更：`default = ["cli", "text"]`，默认构建只编译 CLI 骨架与纯文本转换。PDF/Word 等格式的转换器与依赖全部由各自 feature 门控，未启用时不会编译、也不会注册——`alch convert x.pdf` 因此没有候选引擎，返回 `unsupported format`（退出码 2）。需要哪些格式就显式开启（如 `--features pdf,docx`）；要恢复旧的全量默认行为用 `--features full`。
+
+### ❓ 如何最小构建？
+
+```bash
+cargo build --release                              # 只含 CLI + 文本/代码围栏
+cargo build --release --no-default-features --features cli,text  # 等价显式写法
+```
+
+最小构建不拉取任何网络/云/Office/容器依赖；除核心 9 个依赖（`serde`/`serde_json`/`thiserror`/`tracing`/`tokio`/`async-trait`/`anyhow`/`base64`/`sha2`）外，其余依赖全部 `optional`，只随对应 feature 经 `dep:` 激活。
 
 ### ❓ 不同特性组合的依赖数量差别有多大？
 
-default 档无任何网络/云相关依赖（reqwest/limiteron/futures 均为可选）；`pdf-cloud` 引入 reqwest+limiteron+futures；`audio` 引入 vecboost（ort/ONNX 栈，path 依赖）。特性关闭的引擎不参与编译，二进制更小、审计面更小。
+default 档只含核心 9 依赖 + `encoding_rs`（文本），没有任何网络/云/Office/容器依赖（reqwest/limiteron/futures/lopdf/quick-xml/zip/htmd 均为可选）；`pdf` 引入 lopdf，`pdf-cloud` 引入 reqwest+limiteron+futures，`audio` 引入 vecboost（ort/ONNX 栈，path 依赖）。特性关闭的引擎不参与编译，二进制更小、审计面更小。
 
 ### ❓ 系统要求是什么？
 
@@ -80,7 +94,7 @@ alch doctor && alch formats         # 先看引擎与格式
 
 ### ❓ 支持哪些格式和来源？
 
-文档族（pdf/docx/pptx/odt/odp/rtf/旧版二进制 Office/html/epub/csv/tsv/txt/md/zip 递归/ipynb/tex；表格（xlsx/xls/xlsb/ods）不支持）、代码配置族（~45 扩展名围栏化）、图片（png/jpg/gif/bmp/webp/tiff/svg）、音频（wav/mp3/ogg/opus/flac/aac/m4a/wma）、视频（mp4/avi/mkv/mov/wmv/flv/webm/m4v，ffmpeg 抽轨）、字幕（srt/vtt/ass/ssa）。以 `alch formats` 实时输出为准。
+文档族（pdf/docx/pptx/odt/odp/rtf/旧版二进制 Office/html/epub/csv/tsv/txt/md/zip 递归/ipynb/tex；表格（xlsx/xls/xlsb/ods）不支持）、代码配置族（~45 扩展名围栏化）、图片（png/jpg/gif/bmp/webp/tiff/svg）、音频（wav/mp3/ogg/opus/flac/aac/m4a/wma）、视频（mp4/avi/mkv/mov/wmv/flv/webm/m4v，ffmpeg 抽轨）、字幕（srt/vtt/ass/ssa）。以上格式均要在构建时开启对应 feature（default 只有 `text`）；以 `alch formats` 实时输出为准。
 
 ### ❓ 转换质量怎么判读？有校验功能吗？
 

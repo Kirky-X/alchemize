@@ -395,9 +395,9 @@ fn encode_png(samples: Vec<u8>, width: u32, height: u32, channels: usize) -> Opt
     let mut out = std::io::Cursor::new(Vec::new());
     let result = match channels {
         3 => image::DynamicImage::ImageRgb8(image::ImageBuffer::from_raw(width, height, samples)?)
-            .write_to(&mut out, image::ImageOutputFormat::Png),
+            .write_to(&mut out, image::ImageFormat::Png),
         1 => image::DynamicImage::ImageLuma8(image::ImageBuffer::from_raw(width, height, samples)?)
-            .write_to(&mut out, image::ImageOutputFormat::Png),
+            .write_to(&mut out, image::ImageFormat::Png),
         _ => return None,
     };
     result.ok()?;
@@ -470,8 +470,10 @@ mod tests {
             image::Rgb([x as u8 * 40, y as u8 * 40, 128])
         }));
         let mut out = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut out, image::ImageOutputFormat::Jpeg(80))
-            .unwrap();
+        img.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+            &mut out, 80,
+        ))
+        .unwrap();
         out.into_inner()
     }
 

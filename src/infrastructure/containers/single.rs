@@ -55,6 +55,7 @@ impl GzConverter {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)] // used by feature-gated test modules
     pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
             base: ContainerBase::with_arc(registry),
@@ -74,6 +75,7 @@ impl XzConverter {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)] // used by feature-gated test modules
     pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
             base: ContainerBase::with_arc(registry),
@@ -93,6 +95,7 @@ impl ZstConverter {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)] // used by feature-gated test modules
     pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
             base: ContainerBase::with_arc(registry),
@@ -349,7 +352,7 @@ impl Converter for ZstConverter {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "text", feature = "csv"))]
 mod tests {
     use super::*;
     use crate::infrastructure::document::csv::CsvConverter;

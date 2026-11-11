@@ -9,6 +9,10 @@ alchemize 所有显著变更记录于此文件。
 
 ### 破坏性变更
 
+- **default 收窄为 `["cli", "text"]`**：默认构建只编译 CLI 骨架与纯文本/代码围栏转换；PDF/docx/html 等格式的转换器与依赖全部按 feature 门控。未启用对应 feature 时 `alch convert x.pdf` 没有候选引擎，返回 `unsupported format`（退出码 2）。需要显式 `--features pdf,docx,...`，或 `--features full` 恢复全量能力。`[[bin]] alch` 同步新增 `required-features = ["cli"]`。
+- **新增 15 个格式 feature**（此前这些转换器无条件编译，或 `html` 只含深链）：`text`/`csv`/`html`/`pdf`/`docx`/`pptx`/`odt`/`odp`/`epub`/`ipynb`/`zip`/`latex`/`pandoc`/`media`/`heic`。`html` 现在同时含 htmd 基础链与自研深链，无 `html` feature 时 html 转换完全不可用。既有 feature 调整：`pdf-local = ["pdf", ...]`、`audio = ["media", ...]`、`legacy-office` 增加 quick-xml/zip/tempfile、媒体族统一为 `media`、`heic` 独立。
+- **依赖全部 optional 化**：除核心 9 个（`serde`/`serde_json`/`thiserror`/`tracing`/`tokio`/`async-trait`/`anyhow`/`base64`/`sha2`）外，全部依赖 `optional = true` 且只经 feature 的 `dep:` 引用激活；声明统一为 `default-features = false` + 显式 features。
+- **版本升级**：`base64 0.23`、`sha2 0.11`、`image 0.25`、`pdfium-render 0.9（`scaled_font_size` 替代 `font_size`，旋转/缩放文本的抽取结果可能与 0.5 略有差异）`（bindings 选 `pdfium_6295`；运行时 e2e 待更新 pdfium 二进制）、`zstd 0.14`、`icu_properties 2.4`；`rusqlite` 保持 `0.39`（`0.41` 与 limiteron→dbnexus→sqlx 的 `libsqlite3-sys <0.38` 硬冲突）；其余 `cargo update` 到最新。
 - **Cargo feature 重命名为能力名并按格式拆分**：8 个 feature 调整——6 个重命名 + 2 个按格式拆分；`full` 伞面成员同步为新 14 名集合；不保留旧名别名，旧 `--features` 组合需按新名更新。
 
 | 旧 feature | 新 feature |
@@ -22,9 +26,11 @@ alchemize 所有显著变更记录于此文件。
 | `containers`（拆分） | `tar` / `gzip` / `xz` / `zstd` / `sevenz`（`.tgz` 需 `tar`+`gzip`） |
 | `data`（拆分） | `parquet` / `sqlite` / `bibtex` |
 
-- `full` 伞面成员更新为：`pdf-cloud`+`pdf-local`+`audio`+`email`+`legacy-office`+`html`+`tar`+`gzip`+`xz`+`zstd`+`sevenz`+`parquet`+`sqlite`+`bibtex`（14 个）。
+- `full` 伞面成员更新为：`pdf-cloud`+`pdf-local`+`audio`+`email`+`legacy-office`+`html`+`tar`+`gzip`+`xz`+`zstd`+`sevenz`+`parquet`+`sqlite`+`bibtex`（14 个；后续依赖门控变更再扩为 28 个转换类 feature 全集）。
 - 拆分收益口径：单格式构建相比旧捆绑减少 6–9 个依赖节点（容器族）与 10–31 个（数据族），冷编耗时降 2%–17%；其中 `sqlite`/`bibtex` 收益明显（15%–17%），`parquet` 约 3%，`gzip` 依赖树收益为零（flate2 本就在树内，收益在编译面/二进制面）。
 - `.tar.gz` 组合拼写的降级语义：仅开 `gzip` 时，`.tar.gz` 经 gz 单流解压后将内层 tar 字节降级为附件（内容保留）；`.tgz` 需 `tar`+`gzip` 同时开启才可转换，未齐备时报不支持。
+
+- **SQLite Path 输入改为私有临时副本**：所有输入在打开前 staging 到 `tempfile`（0600、随机名、独占创建）的私有副本，隔断攻击者同目录 `-wal`/`-shm` 注入（RUSTSEC-2026-0459 向量）。语义影响：Path 输入不再读取伴生 `-wal` 中未 checkpoint 的事务（此前就地打开会读到）；staging 需要 TMPDIR 容纳与数据库等大的临时副本。
 
 ### 新增
 

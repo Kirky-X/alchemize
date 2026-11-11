@@ -6,8 +6,7 @@
 //! also implies "must already exist, never created"): the converter can never
 //! write, create, or modify the database it converts.
 
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 
 use async_trait::async_trait;
 use rusqlite::{Connection, OpenFlags};
@@ -36,35 +35,32 @@ impl Default for SqliteConverter {
     }
 }
 
-/// Deletes the temp database file when dropped (failure paths included).
+/// Private temp copy of the database, deleted when dropped (failure paths
+/// included). Staging keeps the attacker-controlled file away from its
+/// sibling `-wal`/`-shm` (RUSTSEC-2026-0459 vector) and out of the shared
+/// temp dir's default world-readable permissions: `tempfile` creates an
+/// exclusively-owned 0600 file with an unpredictable name.
 struct TempDbGuard {
-    path: PathBuf,
+    file: tempfile::NamedTempFile,
 }
 
 impl TempDbGuard {
     /// Materialize raw database bytes into a unique temp file.
     fn from_bytes(bytes: &[u8]) -> Result<Self, AlchemizeError> {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let name = format!(
-            "alchemize-sqlite-{}-{}-{}.db",
-            std::process::id(),
-            nanos,
-            COUNTER.fetch_add(1, Ordering::SeqCst)
-        );
-        let path = std::env::temp_dir().join(name);
-        std::fs::write(&path, bytes)
+        use std::io::Write as _;
+        let mut file = tempfile::Builder::new()
+            .prefix("alchemize-sqlite-")
+            .suffix(".db")
+            .tempfile()
             .map_err(|e| AlchemizeError::other(format!("failed to stage SQLite temp file: {e}")))?;
-        Ok(Self { path })
+        file.write_all(bytes)
+            .and_then(|()| file.flush())
+            .map_err(|e| AlchemizeError::other(format!("failed to stage SQLite temp file: {e}")))?;
+        Ok(Self { file })
     }
-}
 
-impl Drop for TempDbGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+    fn path(&self) -> &std::path::Path {
+        self.file.path()
     }
 }
 
@@ -80,16 +76,14 @@ impl Converter for SqliteConverter {
             .await
             .map_err(|e| AlchemizeError::other(format!("failed to read sqlite input: {e}")))?;
 
-        // Path inputs open in place (read-only); byte inputs are staged into
-        // a temp file that is removed when this scope ends.
-        let _temp;
-        let path: &Path = match &input {
-            Input::Path(p) => p.as_path(),
-            Input::Bytes { .. } => {
-                _temp = TempDbGuard::from_bytes(&bytes)?;
-                &_temp.path
-            }
-        };
+        // All inputs are staged into a private temp copy before opening:
+        // reading the attacker-supplied database in place would also let a
+        // sibling `-wal`/`-shm` file inject uninitialized page-cache bytes
+        // (RUSTSEC-2026-0459 vector; the pinned libsqlite3-sys cannot fix it).
+        // The bytes are already in memory (`to_bytes` above), so staging
+        // adds no extra read of the source.
+        let _temp = TempDbGuard::from_bytes(&bytes)?;
+        let path: &Path = _temp.path();
 
         let conn =
             Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| {
@@ -271,6 +265,8 @@ fn escape_cell(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     /// Build a real database on disk (words + meta), return its bytes and
     /// clean up behind itself.
@@ -319,7 +315,7 @@ mod tests {
     #[tokio::test]
     async fn convert_sqlite_tables_and_samples() {
         let fixture = build_db();
-        let bytes = std::fs::read(&fixture.guard.path).unwrap();
+        let bytes = std::fs::read(fixture.guard.path()).unwrap();
         let converter = SqliteConverter::new();
         let result = converter
             .convert(Input::bytes(bytes, "real.sqlite"))
@@ -350,7 +346,7 @@ mod tests {
         // convert() reject INSERT.
         let fixture = build_db();
         let conn =
-            Connection::open_with_flags(&fixture.guard.path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            Connection::open_with_flags(fixture.guard.path(), OpenFlags::SQLITE_OPEN_READ_ONLY)
                 .unwrap();
         let err = conn
             .execute("INSERT INTO meta VALUES ('x', 'y')", [])
@@ -366,7 +362,7 @@ mod tests {
         let fixture = build_db();
         let converter = SqliteConverter::new();
         let result = converter
-            .convert(Input::Path(fixture.guard.path.clone()))
+            .convert(Input::Path(fixture.guard.path().to_path_buf()))
             .await
             .unwrap();
         assert!(result.markdown.contains("### words"));

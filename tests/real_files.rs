@@ -13,6 +13,7 @@
 //! the real WAV asset (the OS's own lossless encoder). Assertions check
 //! *real content* (specific words/structures from the source), not just
 //! non-emptiness.
+#![cfg(feature = "full")]
 
 use alchemize::application::builder::AlchemizeBuilder;
 use alchemize::domain::input::Input;

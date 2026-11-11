@@ -33,10 +33,12 @@ path = "src/lib.rs"
 [[bin]]
 name = "alch"
 path = "src/main.rs"
+required-features = ["cli"]
 
 [[bench]]
 name = "bench_real"
 harness = false
+required-features = ["full"]
 
 [[bin]]
 name = "alch-mcp"
@@ -45,41 +47,112 @@ required-features = ["mcp"]
 
 [features]
 # sdforge 宏生成的 CLI 注册项带 #[cfg(feature = "cli")]，按调用方 crate 解析——
-# 本仓必须开启同名 feature，否则 alch 命令树为空（forms/doctor/convert 不可达）
-default = ["cli"]
-cli = []
-# 云端 PDF 高保真（MinerU HTTP 客户端）
-pdf-cloud = ["dep:reqwest", "dep:limiteron", "dep:futures", "reqwest/multipart", "reqwest/stream"]
+# 本仓必须开启同名 feature，否则 alch 命令树为空（forms/doctor/convert 不可达）。
+# default 只含 CLI 骨架 + 文本转换：其余格式全部按需开启（--features pdf,docx...）。
+default = ["cli", "text"]
+cli = ["dep:sdforge", "dep:inklog"]
+
+# ── 格式族（每个格式一个 feature；deps 全部 optional，经 dep: 引用）──────────
+# 纯文本 / 代码围栏（default 成员）
+text = ["dep:encoding_rs"]
+# 分隔符分隔表格
+csv = ["dep:csv", "dep:encoding_rs"]
+# 网页：htmd 基础链 + 自研深链（迭代状态机 + dom_smoothie 主内容提取 + 兜底）
+html = [
+    "dep:htmd",
+    "dep:scraper",
+    "dep:dom_smoothie",
+    "dep:ego_tree",
+    "dep:regex",
+    "dep:url",
+    "dep:icu_properties",
+]
+# PDF 本地兜底档（lopdf 文本抽取）
+pdf = ["dep:lopdf"]
+# PDF 本地高保真（pdfium 动态库运行时加载；图片提取走 lopdf 结构遍历 + image 重编码）
+pdf-local = ["pdf", "dep:pdfium-render", "dep:image", "dep:tempfile"]
+# PDF 云端高保真（MinerU HTTP 客户端）
+pdf-cloud = [
+    "dep:reqwest",
+    "dep:limiteron",
+    "dep:futures",
+    "dep:bytes",
+    "reqwest/multipart",
+    "reqwest/stream",
+]
+# OOXML 深解析 + 基础解析（quick-xml + zip）
+docx = ["dep:quick-xml", "dep:zip", "dep:flate2"]
+pptx = ["dep:quick-xml", "dep:zip", "dep:flate2"]
+odt = ["dep:quick-xml", "dep:zip", "dep:flate2"]
+odp = ["dep:quick-xml", "dep:zip", "dep:flate2"]
+# EPUB（rbook + zip + htmd）
+epub = ["dep:quick-xml", "dep:zip", "dep:rbook", "dep:htmd", "dep:flate2"]
+# Jupyter notebook（仅 core serde_json）
+ipynb = []
+# zip/cbz 递归容器
+zip = ["dep:zip", "dep:flate2", "zip/deflate-flate2-zlib-rs"]
+# LaTeX 源（pandoc 外部工具 + 围栏兜底）
+latex = ["dep:tempfile"]
+# pandoc 通用格式（org/rst/asciidoc/opml/mediawiki）
+pandoc = ["dep:encoding_rs"]
+# 媒体四件套：image / audio / video / subtitle（字幕解析 aspasia + 编码探测）
+media = ["dep:aspasia", "dep:encoding_rs"]
+# HEIC/HEIF（OS 解码器 sips + 临时文件）
+heic = ["dep:tempfile"]
+
+# ── 后端档位 ─────────────────────────────────────────────────────────────────
 # 音频转写：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
-audio = ["dep:vecboost", "dep:reqwest", "reqwest/multipart"]
-# 本地 PDF 高保真（pdfium 动态库运行时加载）。图片提取走 lopdf 结构
-# 遍历（pdfium-render 0.5.9 安全层不暴露图片对象句柄）；image 用于样本→PNG
-# 重编码——image 已在依赖树内（pdfium-render 传递引用），零新增外部代码。
-# lopdf 为无条件依赖（兜底档文本抽取 + 结构遍历共用），不在此声明。
-pdf-local = ["dep:pdfium-render", "dep:image"]
-# 旧格式引擎（doc/ppt/rtf，外部 soffice 二进制）
-legacy-office = []
-# 归档容器族按格式隔离：每个格式一个 feature。
-# 组合格式 .tgz 需 tar+gzip 同时开启（TarGzConverter 走 cfg(all)）。
+audio = ["media", "dep:vecboost", "dep:reqwest", "dep:tempfile", "reqwest/multipart"]
+# 旧格式引擎（doc/ppt/rtf，外部 soffice 二进制 + 临时 profile）。
+# 转换产物交给 OOXML 深解析器，故复用 quick-xml/zip。
+legacy-office = ["dep:tempfile", "dep:quick-xml", "dep:zip", "dep:flate2"]
+
+# ── 数据 / 容器 / 邮件 ───────────────────────────────────────────────────────
+parquet = ["dep:parquet", "dep:bytes"]
+sqlite = ["dep:rusqlite", "dep:tempfile"]
+bibtex = ["dep:biblatex"]
+email = ["dep:mail-parser"]
+# 归档容器族按格式隔离；组合格式 .tgz 需 tar+gzip 同时开启（cfg(all)）。
 tar = ["dep:tar"]
 gzip = ["dep:flate2"]
 xz = ["dep:xz2"]
 zstd = ["dep:zstd"]
 sevenz = ["dep:sevenz-rust2"]
-# 结构化数据格式按格式隔离：每个格式一个 feature。
-parquet = ["dep:parquet"]
-sqlite = ["dep:rusqlite"]
-bibtex = ["dep:biblatex"]
-# 邮件（eml）
-email = ["dep:mail-parser"]
-# MCP 工具面：sdforge rmcp stdio 服务（alch-mcp）；CLI 封装（cli feature）恒在
-mcp = ["sdforge/mcp"]
-# html 自研引擎：迭代状态机主链 + dom_smoothie 主内容提取 + htmd 兜底；
-# icu_properties（Unicode P/S 分类，已在依赖树内）。
-# htmd 基础 html 转换无条件编译：本 feature off 时 html 能力仍在（落 htmd 链）。
-html = ["dep:scraper", "dep:dom_smoothie", "dep:ego_tree", "dep:regex", "dep:url", "dep:icu_properties"]
-# 全能力伞面：14 个转换能力 feature 全集合。
-full = ["pdf-cloud", "audio", "html", "tar", "gzip", "xz", "zstd", "sevenz", "parquet", "sqlite", "bibtex", "email", "legacy-office", "pdf-local"]
+
+# ── 工具面 ───────────────────────────────────────────────────────────────────
+# MCP 工具面：sdforge rmcp stdio 服务（alch-mcp）
+mcp = ["dep:sdforge", "dep:inklog", "sdforge/mcp"]
+# 全能力伞面：全部转换类 feature（不含 cli/mcp）。
+full = [
+    "text",
+    "csv",
+    "html",
+    "pdf",
+    "pdf-local",
+    "pdf-cloud",
+    "docx",
+    "pptx",
+    "odt",
+    "odp",
+    "epub",
+    "ipynb",
+    "zip",
+    "latex",
+    "pandoc",
+    "media",
+    "heic",
+    "audio",
+    "legacy-office",
+    "email",
+    "parquet",
+    "sqlite",
+    "bibtex",
+    "tar",
+    "gzip",
+    "xz",
+    "zstd",
+    "sevenz",
+]
 # 新增一个格式 feature 的同步点（漏改任一处 = 引擎静默丢失）：
 #   1) 本文件的 feature 定义 + `full` 成员
 #   2) src/infrastructure/engines.rs 的逐条 #[cfg] 注册语句
@@ -88,62 +161,59 @@ full = ["pdf-cloud", "audio", "html", "tar", "gzip", "xz", "zstd", "sevenz", "pa
 #   4) containers/mod.rs 的 pub mod 门与 pub use 门
 #   5) 实现文件（containers/single.rs 等）的文件级 any(...) 与逐项 #[cfg]
 #   6) src/infrastructure/engines.rs tests：该 feature 的在场/缺席断言对
-# registration-existence tests 与 CI 的 feature-isolation job 会把「漏改」
-# 从静默丢失变成编译/测试失败。
+#   7) src/feature_assertions.rs：full 成员守卫表 + CI feature-isolation 的
+#      循环列表（29 配置）
+# 双重兜底：full 守卫（漏加成员 = 编译错误）与 CI 的「无 cli 仅 --lib」行
+# （漏依赖边 = 下游构建失败）把「漏改」从静默丢失变成构建失败。
 
 [dependencies]
+# ── 核心（无条件）：公开 API 类型 / 错误 / 异步运行时 / 日志 / 资产内联与哈希
+# 门控它们需要重构 ConvertResult、AlchemizeError、Input::to_bytes、InlineSink
+# 等公开面，收益与风险不成比例（见 specmark 变更 dependency-feature-gating）。
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 async-trait = { version = "0.1", default-features = false }
-base64 = { version = "0.22", default-features = false, features = ["std"] }
-bytes = { version = "1.0", default-features = false, features = ["std"] }
-
-# 文档解析
-csv = { version = "1.4", default-features = false }
-encoding_rs = { version = "0.8", default-features = false }
-htmd = { version = "0.5", default-features = false }
-aspasia = { version = "0.2", default-features = false }
-# lopdf（crates.io 直连 0.47）：兜底档文本抽取（extract_text_chunks，每页
-# 有界）与 pdf_images 结构遍历共用；解压上限由调用点显式设限
-# （LoadOptions / decompressed_content_with_limit），见
-# specmark/changes/retire-lopdf-fork（归档后并入主 specs）
-lopdf = { version = "0.47", default-features = false }
-quick-xml = { version = "0.42", default-features = false, features = ["serialize"] }
-rbook = { version = "0.7", default-features = false, features = ["threadsafe"] }
+base64 = { version = "0.23", default-features = false, features = ["std"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
-sha2 = { version = "0.10", default-features = false }
-thiserror = { version = "2.0", default-features = false }
-tempfile = { version = "3", default-features = false, features = ["getrandom"] }
+sha2 = { version = "0.11", default-features = false }
+thiserror = { version = "2.0", default-features = false, features = ["std"] }
 tokio = { version = "1.0", default-features = false, features = ["rt", "rt-multi-thread", "macros", "fs", "process", "io-util", "time", "sync"] }
 tracing = { version = "0.1", default-features = false }
-# CLI 日志前端：全仓 tracing 埋点（warn/debug/info）的消费者。默认不装配
-# （ALCHEMIZE_LOG 未设/off 时零开销，stdout/stderr 形态与 cli-output spec
-# 钉死的契约逐字节一致）；设级后全部级别强制走 stderr，stdout 管道纯净性
-# 不破。default-features = false 裁掉 i18n/cache（oxcache）依赖树。
-inklog = { version = "0.3.0-rc.12", default-features = false }
-zip = { version = "9.3", default-features = false, features = ["deflate"] }
 
-# CLI/MCP 封装框架：#[forge] 端点 → CliBuilder + rmcp stdio（MSRV 1.97.1 的来源）
-sdforge = { version = "0.5.0-rc.10", features = ["cli"] }
+# ── 文档族（全部 optional，经 dep: 由格式 feature 激活）
+# 编码探测（GBK/Big5/Shift-JIS/... 优先 CJK，lossy 兜底）。alloc 必须显式
+# 开启：Encoding::decode 在 0.8.44 由 `alloc` feature 门控（此前被无条件依赖
+# 树的 feature 统一顺带激活）。
+encoding_rs = { version = "0.8", default-features = false, features = ["alloc"], optional = true }
+csv = { version = "1.4", default-features = false, optional = true }
+# html 基础链（htmd）与 epub 共用
+htmd = { version = "0.5", default-features = false, optional = true }
+# PDF 兜底档文本抽取（extract_text_chunks，每页有界）
+lopdf = { version = "0.47", default-features = false, optional = true }
+# OOXML 深解析与 epub 共用
+quick-xml = { version = "0.42", default-features = false, features = ["serialize"], optional = true }
+zip = { version = "9.3", default-features = false, features = ["deflate-flate2"], optional = true }
+# EPUB 解析
+rbook = { version = "0.7", default-features = false, features = ["threadsafe"], optional = true }
+# 外部工具调用（pandoc/soffice/sips/ffmpeg）与 pdfium 样本落盘用的临时目录
+tempfile = { version = "3", default-features = false, features = ["getrandom"], optional = true }
 
-# 可选后端
+# ── 媒体（字幕解析）
+aspasia = { version = "0.2", default-features = false, optional = true }
+
+# ── html 深链
 scraper = { version = "0.29", default-features = false, features = ["errors", "main"], optional = true }
 # ego-tree 版本须与 scraper 0.29 内部依赖一致（NodeId 类型同一性，crawlrs 同款约束）
 ego_tree = { package = "ego-tree", version = "0.11", default-features = false, optional = true }
 dom_smoothie = { version = "0.19", default-features = false, optional = true }
-# html-deep 链接绝对化预处理
+# 链接绝对化预处理
 regex = { version = "1.13", default-features = false, features = ["std", "perf", "unicode"], optional = true }
 url = { version = "2", default-features = false, features = ["std"], optional = true }
+# Unicode 属性数据库：行内样式"词后标点"决策需精确 P/S 分类（CommonMark 口径）
+icu_properties = { version = "2.4", default-features = false, features = ["compiled_data"], optional = true }
+
+# ── 网络后端
 futures = { version = "0.3", default-features = false, features = ["std"], optional = true }
-# pdfium（Chrome PDF 引擎）绑定：运行时动态库加载，缺失降级
-pdfium-render = { version = "0.5", default-features = false, optional = true }
-# PDF 图片提取（feature pdf-local）：结构遍历复用上方无条件 lopdf（crates.io
-# 直连 0.47）；样本→PNG 重编码用 image（pdfium-render 已传递引用，
-# 仅补显式声明）
-image = { version = "0.23", default-features = false, features = ["png", "jpeg"], optional = true }
-# Unicode 属性数据库（feature html）：行内样式"词后标点"决策需精确
-# P/S 分类（CommonMark 口径）；已在依赖树内，仅补显式声明
-icu_properties = { version = "2.3", default-features = false, features = ["compiled_data"], optional = true }
 # 轮询退避原语：MinerU 三客户端共享 poll_delay 走 limiteron delay_for_attempt
 limiteron = { version = "0.3.0-rc.10", default-features = false, features = ["retry"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
@@ -153,24 +223,48 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 # 或把 vecboost 并入本工作区。
 vecboost = { path = "../vecboost", version = "0.3.0-rc.3", default-features = false, features = ["transcribe"], optional = true }
 
-# 归档容器族（feature tar/gzip/xz/zstd/sevenz — 按格式拆分）
+# ── 沙箱 / 子进程工具依赖
+# pdfium（Chrome PDF 引擎）绑定：运行时动态库加载，缺失降级。
+# 0.9 起 bindings 由 pdfium 版本 feature 生成：必须选一个 pdfium_xxxx。
+# 6295 是距本机 e2e 动态库（chromium/6309）最近的一档；运行时 e2e 兼容性
+# 待更新 pdfium 二进制后验证（specmark dependency-feature-gating Deferred）。
+pdfium-render = { version = "0.9", default-features = false, features = [
+    "pdfium_6295",
+    "image_025",
+    "thread_safe",
+], optional = true }
+# PDF 图片样本→PNG 重编码
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
+
+# ── 数据 / 容器 / 邮件
+bytes = { version = "1.0", default-features = false, features = ["std"], optional = true }
+parquet = { version = "60", default-features = false, features = ["arrow", "snap", "lz4", "zstd", "flate2-rust_backend", "brotli"], optional = true }
+# 0.41 会引入 libsqlite3-sys 0.39（links=sqlite3），与 limiteron→dbnexus→
+# sea-orm→sqlx-sqlite 的 libsqlite3-sys u003c0.38 硬冲突；0.39 是当前可共存的
+# 最高版本（上游 sqlx 放宽后解除）。
+rusqlite = { version = "0.39", default-features = false, features = ["bundled"], optional = true }
+biblatex = { version = "0.12", default-features = false, optional = true }
+# mail-parser 是活跃维护的 MIME 解析器（mail crate 的 mail-internals 带
+# RUSTSEC-2023-0054 UAF 且无修复版本）
+mail-parser = { version = "1.0", default-features = false, optional = true }
+# 归档容器族
 tar = { version = "0.4", default-features = false, optional = true }
-flate2 = { version = "1", default-features = false, optional = true }
+# rust_backend 必须显式选择：default-features = false 下 flate2 无 zlib 后端
+# （此前被其他依赖的 feature 统一顺带激活）。
+flate2 = { version = "1", default-features = false, features = ["rust_backend"], optional = true }
 xz2 = { version = "0.1", default-features = false, optional = true }
-zstd = { version = "0.13", default-features = false, optional = true }
+zstd = { version = "0.14", default-features = false, optional = true }
 # compress: writer needed by tests to build fixtures; LZMA2 decode is ungated
 sevenz-rust2 = { version = "0.25", default-features = false, features = [
     "compress",
 ], optional = true }
 
-# 结构化数据（feature parquet/sqlite/bibtex — 按格式拆分）
-parquet = { version = "60", default-features = false, features = ["arrow", "snap", "lz4", "zstd", "flate2-rust_backend", "brotli"], optional = true }
-rusqlite = { version = "0.39", default-features = false, features = ["bundled"], optional = true }
-biblatex = { version = "0.12", default-features = false, optional = true }
-
-# 邮件（feature email）：mail-parser 是活跃维护的 MIME 解析器（mail crate 的
-# mail-internals 带 RUSTSEC-2023-0054 UAF 且无修复版本）
-mail-parser = { version = "1.0", default-features = false, optional = true }
+# ── CLI / MCP
+# sdforge：#[forge] 端点 → CliBuilder + rmcp stdio（MSRV 1.97.1 的来源）
+sdforge = { version = "0.5.0-rc.10", features = ["cli"], optional = true }
+# CLI 日志前端：全仓 tracing 埋点的消费者。默认不装配（ALCHEMIZE_LOG
+# 未设/off 时零开销）；default-features = false 裁掉 i18n/cache 依赖树。
+inklog = { version = "0.3.0-rc.12", default-features = false, optional = true }
 
 [dev-dependencies]
 http = { version = "1.5", default-features = false, features = ["std"] }

@@ -183,9 +183,35 @@ pub fn decode_entity(name: &str) -> String {
     }
 }
 
+/// Strip tags from a fragment, keeping text content.
+///
+/// Lives here (not in the html module) so the LaTeX converter can reuse it
+/// without pulling the whole `html` capability feature in.
+pub fn strip_tags(fragment: &str) -> String {
+    let mut out = String::new();
+    let mut rest = fragment;
+    while let Some(lt) = rest.find('<') {
+        out.push_str(&rest[..lt]);
+        match rest[lt..].find('>') {
+            Some(gt) => rest = &rest[lt + gt + 1..],
+            None => {
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Decode bytes to a string, trying UTF-8 first then common legacy encodings.
 ///
 /// Returns `(decoded, encoding_name)`; falls back to lossy UTF-8.
+#[cfg(any(
+    feature = "text",
+    feature = "csv",
+    feature = "pandoc",
+    feature = "media"
+))]
 pub fn detect_encoding(bytes: &[u8]) -> (String, String) {
     if let Ok(s) = std::str::from_utf8(bytes) {
         return (s.to_string(), "utf-8".to_string());
@@ -270,6 +296,12 @@ mod tests {
         assert_eq!(fence_for("a\n    `````\nb"), "````");
     }
 
+    #[cfg(any(
+        feature = "text",
+        feature = "csv",
+        feature = "pandoc",
+        feature = "media"
+    ))]
     #[test]
     fn detect_encoding_utf8_passthrough() {
         let (text, name) = detect_encoding("héllo".as_bytes());
@@ -277,6 +309,12 @@ mod tests {
         assert_eq!(text, "héllo");
     }
 
+    #[cfg(any(
+        feature = "text",
+        feature = "csv",
+        feature = "pandoc",
+        feature = "media"
+    ))]
     #[test]
     fn detect_encoding_gbk_fallback() {
         // "你好" encoded in GBK
@@ -286,6 +324,12 @@ mod tests {
         assert!(text.contains("你好"));
     }
 
+    #[cfg(any(
+        feature = "text",
+        feature = "csv",
+        feature = "pandoc",
+        feature = "media"
+    ))]
     #[test]
     fn detect_encoding_lossy_for_undecodable() {
         let (text, name) = detect_encoding(&[0xFF, 0xFE, 0x00]);

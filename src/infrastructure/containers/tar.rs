@@ -61,6 +61,7 @@ impl TarConverter {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)] // used by feature-gated test modules
     pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
             base: ContainerBase::with_arc(registry),
@@ -121,6 +122,7 @@ impl TarGzConverter {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)] // used by feature-gated test modules
     pub(crate) fn with_arc(registry: Arc<ConverterRegistry>) -> Self {
         Self {
             base: ContainerBase::with_arc(registry),
@@ -225,7 +227,7 @@ fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
     Ok(out)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "text"))]
 mod tests {
     use super::*;
     use crate::infrastructure::document::text::TextConverter;

@@ -2,10 +2,11 @@
 //! pdfium local PDF engine (feature `pdf-local`) — Chrome's PDF library via
 //! pdfium-render, loaded dynamically at runtime.
 //!
-//! Binary compatibility: pdfium-render 0.5.x binds `FPDFFont_GetFontName`,
-//! which pdfium builds after ~chromium/7000 no longer export — use a
-//! 2023-era binaries release (e.g. chromium/6309) or the bind step fails
-//! with `LoadLibraryError(DlSym)`.
+//! Binary compatibility: bindings are generated from the `pdfium_6295`
+//! feature of pdfium-render 0.9, so the dynamic library must be the
+//! matching pdfium release (chromium/6295-class). Newer or older builds can
+//! bind but expose an unsupported ABI combination — the runtime e2e matrix
+//! for 0.9 is pending a matching binary (see `dependency-feature-gating`).
 //!
 //! Extraction: per-page characters with coordinates, regrouped into
 //! paragraphs by vertical gaps; embedded images come from the lopdf
@@ -205,14 +206,15 @@ fn extract(
         .map_err(|e| AlchemizeError::Pdf(format!("pdfium bind failed: {e:?}")))?;
     let pdfium = Pdfium::new(bindings);
     let doc = pdfium
-        .load_pdf_from_bytes(bytes, None)
+        .load_pdf_from_byte_slice(bytes, None)
         .map_err(|e| AlchemizeError::Pdf(format!("pdfium open failed: {e:?}")))?;
 
     let page_count = doc.pages().len();
     let mut markdown = String::new();
 
-    for page in doc.pages().iter() {
-        let page_index = page.index() as usize;
+    // pdfium-render 0.9 removed PdfPage::index(); the iterator order is the
+    // page order, so enumerate instead.
+    for (page_index, page) in doc.pages().iter().enumerate() {
         let mut lines: Vec<Line> = Vec::new();
 
         for object in page.objects().iter() {
@@ -227,16 +229,16 @@ fn extract(
                         top: 0.0,
                         bottom: 0.0,
                         left: 0.0,
-                        font_size: text.font_size().value,
+                        font_size: text.scaled_font_size().value,
                     });
                     continue;
                 };
                 lines.push(Line {
                     text: run,
-                    top: bounds.top.value,
-                    bottom: bounds.bottom.value,
-                    left: bounds.left.value,
-                    font_size: text.font_size().value,
+                    top: bounds.top().value,
+                    bottom: bounds.bottom().value,
+                    left: bounds.left().value,
+                    font_size: text.scaled_font_size().value,
                 });
             }
         }
@@ -406,8 +408,10 @@ mod tests {
             image::Rgb([(x as u8) * 30, (y as u8) * 30, 255u8])
         }));
         let mut jpg = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut jpg, image::ImageOutputFormat::Jpeg(90))
-            .unwrap();
+        img.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+            &mut jpg, 90,
+        ))
+        .unwrap();
         let jpg = jpg.into_inner();
 
         let mut doc = lopdf::Document::with_version("1.4");

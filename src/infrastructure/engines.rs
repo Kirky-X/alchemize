@@ -11,7 +11,10 @@ use std::sync::Arc;
 use crate::application::builder::MineruConfig;
 use crate::application::ports::{Converter, TranscribeProvider, VisionProvider};
 use crate::domain::result::VideoProcessingMode;
-use crate::infrastructure::document::{CsvConverter, TextConverter};
+#[cfg(feature = "csv")]
+use crate::infrastructure::document::CsvConverter;
+#[cfg(feature = "text")]
+use crate::infrastructure::document::TextConverter;
 
 /// Assemble the default engine list from configuration and feature flags.
 ///
@@ -37,26 +40,35 @@ pub fn default_converters(
         std::sync::OnceLock<std::sync::Weak<crate::application::registry::ConverterRegistry>>,
     >,
 ) -> Vec<Box<dyn Converter>> {
-    let mut engines: Vec<Box<dyn Converter>> = vec![
-        // Text family (plain text + code/config fence).
-        Box::new(TextConverter::new()),
-    ];
+    // Text family (plain text + code/config fence) seeds the list; builds
+    // without it start empty (clippy::vec_init_then_push cannot see the cfg).
+    #[cfg(feature = "text")]
+    #[allow(unused_mut)]
+    let mut engines: Vec<Box<dyn Converter>> = vec![Box::new(TextConverter::new())];
+    #[cfg(not(feature = "text"))]
+    #[allow(unused_mut)]
+    let mut engines: Vec<Box<dyn Converter>> = Vec::new();
     // Self-hosted deep DOCX parser (priority 18): style cascade, footnotes,
     // merged cells, drawing assets. Above the native docx (10).
+    #[cfg(feature = "docx")]
     engines.push(Box::new(
         crate::infrastructure::document::DocxDeepConverter::new(),
     ));
     // Self-hosted deep office parsers (priority 18): ODT/ODP/PPTX.
+    #[cfg(feature = "odt")]
     engines.push(Box::new(
         crate::infrastructure::document::OdtConverter::new(),
     ));
+    #[cfg(feature = "odp")]
     engines.push(Box::new(
         crate::infrastructure::document::OdpConverter::new(),
     ));
+    #[cfg(feature = "pptx")]
     engines.push(Box::new(
         crate::infrastructure::document::PptxDeepConverter::new(),
     ));
     // Office XML (fallback tier below the deep parsers).
+    #[cfg(feature = "docx")]
     engines.push(Box::new(
         crate::infrastructure::document::DocxConverter::new(),
     ));
@@ -68,42 +80,51 @@ pub fn default_converters(
         crate::infrastructure::document::PdfiumConverter::new(),
     ));
     // PDF local fallback tier.
+    #[cfg(feature = "pdf")]
     engines.push(Box::new(
         crate::infrastructure::document::PdfConverter::new(),
     ));
     // LaTeX source (pandoc-gated, fenced fallback).
+    #[cfg(feature = "latex")]
     engines.push(Box::new(
         crate::infrastructure::document::LatexSourceConverter::new(),
     ));
     // Generic pandoc formats (org/rst/asciidoc/opml/mediawiki).
+    #[cfg(feature = "pandoc")]
     engines.push(Box::new(
         crate::infrastructure::document::PandocGenericConverter::new(),
     ));
-    // Media family.
-    let image_converter = match vision.clone() {
-        Some(vision) => crate::infrastructure::media::ImageConverter::with_vision(vision),
-        None => crate::infrastructure::media::ImageConverter::new(),
-    };
-    engines.push(Box::new(image_converter));
+    // Media family: image / audio / video / subtitle.
+    #[cfg(feature = "media")]
+    {
+        let image_converter = match vision.clone() {
+            Some(vision) => crate::infrastructure::media::ImageConverter::with_vision(vision),
+            None => crate::infrastructure::media::ImageConverter::new(),
+        };
+        engines.push(Box::new(image_converter));
+
+        let audio_converter = match transcribe.clone() {
+            Some(provider) => {
+                crate::infrastructure::media::AudioConverter::with_transcriber(provider)
+            }
+            None => crate::infrastructure::media::AudioConverter::new(),
+        };
+        engines.push(Box::new(audio_converter));
+
+        let video_converter = match vision.clone() {
+            Some(vision) => crate::infrastructure::media::VideoConverter::new(video_mode)
+                .with_vision_provider(vision),
+            None => crate::infrastructure::media::VideoConverter::new(video_mode),
+        };
+        engines.push(Box::new(video_converter));
+
+        engines.push(Box::new(
+            crate::infrastructure::media::SubtitleConverter::new(),
+        ));
+    }
     // HEIC/HEIF: OS decoder (sips) or metadata-only fallback.
+    #[cfg(feature = "heic")]
     engines.push(Box::new(crate::infrastructure::media::HeicConverter::new()));
-
-    let audio_converter = match transcribe.clone() {
-        Some(provider) => crate::infrastructure::media::AudioConverter::with_transcriber(provider),
-        None => crate::infrastructure::media::AudioConverter::new(),
-    };
-    engines.push(Box::new(audio_converter));
-
-    let video_converter = match vision.clone() {
-        Some(vision) => crate::infrastructure::media::VideoConverter::new(video_mode)
-            .with_vision_provider(vision),
-        None => crate::infrastructure::media::VideoConverter::new(video_mode),
-    };
-    engines.push(Box::new(video_converter));
-
-    engines.push(Box::new(
-        crate::infrastructure::media::SubtitleConverter::new(),
-    ));
 
     // MinerU remote tier (config-gated; falls through to local on failure).
     #[cfg(feature = "pdf-cloud")]
@@ -114,15 +135,19 @@ pub fn default_converters(
     {
         engines.push(Box::new(conv));
     }
+    #[cfg(feature = "pptx")]
     engines.push(Box::new(
         crate::infrastructure::document::PptxConverter::new(),
     ));
     // Tables (csv/tsv).
+    #[cfg(feature = "csv")]
     engines.push(Box::new(CsvConverter::new()));
     // Hypertext / e-book.
+    #[cfg(feature = "html")]
     engines.push(Box::new(
         crate::infrastructure::document::HtmlConverter::new(),
     ));
+    #[cfg(feature = "epub")]
     engines.push(Box::new(
         crate::infrastructure::document::EpubConverter::new(),
     ));
@@ -131,6 +156,7 @@ pub fn default_converters(
     // ODS repeats and text expansion) cannot be bounded by a pre-check for
     // untrusted input.
     // Notebooks.
+    #[cfg(feature = "ipynb")]
     engines.push(Box::new(
         crate::infrastructure::document::IpynbConverter::new(),
     ));
@@ -232,12 +258,14 @@ pub fn default_converters(
     // stay out of the registry itself — otherwise a nested .zip entry would
     // recurse without bound.
     //
-    // Feature-off silencing: `pdf-cloud`/`html_deep` are consumed above only
-    // when their cargo feature is compiled in.
+    // Feature-off silencing: parameters are consumed above only when their
+    // cargo feature is compiled in.
     #[cfg(not(feature = "pdf-cloud"))]
     let _ = mineru;
     #[cfg(not(feature = "html"))]
     let _ = html_deep;
+    #[cfg(not(feature = "media"))]
+    let _ = (vision, transcribe, video_mode);
     engines
 }
 
@@ -290,8 +318,30 @@ mod feature_registration_tests {
             };
         }
 
+        // 格式族
+        assert_gated!("text", "text");
+        assert_gated!("csv", "csv");
+        assert_gated!("html", "html");
         assert_gated!("html", "html-deep");
+        assert_gated!("pdf", "pdf");
         assert_gated!("pdf-local", "pdfium");
+        assert_gated!("docx", "docx");
+        assert_gated!("docx", "docx-deep");
+        assert_gated!("pptx", "pptx");
+        assert_gated!("pptx", "pptx-deep");
+        assert_gated!("odt", "odt-deep");
+        assert_gated!("odp", "odp-deep");
+        assert_gated!("epub", "epub");
+        assert_gated!("ipynb", "ipynb");
+        assert_gated!("latex", "latex-source");
+        assert_gated!("pandoc", "pandoc-generic");
+        assert_gated!("media", "image");
+        assert_gated!("media", "audio");
+        assert_gated!("media", "video");
+        assert_gated!("media", "subtitle");
+        assert_gated!("heic", "heic");
+        // 后端 / 数据 / 容器
+        assert_gated!("pdf-cloud", "mineru");
         assert_gated!("legacy-office", "legacy-office");
         assert_gated!("legacy-office", "legacy-ppt");
         assert_gated!("email", "eml");
@@ -303,7 +353,6 @@ mod feature_registration_tests {
         assert_gated!("parquet", "parquet");
         assert_gated!("sqlite", "sqlite");
         assert_gated!("bibtex", "bib");
-        assert_gated!("pdf-cloud", "mineru");
 
         // `.tgz` is a combined capability: present only with both features.
         #[cfg(all(feature = "tar", feature = "gzip"))]

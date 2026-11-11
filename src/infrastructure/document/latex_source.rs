@@ -442,7 +442,7 @@ fn convert_figcaption(md: &str) -> String {
             return out;
         };
         let inner = &after[open_end + 1..close_rel];
-        let plain = crate::infrastructure::document::html::strip_tags(inner);
+        let plain = crate::infrastructure::document::shared::strip_tags(inner);
         out.push_str(&format!("\n*{plain}*\n"));
         rest = &after[close_rel + "</figcaption>".len()..];
     }

@@ -3,6 +3,7 @@
 
 //! CLI end-to-end tests: exercise the `alch` binary (formats/doctor/convert,
 //! exit codes, asset writing).
+#![cfg(all(feature = "cli", feature = "full"))]
 
 use std::process::{Command, Stdio};
 

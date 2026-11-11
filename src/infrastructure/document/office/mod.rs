@@ -1,25 +1,68 @@
 //! Self-hosted office-format deep parsers.
+//!
+//! Each parser is gated by its format feature; the module itself compiles
+//! when any of them is enabled.
 
+// Cross-feature reuse: ODT reuses the DOCX part reader/styles, ODP reuses the
+// ODT walker, and legacy-office hands converted OOXML bytes to the deep
+// docx/pptx parsers. The module gates therefore include their consumers.
+#[cfg(any(
+    feature = "docx",
+    feature = "odt",
+    feature = "odp",
+    feature = "legacy-office"
+))]
 pub mod docx;
+#[cfg(feature = "odp")]
 pub mod odp;
+#[cfg(any(feature = "odt", feature = "odp"))]
 pub mod odt;
+#[cfg(any(
+    feature = "docx",
+    feature = "odt",
+    feature = "odp",
+    feature = "legacy-office"
+))]
 pub mod omml;
+#[cfg(any(feature = "pptx", feature = "legacy-office"))]
 pub mod pptx_deep;
 
 #[cfg(feature = "legacy-office")]
 pub mod legacy_office;
 
+#[cfg(feature = "docx")]
 pub use docx::DocxDeepConverter;
 #[cfg(feature = "legacy-office")]
 pub use legacy_office::{LegacyOfficeConverter, LegacyPptConverter};
+#[cfg(feature = "odp")]
 pub use odp::OdpConverter;
+#[cfg(feature = "odt")]
 pub use odt::OdtConverter;
+#[cfg(feature = "pptx")]
 pub use pptx_deep::PptxDeepConverter;
 
+#[cfg(any(
+    feature = "docx",
+    feature = "odt",
+    feature = "odp",
+    feature = "legacy-office"
+))]
 use crate::domain::asset::{Asset, AssetNamer};
+#[cfg(any(
+    feature = "docx",
+    feature = "odt",
+    feature = "odp",
+    feature = "legacy-office"
+))]
 use crate::domain::document::{Block, CellSlot, Document, ImageSource, Inline};
 
 /// One raw media payload as parsed from a package part.
+#[cfg(any(
+    feature = "docx",
+    feature = "odt",
+    feature = "odp",
+    feature = "legacy-office"
+))]
 pub(crate) struct RawMedia<'a> {
     /// Package-relative part name (used for the file extension).
     pub part: &'a str,
@@ -35,6 +78,12 @@ pub(crate) struct RawMedia<'a> {
 ///
 /// The CLI writes each returned asset at exactly that filename under the
 /// output directory, so the markdown image links resolve.
+#[cfg(any(
+    feature = "docx",
+    feature = "odt",
+    feature = "odp",
+    feature = "legacy-office"
+))]
 pub(crate) fn rewrite_image_assets(document: &mut Document, raw: &[RawMedia<'_>]) -> Vec<Asset> {
     use std::collections::HashMap;
 
@@ -113,6 +162,12 @@ pub(crate) fn rewrite_image_assets(document: &mut Document, raw: &[RawMedia<'_>]
 
 /// File extension for an extracted asset: the part suffix when present,
 /// otherwise the media-type subtype.
+#[cfg(any(
+    feature = "docx",
+    feature = "odt",
+    feature = "odp",
+    feature = "legacy-office"
+))]
 fn asset_ext(part: &str, media_type: &str) -> String {
     if let Some((_, ext)) = part.rsplit_once('.')
         && !ext.is_empty()
@@ -128,7 +183,15 @@ fn asset_ext(part: &str, media_type: &str) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(
+        feature = "docx",
+        feature = "odt",
+        feature = "odp",
+        feature = "legacy-office"
+    )
+))]
 mod tests {
     use crate::domain::asset::sha8_hex;
 

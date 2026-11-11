@@ -5,6 +5,7 @@
 
 pub mod application;
 pub mod domain;
+mod feature_assertions;
 pub mod infrastructure;
 
 pub use application::builder::{Alchemize, AlchemizeBuilder, HtmlDeepEngineConfig, MineruConfig};
@@ -20,6 +21,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub(crate) mod test_support {
     use tokio::sync::{Mutex, MutexGuard};
 
+    #[allow(dead_code)] // used only by tests of feature-gated converters
     static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     /// Serialize tests that read or write the process-global environment
@@ -30,6 +32,7 @@ pub(crate) mod test_support {
     /// the guard across `await` points to serialize whole conversions, and a
     /// std guard held across `await` both blocks the executor and fails
     /// `clippy::await_holding_lock`.
+    #[allow(dead_code)] // used only by tests of feature-gated converters
     pub(crate) async fn env_lock() -> MutexGuard<'static, ()> {
         ENV_LOCK.lock().await
     }
