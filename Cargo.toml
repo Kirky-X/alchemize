@@ -163,6 +163,9 @@ full = [
 #   6) src/infrastructure/engines.rs tests：该 feature 的在场/缺席断言对
 #   7) src/feature_assertions.rs：full 成员守卫表 + CI feature-isolation 的
 #      循环列表（29 配置）
+#   8) src/domain/feature_map.rs：扩展名映射 + enabled_features 清单
+#      （Cargo `full` 集合相等断言；映射表由 engines.rs 的 binding/coverage
+#      三重机器守卫锚定，CI 循环集合亦由该测试比对）
 # 双重兜底：full 守卫（漏加成员 = 编译错误）与 CI 的「无 cli 仅 --lib」行
 # （漏依赖边 = 下游构建失败）把「漏改」从静默丢失变成构建失败。
 

@@ -58,12 +58,60 @@ fn build_alch(
     builder.build()
 }
 
+/// Diagnostics for an unsupported extension: names the missing capability
+/// features (and the rebuild flag) when the format merely was not compiled
+/// in, and stays quiet when no feature can help.
+///
+/// The extension comes from a user-supplied filename, so it is sanitized
+/// before printing: control characters and Unicode bidi controls could
+/// otherwise drive terminal escapes or reorder a fake diagnostic line
+/// (CWE-150). Character set: C0/C1 controls plus `Bidi_Control`
+/// (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069).
+fn unsupported_format_message(ext: &str) -> String {
+    let safe = sanitize_ext(ext);
+    match alchemize::domain::feature_map::missing_features(ext) {
+        None => format!("unsupported format: {safe}"),
+        Some(missing) => {
+            let names = missing
+                .iter()
+                .map(|f| format!("'{f}'"))
+                .collect::<Vec<_>>()
+                .join(" and ");
+            let plural = if missing.len() > 1 { "s" } else { "" };
+            let them = if missing.len() > 1 { "them" } else { "it" };
+            format!(
+                "unsupported format: {safe}: requires the {names} feature{plural}; this build has {them} disabled, rebuild with --features {}",
+                missing.join(",")
+            )
+        }
+    }
+}
+
+fn sanitize_ext(ext: &str) -> String {
+    ext.chars()
+        .map(|c| {
+            let bidi = matches!(
+                c,
+                '\u{061c}'
+                    | '\u{200e}'
+                    | '\u{200f}'
+                    | '\u{202a}'..='\u{202e}'
+                    | '\u{2066}'..='\u{2069}'
+            );
+            if c.is_control() || bidi { '?' } else { c }
+        })
+        .collect()
+}
+
 /// AlchemizeError → ApiError。映射即退出码：`NotFound("format")` → 2、
 /// `ServiceUnavailable` → 3、其余 → 1（见 main.rs runner）。
 fn map_error(err: AlchemizeError) -> ApiError {
     match err {
         AlchemizeError::UnsupportedFormat(ext) => {
-            eprintln!("unsupported format: {ext}");
+            // The extension may simply be a capability this build did not
+            // compile in — say which feature turns it on instead of leaving
+            // the user guessing (exit code stays 2: unsupported format).
+            eprintln!("{}", unsupported_format_message(&ext));
             ApiError::NotFound {
                 resource: "format".into(),
                 resource_id: Some(ext),

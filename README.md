@@ -306,9 +306,9 @@ flowchart LR
 ### ▶️ 运行命令
 
 ```bash
-cargo test                     # default 档（154 例：仅 core + text）
-cargo test --features full     # full 档（907 例）
-cargo test --all-features      # all-features 档（912 例，含 cli/mcp）
+cargo test                     # default 档（168 例：仅 core + text）
+cargo test --features full     # full 档（912 passed，另有 5 例 ignored）
+cargo test --all-features      # all-features 档（917 passed，另有 5 例 ignored）
 cargo clippy --all-features   # 零新增告警
 cargo fmt --check             # 格式化零 diff
 cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
@@ -318,9 +318,9 @@ cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
 
 | 档位 | 用例数 | 覆盖范围 |
 | --- | --- | --- |
-| default（cli+text） | 154 | 仅 core + text 用例 |
-| full | 907 | 全部转换能力（另有 5 例 ignored：真模型 e2e 等） |
-| all-features | 912 | 含 cli/mcp（另有 5 例 ignored：真模型 e2e 等） |
+| default（cli+text） | 168 | 仅 core + text 用例 |
+| full | 912 | 全部转换能力（passed；另有 5 例 ignored） |
+| all-features | 917 | 含 cli/mcp（passed；另有 5 例 ignored） |
 
 行覆盖率 **90.49%**（门禁 ≥90%）。
 

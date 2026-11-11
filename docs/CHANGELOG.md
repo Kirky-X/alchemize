@@ -32,8 +32,11 @@ alchemize 所有显著变更记录于此文件。
 
 - **SQLite Path 输入改为私有临时副本**：所有输入在打开前 staging 到 `tempfile`（0600、随机名、独占创建）的私有副本，隔断攻击者同目录 `-wal`/`-shm` 注入（RUSTSEC-2026-0459 向量）。语义影响：Path 输入不再读取伴生 `-wal` 中未 checkpoint 的事务（此前就地打开会读到）；staging 需要 TMPDIR 容纳与数据库等大的临时副本。
 
+
 ### 新增
 
+- **未启用格式的诊断（特征提示）**：default/精简构建下 `alch convert x.pdf` 的 stderr 现在给出 `unsupported format: pdf: requires the 'pdf' feature; this build has it disabled, rebuild with --features pdf`（退出码仍为 2，stdout 与错误枚举形态不变；扩展名先做控制字符与 bidi 控制符脱敏）。库侧新增 additive 导出 `alchemize::domain::feature_map`：`EXTENSION_FEATURES` 映射表（单一事实源，仅收录引擎实际声明的扩展名）、`features_for_extension` / `missing_features`（数据面）与 `enabled_features`（编译期清单）；映射可靠性由三重机器守卫锚定（单 feature 绑定、full 反向覆盖、Cargo `full` 集合相等）。
+- **隔离矩阵行为验证**：CI feature-isolation 每格改为三步窄构建——下游依赖边检查（`cargo check --lib`，无 cli）→ 该 feature 的全部 lib 测试 → 该 feature 的 golden 行为子集（golden 用例改为按格式 feature 门控，proptest 仍只在 full 运行）；另有 `cli,text` bin 基线与 `feature_hint` 非空回归入口。覆盖显著增强且去掉整树 `--all-targets` 编译，成本不增反降。
 - **PDF 解压炸弹防护**：vendor `lopdf 0.42.0` 分叉（`third_party/lopdf`，`[patch.crates-io]` 接入，MIT 随包携带）给 FlateDecode/LZWDecode 流解压加每流 64 MiB 输出上限（对齐容器族 `MAX_ENTRY_BYTES`），单一收口覆盖 parse 阶段 ObjStm/XRefStm 与 pdf-extract 内容流/ICC 流全部路径；`decompress_predictor` 增加 DecodeParms 几何护栏；分叉线程本位违规标记供宿主在 pdf-extract 吞错后显性拒绝（`AlchemizeError::Pdf`），转换器与 CLI 端到端验证 100 MB 膨胀炸弹被拒（峰值 RSS 79 MB）。
 - **PDF 兜底档切换 lopdf 0.47 直连并退役分叉**：移除 `pdf-extract` 依赖与 `third_party/lopdf` vendor 分叉，供应链回归 crates.io 单一上游 `lopdf 0.47`；兜底档文本抽取切到 lopdf 自带 `extract_text_chunks_with_limit`（每页 64 MiB）并新增 256 MiB 全文档累计文本预算（page-farm DoS 守卫），图片路径改 `decompressed_content_with_limit`（每流 64 MiB）；解压错误由 lopdf 原生传播、类型级映射为 `AlchemizeError::Pdf`（替代线程本位标记），抽取段包 `spawn_blocking` 对齐同库惯例。差分基准（Apple EULA / arxiv 论文 / fork fixture 三语料）判定兜底档质量可接受。
 - **MCP 工具面**（feature `mcp`）：`alch-mcp` 二进制经 sdforge（rmcp，stdio）把 convert/doctor/formats 暴露为 MCP 工具。

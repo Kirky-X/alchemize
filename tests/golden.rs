@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Golden fixture tests: each format converts to its expected markdown.
-#![cfg(feature = "full")]
+//!
+//! Each case is gated by the capability feature that provides its format,
+//! so a single-format build still verifies that format's behavior (the
+//! isolation matrix in CI runs these per feature).
 
 use alchemize::application::builder::{Alchemize, AlchemizeBuilder};
 use alchemize::domain::input::Input;
@@ -21,6 +24,7 @@ fn fixture_dir(name: &str) -> std::path::PathBuf {
 ///
 /// `strip_metadata_tails`: the wav/mp4/png fixtures have no real decodable
 /// payload, so those families assert metadata-mode output instead.
+#[allow(dead_code)] // used only by the format-gated cases below
 async fn golden(name: &str, ext: &str) -> String {
     let input = Input::Path(fixture_dir(name).join(format!("sample.{ext}")));
     alch()
@@ -30,6 +34,7 @@ async fn golden(name: &str, ext: &str) -> String {
         .markdown
 }
 
+#[cfg(feature = "text")]
 #[tokio::test]
 async fn golden_txt() {
     assert_eq!(
@@ -38,6 +43,7 @@ async fn golden_txt() {
     );
 }
 
+#[cfg(feature = "text")]
 #[tokio::test]
 async fn golden_md_passthrough() {
     assert_eq!(
@@ -46,6 +52,7 @@ async fn golden_md_passthrough() {
     );
 }
 
+#[cfg(feature = "text")]
 #[tokio::test]
 async fn golden_py_fenced() {
     assert_eq!(
@@ -54,6 +61,7 @@ async fn golden_py_fenced() {
     );
 }
 
+#[cfg(feature = "text")]
 #[tokio::test]
 async fn golden_yaml_fenced() {
     assert_eq!(
@@ -62,6 +70,7 @@ async fn golden_yaml_fenced() {
     );
 }
 
+#[cfg(feature = "csv")]
 #[tokio::test]
 async fn golden_csv_table() {
     assert_eq!(
@@ -70,6 +79,7 @@ async fn golden_csv_table() {
     );
 }
 
+#[cfg(feature = "csv")]
 #[tokio::test]
 async fn golden_tsv_table() {
     assert_eq!(
@@ -78,6 +88,7 @@ async fn golden_tsv_table() {
     );
 }
 
+#[cfg(feature = "media")]
 #[tokio::test]
 async fn golden_srt() {
     assert_eq!(
@@ -86,6 +97,7 @@ async fn golden_srt() {
     );
 }
 
+#[cfg(feature = "media")]
 #[tokio::test]
 async fn golden_vtt() {
     assert_eq!(
@@ -94,12 +106,14 @@ async fn golden_vtt() {
     );
 }
 
+#[cfg(feature = "media")]
 #[tokio::test]
 async fn golden_ass() {
     let md = golden("ass", "ass").await;
     assert!(md.contains("[00:01.000 - 00:02.000] Hello ASS"), "md: {md}");
 }
 
+#[cfg(feature = "html")]
 #[tokio::test]
 async fn golden_html_math_preserved() {
     let md = golden("html", "html").await;
@@ -107,6 +121,7 @@ async fn golden_html_math_preserved() {
     assert!(md.contains("$$c^2 = a^2 + b^2$$"), "md: {md}");
 }
 
+#[cfg(feature = "ipynb")]
 #[tokio::test]
 async fn golden_ipynb() {
     let md = golden("ipynb", "ipynb").await;
@@ -114,6 +129,7 @@ async fn golden_ipynb() {
     assert!(md.contains("```python\nx = 1\n```"), "md: {md}");
 }
 
+#[cfg(feature = "zip")]
 #[tokio::test]
 async fn golden_zip_recursive() {
     let md = golden("zip", "zip").await;
@@ -121,6 +137,7 @@ async fn golden_zip_recursive() {
     assert!(md.contains("Hello from ZIP"));
 }
 
+#[cfg(feature = "epub")]
 #[tokio::test]
 async fn golden_epub_chapters() {
     let md = golden("epub", "epub").await;
@@ -129,6 +146,7 @@ async fn golden_epub_chapters() {
     assert!(md.contains("Epub body text."), "md: {md}");
 }
 
+#[cfg(feature = "docx")]
 #[tokio::test]
 async fn golden_docx_text() {
     let md = golden("docx", "docx").await;
@@ -146,6 +164,7 @@ async fn golden_xlsx_disabled_by_default() {
     );
 }
 
+#[cfg(feature = "latex")]
 #[tokio::test]
 async fn golden_tex_env_aware() {
     let md = golden("tex", "tex").await;
@@ -156,6 +175,7 @@ async fn golden_tex_env_aware() {
     }
 }
 
+#[cfg(feature = "media")]
 #[tokio::test]
 async fn golden_wav_metadata_degradation() {
     // Zero-sample wav: no transcriber configured → metadata markdown, not error.
@@ -163,6 +183,7 @@ async fn golden_wav_metadata_degradation() {
     assert!(!md.is_empty());
 }
 
+#[cfg(feature = "media")]
 #[tokio::test]
 async fn golden_mp4_metadata_degradation() {
     // Header-only mp4: no ffmpeg path taken → metadata markdown, not error.
@@ -170,6 +191,7 @@ async fn golden_mp4_metadata_degradation() {
     assert!(!md.is_empty());
 }
 
+#[cfg(feature = "media")]
 #[tokio::test]
 async fn golden_png_metadata_degradation() {
     // Truncated png without vision provider: metadata markdown, not error.
@@ -177,6 +199,7 @@ async fn golden_png_metadata_degradation() {
     assert!(!md.is_empty());
 }
 
+#[allow(dead_code)] // used only by the latex-gated case
 fn which_pandoc() -> bool {
     std::env::var("PATH")
         .map(|p| std::env::split_paths(&p).any(|d| d.join("pandoc").is_file()))
@@ -184,7 +207,9 @@ fn which_pandoc() -> bool {
 }
 
 /// proptest: arbitrary bytes never panic the magic detector.
-#[cfg(test)]
+/// Only under `full`: the isolation matrix runs this file once per feature,
+/// and repeating the property cases there adds cost without new coverage.
+#[cfg(all(test, feature = "full"))]
 mod proptests {
     use alchemize::domain::input::{Input, detect_format};
     use proptest::prelude::*;

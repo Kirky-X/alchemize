@@ -69,14 +69,14 @@ cargo build --features full
 
 ```bash
 cargo build                     # 默认档：CLI + 文本转换
-cargo test                      # default 档（154 例，core + text）
-cargo test --features full      # full 档（907 例）
-cargo test --all-features       # all-features 档（912 例，含 cli/mcp）
+cargo test                      # default 档（168 例，core + text）
+cargo test --features full      # full 档（912 passed，另有 5 例 ignored）
+cargo test --all-features       # all-features 档（917 passed，另有 5 例 ignored）
 ```
 
 质量门禁（本地 pre-commit hook + GitHub CI 双层执行，规则见 `.pre-commit-config.yaml` 与 `.github/workflows/ci.yml`）：
 
-- **feature-isolation**：CI 逐个配置执行 `cargo check --all-targets --no-default-features --features "cli,<F>"` 并跑注册在场性测试（开=引擎在场 / 关=引擎缺席），覆盖 29 个配置（28 个单 feature + `.tgz` 的 `tar,gzip` 组合）。单 job 顺序循环共享 target dir。
+- **feature-isolation**：CI 逐个配置执行三步窄构建——下游 `cargo check --lib --no-default-features --features "<F>"`（无 cli，暴露依赖边）→ 该 feature 的全部 lib 测试（含注册在场/缺席断言）→ 该 feature 的 golden 行为子集（用例按格式 feature 门控）；另有 `cli,text` 的 bin 基线与 feature_hint 非空回归入口。覆盖 29 个配置（28 个单 feature + `.tgz` 的 `tar,gzip` 组合），单 job 顺序循环共享 target dir。bin 的残余风险：仅 `cli,text` 基线覆盖，其余 cli 组合由 full/all-features 并集承担。
 - **三档测试**：default / `--features full` / `--all-features` 全绿；fmt 与 `clippy -D warnings` 零告警。
 
 ```bash
@@ -117,7 +117,7 @@ git branch -d feat/my-engine
 - 新增行为必须带钉住该行为的测试；修缺陷先写暴露缺陷的测试再修。
 - **覆盖率门禁 ≥89%**：`cargo llvm-cov --features full` 度量，当前 89.44%。（曾自 documented ≥90%，后续功能提交令水位漂移；回升 90 前以实测为准，diff 覆盖率门禁仍为 ≥90% 不降标。）
 - 金样输出变更（`tests/golden.rs`）必须在提交说明中写明变更理由。
-- 测试三档都要过：`cargo test`（default 154，core + text 瘦身档）、`cargo test --features full`（907）与 `cargo test --all-features`（912，含 cli/mcp）。
+- 测试三档都要过：`cargo test`（default 168，core + text 瘦身档）、`cargo test --features full`（912 passed，另 5 ignored）与 `cargo test --all-features`（917 passed，另 5 ignored，含 cli/mcp）。
 
 ## 📐 代码规范
 

@@ -11,6 +11,7 @@ pub mod infrastructure;
 pub use application::builder::{Alchemize, AlchemizeBuilder, HtmlDeepEngineConfig, MineruConfig};
 pub use application::registry::ConverterRegistry;
 pub use domain::error::AlchemizeError;
+pub use domain::feature_map::{enabled_features, features_for_extension, missing_features};
 pub use domain::input::{Input, InputFormat, detect_format};
 
 /// Crate version (mirrors Cargo.toml via workspace inheritance).

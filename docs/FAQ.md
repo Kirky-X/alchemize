@@ -23,7 +23,7 @@
 
 ### ❓ Alchemize 可以用于生产环境吗？
 
-可以。测试规模 default 档 154 例（仅 core + text）、full 档 907 例、all-features 档 912 例，行覆盖率 90.49%（门禁 ≥90%），真实文件套件 12 项测试（素材：9 个仓库内 fixtures 与 1 个外部视频源）覆盖 PDF/DOCX/XLSX/RTF 等真实文档。安全模型见[安全文档](SECURITY.md)。
+可以。测试规模 default 档 168 例（仅 core + text）、full 档 912 passed（另 5 ignored）、all-features 档 917 passed（另 5 ignored），行覆盖率 90.49%（门禁 ≥90%），真实文件套件 12 项测试（素材：9 个仓库内 fixtures 与 1 个外部视频源）覆盖 PDF/DOCX/XLSX/RTF 等真实文档。安全模型见[安全文档](SECURITY.md)。
 
 ### ❓ 支持哪些平台？
 

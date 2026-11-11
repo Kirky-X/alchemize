@@ -30,6 +30,7 @@
 pub use application::builder::{Alchemize, AlchemizeBuilder, MineruConfig};
 pub use application::registry::ConverterRegistry;
 pub use domain::error::AlchemizeError;
+pub use domain::feature_map::{enabled_features, features_for_extension, missing_features};
 pub use domain::input::{Input, InputFormat, detect_format};
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ```
@@ -56,6 +57,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 | `cli` | CLI 骨架（`[[bin]] alch` 的 required-features） | **开** |
 | `mcp` | `alch-mcp` 工具面 | 关 |
 | `full` | 全部 28 个转换类 feature 集合（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | 关 |
+
+附加（非 feature）导出：`domain::feature_map` 提供 `EXTENSION_FEATURES` 映射表与 `features_for_extension` / `missing_features` / `enabled_features` 数据面，用于判断「某扩展名需要哪些能力 feature」「本构建开启了哪些」；CLI 的 `unsupported format: … requires the 'pdf' feature` 提示即由此拼装。
 
 `default = ["cli", "text"]`：默认构建只有文本转换器（+ CLI 骨架）。`Alchemize::convert` 在输入格式没有候选引擎时返回 `UnsupportedFormat`（`Err`，CLI 退出码 2）——格式 feature 未启用与扩展名确实不支持，在门面层是同一种终态。
 

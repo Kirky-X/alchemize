@@ -354,6 +354,141 @@ mod feature_registration_tests {
         assert_gated!("sqlite", "sqlite");
         assert_gated!("bibtex", "bib");
 
+        // --- feature_map binding & completeness ---------------------------
+        // (1) binding — every build: for each table entry whose features are
+        // all enabled here, a converter that this build actually registered
+        // (or the facade zip converter) must accept the extension. A wrong
+        // feature attribution therefore fails in that feature's own cell.
+        let exts_of_this_build: Vec<String> = {
+            let slot = std::sync::Arc::new(std::sync::OnceLock::new());
+            let mineru = Some(MineruConfig::default());
+            let html_deep = Some(crate::application::builder::HtmlDeepEngineConfig::default());
+            let converters = default_converters(
+                &mineru,
+                None,
+                None,
+                VideoProcessingMode::default(),
+                &html_deep,
+                &slot,
+            );
+            converters
+                .iter()
+                .flat_map(|c| c.supported_extensions().iter().map(|s| s.to_string()))
+                .collect()
+        };
+        let enabled = crate::domain::feature_map::enabled_features();
+        for (ext, required) in crate::domain::feature_map::EXTENSION_FEATURES {
+            if !required.iter().all(|f| enabled.contains(f)) {
+                continue;
+            }
+            if required.contains(&"zip") {
+                // Facade-level converter, not a registry member: check the
+                // extension against the facade's own list, not a name.
+                #[cfg(feature = "zip")]
+                {
+                    let zip = crate::infrastructure::document::ZipConverter::with_arc(
+                        std::sync::Arc::new(crate::application::registry::ConverterRegistry::new()),
+                    );
+                    assert!(
+                        zip.supported_extensions().contains(ext),
+                        "feature_map says '{ext}' is served by the zip facade, but it is not"
+                    );
+                }
+                #[cfg(not(feature = "zip"))]
+                assert!(
+                    crate::domain::feature_map::missing_features(ext).is_some(),
+                    "zip feature is off but '{ext}' reports no missing feature"
+                );
+                continue;
+            }
+            assert!(
+                exts_of_this_build.iter().any(|e| e == ext),
+                "feature_map says '{ext}' needs {required:?}, all of which are enabled, \
+                 but no registered converter accepts it"
+            );
+        }
+
+        // Zip-off direction: the loop above skips entries whose features are
+        // not all enabled, so assert the refusal directly.
+        #[cfg(not(feature = "zip"))]
+        assert!(
+            crate::domain::feature_map::missing_features("zip").is_some(),
+            "zip feature is off but .zip reports no missing feature"
+        );
+
+        // (2) completeness + (3) feature-set — verified under `full`, where
+        // every converter is registered.
+        #[cfg(feature = "full")]
+        {
+            // (2a) every converter-declared extension is in the table.
+            for ext in &exts_of_this_build {
+                assert!(
+                    crate::domain::feature_map::features_for_extension(ext).is_some(),
+                    "converter declares '{ext}' but the feature map does not list it"
+                );
+            }
+            // (2b) the facade zip converter's extensions are in the table too.
+            {
+                let zip = crate::infrastructure::document::ZipConverter::with_arc(
+                    std::sync::Arc::new(crate::application::registry::ConverterRegistry::new()),
+                );
+                for ext in zip.supported_extensions() {
+                    assert!(
+                        crate::domain::feature_map::features_for_extension(ext).is_some(),
+                        "zip facade declares '{ext}' but the feature map does not list it"
+                    );
+                }
+            }
+            // (3) enabled_features == Cargo.toml `full`; every table feature
+            // is a conversion feature (i.e. a member of `full`); every other
+            // declared feature is either `full` itself or one of the two
+            // non-conversion tool faces.
+            let cargo = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+                .expect("read Cargo.toml");
+            let full: std::collections::BTreeSet<&str> =
+                parse_cargo_list(&cargo, "full").into_iter().collect();
+            let listed: std::collections::BTreeSet<&str> = enabled.into_iter().collect();
+            assert_eq!(
+                listed, full,
+                "enabled_features() and Cargo.toml `full` must be the same set"
+            );
+            for (ext, required) in crate::domain::feature_map::EXTENSION_FEATURES {
+                for f in *required {
+                    assert!(
+                        full.contains(f),
+                        "feature_map entry '{ext}' names '{f}', which is not a conversion feature in `full`"
+                    );
+                }
+            }
+            // The CI isolation loop is a hand-written list; keep it equal to
+            // `full` (+ the tar,gzip combination), so a forgotten cell fails
+            // here instead of never being isolated.
+            let ci = std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/.github/workflows/ci.yml"
+            ))
+            .expect("read ci.yml");
+            let loop_set: std::collections::BTreeSet<&str> =
+                parse_ci_loop(&ci).into_iter().collect();
+            let mut expected = full.clone();
+            expected.insert("tar,gzip");
+            assert_eq!(
+                loop_set, expected,
+                "CI feature-isolation loop must list exactly `full` plus tar,gzip"
+            );
+            // Every declared feature must be a conversion feature, `full`
+            // itself, `default`, or a non-conversion tool face — so adding a
+            // Cargo feature without wiring it into `full`/enabled_features
+            // cannot ship unguarded.
+            let tool_faces = ["default", "cli", "mcp", "full"];
+            for key in parse_cargo_feature_keys(&cargo) {
+                assert!(
+                    full.contains(key) || tool_faces.contains(&key),
+                    "Cargo.toml declares feature '{key}' outside `full` and outside the tool faces"
+                );
+            }
+        }
+
         // `.tgz` is a combined capability: present only with both features.
         #[cfg(all(feature = "tar", feature = "gzip"))]
         assert!(names.contains(&"tar-gz"), "tar+gzip: tar-gz must register");
@@ -362,5 +497,62 @@ mod feature_registration_tests {
             !names.contains(&"tar-gz"),
             "tar-gz must stay unregistered unless both tar and gzip are on"
         );
+    }
+
+    /// Extract a quoted string list (e.g. `full = ["a", "b"]`) from Cargo.toml.
+    #[cfg(feature = "full")]
+    fn parse_cargo_list<'a>(cargo: &'a str, key: &str) -> Vec<&'a str> {
+        let marker = format!("{key} = [");
+        let start = cargo
+            .find(&marker)
+            .unwrap_or_else(|| panic!("Cargo.toml has no `{key}` list"))
+            + marker.len();
+        let rest = &cargo[start..];
+        let end = rest.find(']').expect("unterminated list");
+        rest[..end]
+            .split(',')
+            .filter_map(|item| {
+                let item = item.trim();
+                item.strip_prefix('"')?.strip_suffix('"')
+            })
+            .collect()
+    }
+
+    /// Extract the feature tokens of the CI isolation loop
+    /// (`for f in ... ; do`), stripping shell line continuations.
+    #[cfg(feature = "full")]
+    fn parse_ci_loop(ci: &str) -> Vec<&str> {
+        let start =
+            ci.find("for f in ").expect("ci.yml has the isolation loop") + "for f in ".len();
+        let rest = &ci[start..];
+        let end = rest.find("; do").expect("loop terminator");
+        rest[..end]
+            .split_whitespace()
+            .map(|tok| tok.trim_matches('"').trim_end_matches('\\'))
+            .filter(|tok| !tok.is_empty())
+            .collect()
+    }
+
+    /// Extract the keys of Cargo.toml's `[features]` table.
+    #[cfg(feature = "full")]
+    fn parse_cargo_feature_keys(cargo: &str) -> Vec<&str> {
+        let section = cargo
+            .split("[features]")
+            .nth(1)
+            .expect("Cargo.toml has a [features] section");
+        let mut keys = Vec::new();
+        for line in section.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                break; // end of [features]; later sections list deps, not features
+            }
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some((key, _)) = line.split_once(" = ") {
+                keys.push(key.trim());
+            }
+        }
+        keys
     }
 }

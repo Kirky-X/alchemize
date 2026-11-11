@@ -211,7 +211,7 @@ impl Alchemize {
         if self.zip.is_some() {
             rows.push((
                 "zip".to_string(),
-                vec!["zip".to_string()],
+                vec!["zip".to_string(), "cbz".to_string()],
                 crate::application::ports::Availability::Available,
             ));
         }

@@ -306,9 +306,9 @@ Design principles, module layout and data flows in the [🏗️ Architecture doc
 ### ▶️ Commands
 
 ```bash
-cargo test                     # default tier (154 tests: core + text only)
-cargo test --features full     # full tier (907 tests)
-cargo test --all-features      # all-features tier (912 tests, including cli/mcp)
+cargo test                     # default tier (168 tests: core + text only)
+cargo test --features full     # full tier (912 tests)
+cargo test --all-features      # all-features tier (917 tests, including cli/mcp)
 cargo clippy --all-features   # no new warnings
 cargo fmt --check             # zero format diffs
 cargo llvm-cov --features full # coverage (gate ≥90%)
@@ -318,9 +318,9 @@ cargo llvm-cov --features full # coverage (gate ≥90%)
 
 | Tier | Test cases | Scope |
 | --- | --- | --- |
-| default (cli+text) | 154 | core + text only |
-| full | 907 | all conversion capabilities (5 ignored: real-model e2e etc.) |
-| all-features | 912 | including cli/mcp (5 ignored: real-model e2e etc.) |
+| default (cli+text) | 168 | core + text only |
+| full | 912 | all conversion capabilities (5 ignored: real-model e2e etc.) |
+| all-features | 917 | including cli/mcp (5 ignored: real-model e2e etc.) |
 
 Line coverage **90.49%** (gate ≥90%).
 

@@ -32,6 +32,19 @@ const MAX_STREAM_DECOMPRESSED_BYTES: usize = 64 * 1024 * 1024;
 /// real-world books; rejects bomb-shaped page farms.
 const MAX_TOTAL_TEXT_BYTES: usize = 256 * 1024 * 1024;
 
+/// Cumulative whole-document text budget (page-farm DoS guard).
+///
+/// Factored out so the guard itself is unit-tested cheaply; the end-to-end
+/// 300 MiB fixture lives in the `full` suite only.
+fn check_cumulative_text_budget(total_text: usize) -> Result<(), AlchemizeError> {
+    if total_text > MAX_TOTAL_TEXT_BYTES {
+        return Err(AlchemizeError::Pdf(format!(
+            "PDF cumulative text budget exceeded ({MAX_TOTAL_TEXT_BYTES} bytes total, bomb protection; page-farm DoS guard)"
+        )));
+    }
+    Ok(())
+}
+
 /// Blocking extraction core: parse + per-page text with explicit bomb limits.
 ///
 /// lopdf 0.47 propagates *bomb* decompression errors natively
@@ -69,11 +82,7 @@ fn extract_pages(bytes: &[u8]) -> Result<Vec<String>, AlchemizeError> {
             })?
             .join("");
         total_text += text.len();
-        if total_text > MAX_TOTAL_TEXT_BYTES {
-            return Err(AlchemizeError::Pdf(format!(
-                "PDF cumulative text budget exceeded ({MAX_TOTAL_TEXT_BYTES} bytes total, bomb protection; page-farm DoS guard)"
-            )));
-        }
+        check_cumulative_text_budget(total_text)?;
         pages.push(text);
     }
     Ok(pages)
@@ -574,10 +583,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn cumulative_text_budget_guard_boundary() {
+        assert!(check_cumulative_text_budget(MAX_TOTAL_TEXT_BYTES).is_ok());
+        let err = check_cumulative_text_budget(MAX_TOTAL_TEXT_BYTES + 1).unwrap_err();
+        assert!(err.to_string().contains("cumulative text budget exceeded"));
+        assert!(err.to_string().contains("bomb protection"));
+    }
+
     /// Six pages of ~50 MiB of literal text each: every page stays under the
     /// 64 MiB per-page cap (raw, no decompression involved), but the running
     /// total crosses the 256 MiB cumulative TEXT budget — the page-farm DoS
     /// guard must reject before the last page.
+    ///
+    /// ~300 MiB fixture, ~19 s: kept to the `full` suite (runs once) so the
+    /// per-feature CI cells stay fast; the guard itself is unit-tested below.
+    #[cfg(feature = "full")]
     #[tokio::test]
     async fn convert_rejects_cumulative_text_budget() {
         use lopdf::{Object, Stream, dictionary};

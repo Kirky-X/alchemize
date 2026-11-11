@@ -74,6 +74,7 @@ flowchart TB
 
 | 模块 | 职责 |
 | --- | --- |
+| `domain/feature_map.rs` | 扩展名→能力 feature 映射表（单一事实源）、编译期启用 feature 清单、缺失 feature 数据面（CLI 提示语由 `forge_app` 组装） |
 | `domain/input.rs` | `Input`（`Path` / `Bytes{data, filename, mimetype, extension}` 两种载体）、`InputFormat` 枚举、`detect_format()`（魔数嗅探优先、扩展名映射兜底） |
 | `domain/result.rs` | `ConvertResult`（markdown + metadata + content_type + quality + title + assets）、`ConversionQuality`、`ContentType`、`VideoProcessingMode` |
 | `domain/asset.rs` | `Asset{filename, bytes, role}` 与 `AssetSink`（`DirSink` 写 `images/`、`InlineSink` 转 base64 data URL）——DirSink 落盘是 domain 层唯一写盘点 |
