@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 不传 languages → CodeQL 自动检测仓库语言
       - name: Initialize CodeQL
