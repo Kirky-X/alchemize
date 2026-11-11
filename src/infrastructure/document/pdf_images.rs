@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! Embedded PDF image extraction — lopdf structure walk (feature `pdfium`).
+//! Embedded PDF image extraction — lopdf structure walk (feature `pdf-local`).
 //!
 //! pdfium-render 0.5.9 seals page-object handles behind a `pub(crate)`
 //! trait, so image bytes cannot come from the pdfium binding. This module

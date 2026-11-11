@@ -341,7 +341,7 @@ async fn zip_and_cbz_route_through_the_facade() {
 
 #[tokio::test]
 async fn eml_converter_via_registry() {
-    // Without the `eml` feature this asserts the explicit unsupported error;
+    // Without the `email` feature this asserts the explicit unsupported error;
     // with it, the headers/body render.
     let alch = AlchemizeBuilder::new().build();
     let eml = b"From: a@b.c\nTo: d@e.f\nSubject: Hi\n\nBody text\n";

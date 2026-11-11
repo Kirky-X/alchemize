@@ -519,7 +519,7 @@ async fn real_zip_members_convert_through_facade() {
     );
 }
 
-// -- data feature: parquet/sqlite/bib (structured-data engines) --------------
+// -- structured-data features: parquet/sqlite/bib (per-format engines) -------------
 
 #[cfg(feature = "parquet")]
 #[tokio::test]
@@ -601,7 +601,7 @@ fn detect_format_reads_real_archives_from_header_names() {
     }
 }
 
-// -- containers feature: nested members dispatch through the assembled registry
+// -- tar feature: nested members dispatch through the assembled registry
 
 #[cfg(feature = "tar")]
 #[tokio::test]

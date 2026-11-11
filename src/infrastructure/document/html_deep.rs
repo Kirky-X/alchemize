@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! `html-deep` 引擎 —— 自研 HTML→Markdown 转换链（feature `html-deep`）。
+//! `html-deep` 引擎 —— 自研 HTML→Markdown 转换链（feature `html`）。
 //!
 //! 主路径为本仓自研迭代状态机引擎（`html_deep/engine`，Apache-2.0，行为
 //! 规格经差分验证，见 specmark 变更 `selfhost-html-engine`）；本文件是
@@ -290,7 +290,7 @@ impl crate::application::ports::Converter for HtmlDeepConverter {
     }
 
     /// priority 15：压过既有 html/htmd 引擎（10）——
-    /// feature html-deep 构建下本链是 html 的首选路径。
+    /// feature html 构建下本链是 html 的首选路径。
     fn priority(&self) -> u8 {
         15
     }

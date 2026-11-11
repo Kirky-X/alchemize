@@ -40,7 +40,7 @@ cargo update -d          # 更新漏洞通告数据库
 | 风险 | 现状 | 缓解 |
 | --- | --- | --- |
 | `with_max_file_size` 消费点 | 已在 facade 分发前拦截超限输入，并作为 ZIP 嵌套条目上限 | 覆盖注册表分发与 zip 分支；tar/tgz/7z 嵌套固定 64 MiB/条目 + 256 MiB/整包，gz/xz/zst 单流解压上限 64 MiB，均不受此值影响；MinerU precision 另有 200MB 上限 |
-| libsqlite3-sys 0.35 存量通告 RUSTSEC-2026-0459（C SQLite CVE-2026-119375，medium） | `sqlite` feature 传递依赖，存量非新增 | cargo-audit 已核；升级 rusqlite 属独立依赖变更，随下一依赖批次处理 |
+| libsqlite3-sys 0.37 存量通告 RUSTSEC-2026-0459（C SQLite CVE-2026-119375，medium） | `sqlite` feature 传递依赖，存量非新增 | cargo-audit 已核；升级 rusqlite 属独立依赖变更，随下一依赖批次处理 |
 | 仓库无 CI 与 git 钩子 | 门禁靠贡献者本地执行 | CONTRIBUTING 明确列出本地门禁清单 |
 
 ### 供应链与门禁

@@ -38,7 +38,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 | --- | --- | --- |
 | `pdf-cloud` | MinerU 引擎注册 + `MineruConfig` 装配 | 关 |
 | `audio` | vecboost 转录门面 + Whisper 兼容后端 | 关 |
-| `full` | 以上全部 | 关 |
+| `full` | 以上全部 14 个转换能力 feature 全集合（详见 Cargo.toml） | 关 |
 
 ## 🧱 核心 API
 

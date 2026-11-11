@@ -20,7 +20,7 @@ use alchemize::domain::error::AlchemizeError;
 use alchemize::domain::input::Input;
 
 /// 平移自原 main.rs：按环境变量与参数组装门面；base_url/extract_main 仅在
-/// html-deep feature 构建下生效（未编译时诚实告警，不静默吞选项）。
+/// html feature 构建下生效（未编译时诚实告警，不静默吞选项）。
 fn build_alch(
     no_remote: bool,
     asset_mode: AssetMode,
@@ -43,7 +43,7 @@ fn build_alch(
         {
             let _ = (&base_url, &extract_main);
             eprintln!(
-                "warning: --base-url/--extract-main require a build with --features html-deep; options ignored"
+                "warning: --base-url/--extract-main require a build with --features html; options ignored"
             );
         }
     }

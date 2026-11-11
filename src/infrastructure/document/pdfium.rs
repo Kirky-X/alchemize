@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! pdfium local PDF engine (feature `pdfium`) — Chrome's PDF library via
+//! pdfium local PDF engine (feature `pdf-local`) — Chrome's PDF library via
 //! pdfium-render, loaded dynamically at runtime.
 //!
 //! Binary compatibility: pdfium-render 0.5.x binds `FPDFFont_GetFontName`,

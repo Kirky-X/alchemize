@@ -90,3 +90,32 @@ jobs:
           ignore: ${{ steps.audit_ignore.outputs.ids }}
       - name: cargo-deny (license / ban / advisory)
         uses: EmbarkStudios/cargo-deny-action@v2
+
+  # 能力 feature 的隔离门禁：每个单 feature（外加 .tgz 的 tar+gzip 组合）
+  # 必须独立编译。quality/test 两个 job 只覆盖并集（--all-features / full），
+  # 「某 feature 关闭时误用未启用依赖或漏注册引擎」在并集下不可见。
+  # 单 job 顺序循环（共享 target dir）：1 次依赖冷编 + N 次本 crate 重编，
+  # 比 N 个 runner job（N 次全树冷编 + N 份 job 开销）省约 3-10 倍 runner-minutes。
+  # --all-targets 让 tests 也参与编译（cargo check 默认不编 test target）；
+  # 每配置顺带跑注册在场性测试，执行「feature 关 → 引擎必须缺席」方向
+  # （该方向的断言在 full/all-features 下被 cfg 编译掉，只有单 feature 态能验）。
+  feature-isolation:
+    name: feature isolation (15 configs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+      - name: Check + registration test per feature config
+        shell: bash
+        run: |
+          set -euo pipefail
+          # cli 是 default 成员，--no-default-features 下显式带回，模拟下游最小构建。
+          for f in html pdf-local pdf-cloud audio legacy-office email \
+                   tar gzip xz zstd sevenz parquet sqlite bibtex "tar,gzip"; do
+            echo "::group::feature=$f"
+            cargo check --all-targets --no-default-features --features "cli,$f"
+            cargo test --lib --no-default-features --features "cli,$f" \
+              feature_gates_register_exactly_the_enabled_engines
+            echo "::endgroup::"
+          done

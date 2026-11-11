@@ -119,6 +119,9 @@ pub(crate) fn check_total_bytes(total: u64) -> Result<(), AlchemizeError> {
 }
 
 /// Enforce the per-entry size limit.
+// Only the entry-enumerating containers (tar/7z) call this; a build with only
+// single-stream format features legitimately leaves it unused.
+#[cfg_attr(not(any(feature = "tar", feature = "sevenz")), allow(dead_code))]
 pub(crate) fn check_entry_size(name: &str, size: u64) -> Result<(), AlchemizeError> {
     if size > MAX_ENTRY_BYTES {
         return Err(AlchemizeError::other(format!(
@@ -131,6 +134,11 @@ pub(crate) fn check_entry_size(name: &str, size: u64) -> Result<(), AlchemizeErr
 /// Read `reader` to end, failing when the output exceeds `limit`
 /// (decompression-bomb protection: returns an error instead of exhausting
 /// memory).
+// Only the single-stream decoders (gzip/xz/zstd) call this.
+#[cfg_attr(
+    not(any(feature = "gzip", feature = "xz", feature = "zstd")),
+    allow(dead_code)
+)]
 pub(crate) fn read_limited(
     reader: impl Read,
     limit: u64,
@@ -154,6 +162,8 @@ pub(crate) fn read_limited(
 /// (`__MACOSX` path segments). Ordinary dotfiles are payload here (a `.env`
 /// inside a tar may be the document); the zip converter additionally drops
 /// hidden files, which is a deliberate difference, not an inconsistency.
+// Only the entry-enumerating containers (tar/7z) call this.
+#[cfg_attr(not(any(feature = "tar", feature = "sevenz")), allow(dead_code))]
 pub(crate) fn is_metadata_entry(name: &str) -> bool {
     let basename = name.rsplit(['/', '\\']).next().unwrap_or(name);
     basename.starts_with("._") || name.split(['/', '\\']).any(|seg| seg == "__MACOSX")

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! MinerU API integration (feature `mineru`).
+//! MinerU API integration (feature `pdf-cloud`).
 //!
 //! - [`MineruClient`] trait — unified abstraction for both APIs
 //! - [`MineruAgentClient`] — lightweight API for small files

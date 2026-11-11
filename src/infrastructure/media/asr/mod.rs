@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Transcription backends: vecboost local ONNX + Whisper HTTP API (both
-//! behind feature `asr`).
+//! behind feature `audio`).
 
 #[cfg(feature = "audio")]
 pub mod vecboost;

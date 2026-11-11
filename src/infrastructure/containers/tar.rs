@@ -15,8 +15,12 @@ use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::infrastructure::containers::{
     ContainerBase, ContainerEntry, RecursiveContainer, RegistrySlot, acquire_depth,
-    charge_chain_bytes, check_entry_size, is_metadata_entry, read_limited, with_depth_scope,
+    check_entry_size, is_metadata_entry, with_depth_scope,
 };
+// Byte-budget helpers used only by the .tgz path (single-format builds without
+// the gzip feature must not import them).
+#[cfg(all(feature = "tar", feature = "gzip"))]
+use crate::infrastructure::containers::{charge_chain_bytes, read_limited};
 
 /// View over raw tar bytes implementing the shared container skeleton.
 pub struct TarArchive {
@@ -100,12 +104,12 @@ impl Converter for TarConverter {
 /// detects the inner tar and recurses into [`TarConverter`] via the registry.
 /// This converter handles `.tgz` directly and `.tar.gz` when an explicit
 /// extension override names it.
-#[cfg(feature = "gzip")]
+#[cfg(all(feature = "tar", feature = "gzip"))]
 pub struct TarGzConverter {
     base: ContainerBase,
 }
 
-#[cfg(feature = "gzip")]
+#[cfg(all(feature = "tar", feature = "gzip"))]
 impl TarGzConverter {
     /// Create with a deferred registry slot (builder wiring: filled once the
     /// enclosing registry is assembled). If the slot stays empty, entries
@@ -125,7 +129,7 @@ impl TarGzConverter {
 }
 
 #[async_trait]
-#[cfg(feature = "gzip")]
+#[cfg(all(feature = "tar", feature = "gzip"))]
 impl Converter for TarGzConverter {
     fn name(&self) -> &'static str {
         "tar-gz"
@@ -225,6 +229,7 @@ fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
 mod tests {
     use super::*;
     use crate::infrastructure::document::text::TextConverter;
+    #[cfg(all(feature = "tar", feature = "gzip"))]
     use std::io::Write;
     use tar::{Builder, Header};
 
@@ -273,9 +278,16 @@ mod tests {
     fn supported_extensions() {
         let converter = TarConverter::with_arc(Arc::new(ConverterRegistry::new()));
         assert_eq!(converter.supported_extensions(), &["tar"]);
+        assert_eq!(converter.name(), "tar");
+    }
+
+    /// `.tgz`/`.tar.gz` 的组合格式能力需要 tar+gzip 同时在场，测试同样
+    /// 按 feature 门控（安全审查 MEDIUM 修复：tar-only 构建不得引用该类型）。
+    #[cfg(all(feature = "tar", feature = "gzip"))]
+    #[test]
+    fn supported_extensions_tar_gz() {
         let gz = TarGzConverter::with_arc(Arc::new(ConverterRegistry::new()));
         assert_eq!(gz.supported_extensions(), &["tgz", "tar.gz"]);
-        assert_eq!(converter.name(), "tar");
         assert_eq!(gz.name(), "tar-gz");
     }
 
@@ -344,7 +356,7 @@ mod tests {
         assert_eq!(result.metadata["file_count"], 0);
     }
 
-    #[cfg(feature = "gzip")]
+    #[cfg(all(feature = "tar", feature = "gzip"))]
     #[tokio::test]
     async fn convert_tgz_roundtrip() {
         let converter = TarGzConverter::with_arc(registry_with_text());

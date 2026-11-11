@@ -23,13 +23,15 @@ alchemize 所有显著变更记录于此文件。
 | `data`（拆分） | `parquet` / `sqlite` / `bibtex` |
 
 - `full` 伞面成员更新为：`pdf-cloud`+`pdf-local`+`audio`+`email`+`legacy-office`+`html`+`tar`+`gzip`+`xz`+`zstd`+`sevenz`+`parquet`+`sqlite`+`bibtex`（14 个）。
+- 拆分收益口径：单格式构建相比旧捆绑减少 6–9 个依赖节点（容器族）与 10–31 个（数据族），冷编耗时降 2%–17%；其中 `sqlite`/`bibtex` 收益明显（15%–17%），`parquet` 约 3%，`gzip` 依赖树收益为零（flate2 本就在树内，收益在编译面/二进制面）。
+- `.tar.gz` 组合拼写的降级语义：仅开 `gzip` 时，`.tar.gz` 经 gz 单流解压后将内层 tar 字节降级为附件（内容保留）；`.tgz` 需 `tar`+`gzip` 同时开启才可转换，未齐备时报不支持。
 
 ### 新增
 
 - **PDF 解压炸弹防护**：vendor `lopdf 0.42.0` 分叉（`third_party/lopdf`，`[patch.crates-io]` 接入，MIT 随包携带）给 FlateDecode/LZWDecode 流解压加每流 64 MiB 输出上限（对齐容器族 `MAX_ENTRY_BYTES`），单一收口覆盖 parse 阶段 ObjStm/XRefStm 与 pdf-extract 内容流/ICC 流全部路径；`decompress_predictor` 增加 DecodeParms 几何护栏；分叉线程本位违规标记供宿主在 pdf-extract 吞错后显性拒绝（`AlchemizeError::Pdf`），转换器与 CLI 端到端验证 100 MB 膨胀炸弹被拒（峰值 RSS 79 MB）。
 - **PDF 兜底档切换 lopdf 0.47 直连并退役分叉**：移除 `pdf-extract` 依赖与 `third_party/lopdf` vendor 分叉，供应链回归 crates.io 单一上游 `lopdf 0.47`；兜底档文本抽取切到 lopdf 自带 `extract_text_chunks_with_limit`（每页 64 MiB）并新增 256 MiB 全文档累计文本预算（page-farm DoS 守卫），图片路径改 `decompressed_content_with_limit`（每流 64 MiB）；解压错误由 lopdf 原生传播、类型级映射为 `AlchemizeError::Pdf`（替代线程本位标记），抽取段包 `spawn_blocking` 对齐同库惯例。差分基准（Apple EULA / arxiv 论文 / fork fixture 三语料）判定兜底档质量可接受。
 - **MCP 工具面**（feature `mcp`）：`alch-mcp` 二进制经 sdforge（rmcp，stdio）把 convert/doctor/formats 暴露为 MCP 工具。
-- **html-deep 自研引擎**（feature `html-deep`）：只读 DOM → Markdown 迭代状态机——空输出防呆、迭代式 DOM 防栈击穿、诚实降级；可选主内容提取（dom_smoothie，`--extract-main`）与链接绝对化（`--base-url`）；含 `<math` 标签的页面自动路由 htmd 保真，`$..$` 文本 TeX 跨度原样保留。convert 端点新增 `--base-url`/`--extract-main`。
+- **html-deep 自研引擎**（feature `html`）：只读 DOM → Markdown 迭代状态机——空输出防呆、迭代式 DOM 防栈击穿、诚实降级；可选主内容提取（dom_smoothie，`--extract-main`）与链接绝对化（`--base-url`）；含 `<math` 标签的页面自动路由 htmd 保真，`$..$` 文本 TeX 跨度原样保留。convert 端点新增 `--base-url`/`--extract-main`。
 - 文档套件（七篇专题文档）与全部源文件版权头（Apache-2.0 SPDX）。
 - 文档骨架与 confers 对齐：七篇逐篇映射 confers 章节序列（概述→设计原则→系统架构→模块划分→数据流→安全设计→性能设计→相关文档等，逐篇见「📋 目录」）。
 - 文档导航节：README.md「📚 文档」表格与 README_EN.md「Docs」表格。
@@ -64,9 +66,9 @@ alchemize 所有显著变更记录于此文件。
 - **转换引擎注册表**：`Converter` 端口 + 优先级 fallback 链；`metadata.converter` 记录实际引擎，`quality` 如实标注 `api`/`local_full`/`local_fallback` 三级；全链失败返回逐引擎 attempts 明细。
 - **文档格式**：pdf（pdf-extract 本地文本 + TOC 剔除/结构启发）、docx/pptx/xlsx/xls/ods（原生 XML + calamine）、odt/odp/rtf、html/htm、epub、csv/tsv（分隔符自探测）、txt/text/log/md 与 ~45 扩展名代码围栏、ipynb、tex/latex（pandoc 探测 + 围栏兜底）、zip 递归容器（嵌套 zip 显式不支持）。
 - **anydoc 后端**（feature `anydoc`）：office 全格式含旧版二进制 Office（doc/ppt/…），priority 15 压过原生解析；图片按文档序经自研 GFM 渲染器导出。
-- **MinerU 云端 PDF**（feature `mineru`）：Agent/Precision 双客户端按文件大小选择、limiteron 轮询退避、响应体积分级上限、SSRF 校验（scheme/环回/私网/CGNAT/链路本地/域名白名单/签名）；`ALCHEMIZE_MINERU_URL` 配置端点，本地优先、云端兜底（priority 5 链尾）。
+- **MinerU 云端 PDF**（feature `pdf-cloud`）：Agent/Precision 双客户端按文件大小选择、limiteron 轮询退避、响应体积分级上限、SSRF 校验（scheme/环回/私网/CGNAT/链路本地/域名白名单/签名）；`ALCHEMIZE_MINERU_URL` 配置端点，本地优先、云端兜底（priority 5 链尾）。
 - **媒体转换**：图片（VisionProvider 注入或元数据降级）、音频/视频（ffmpeg 抽轨 → 转录链）、字幕（srt/vtt/ass/ssa 原生解析）、视频帧去重、视频处理模式（Gpu/AudioOnly/Disabled）。
-- **ASR 本地转录**（feature `asr`）：vecboost 门面（Qwen3-ASR ONNX 三件套 + silero VAD），模型 bundle 缺失时如实报 Unavailable 不自动联网；输出 VAD 段级文本 + 时间戳，显式声明非说话人识别；另备 Whisper 兼容 API 后端（显式注入激活）。
+- **ASR 本地转录**（feature `audio`）：vecboost 门面（Qwen3-ASR ONNX 三件套 + silero VAD），模型 bundle 缺失时如实报 Unavailable 不自动联网；输出 VAD 段级文本 + 时间戳，显式声明非说话人识别；另备 Whisper 兼容 API 后端（显式注入激活）。
 - **CLI `alch`**：`convert`（-o/--engine/--assets dir|inline/--no-remote/--format）、`doctor`（逐引擎可用性诊断）、`formats`（支持扩展名清单）；退出码 0/1/2/3 语义化。
 - **多编码支持**：UTF-8 直读 → GBK/Big5/Shift-JIS/EUC-JP/ISO-2022-JP/EUC-KR/windows-1252 探测（CJK 优先）→ lossy UTF-8 兜底。
 - **密钥防泄漏**：`MineruConfig::api_token` 脱敏（单测钉住）。

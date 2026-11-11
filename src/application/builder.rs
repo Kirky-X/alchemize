@@ -83,7 +83,7 @@ impl std::fmt::Display for MineruConfig {
     }
 }
 
-/// html-deep 引擎配置（feature `html-deep`）：链接绝对化基准与主内容提取开关。
+/// html-deep 引擎配置（feature `html`）：链接绝对化基准与主内容提取开关。
 #[derive(Debug, Clone, Default)]
 pub struct HtmlDeepEngineConfig {
     /// 相对链接绝对化基准（None = 不改写链接）
@@ -274,14 +274,14 @@ impl AlchemizeBuilder {
     }
 
     /// Set the html-deep engine configuration (engine registered when the
-    /// `html-deep` feature is compiled in).
+    /// `html` feature is compiled in).
     pub fn with_html_deep(mut self, config: HtmlDeepEngineConfig) -> Self {
         self.html_deep = Some(config);
         self
     }
 
     /// Set the MinerU endpoint configuration (enables MinerU engines when
-    /// the `mineru` feature is compiled in).
+    /// the `pdf-cloud` feature is compiled in).
     pub fn with_mineru(mut self, config: MineruConfig) -> Self {
         self.mineru = Some(config);
         self
@@ -335,7 +335,7 @@ impl AlchemizeBuilder {
             ConverterRegistry::new()
         };
 
-        // html-deep：feature html-deep 编译即注册（默认配置）；with_html_deep 仅
+        // html：feature html 编译即注册（默认配置）；with_html_deep 仅
         // 定制 base_url/extract_main——「编译即可用」的注册语义。
         #[cfg(feature = "html")]
         let html_deep = Some(self.html_deep.clone().unwrap_or_default());
@@ -558,7 +558,7 @@ mod tests {
         }
     }
 
-    /// html-deep feature 下同样逐字节相等，且两端口溯源均为 html-deep 引擎
+    /// html feature 下同样逐字节相等，且两端口溯源均为 html-deep 引擎
     /// （math 路由语料的兜底 htmd 输出也以顶层转换器名义入库）。
     #[cfg(feature = "html")]
     #[tokio::test]

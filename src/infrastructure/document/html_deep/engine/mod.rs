@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! html-deep 自研引擎 —— 只读 DOM → Markdown 迭代状态机（feature `html-deep`）。
+//! html-deep 自研引擎 —— 只读 DOM → Markdown 迭代状态机（feature `html`）。
 //!
 //! 契约（行为规格真源见 specmark 变更 `selfhost-html-engine`，不入库）：
 //! - 全程迭代任务栈，DOM 深度不变成 Rust 调用栈深度（万级嵌套安全）；

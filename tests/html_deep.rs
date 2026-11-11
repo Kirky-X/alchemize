@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! html-deep 引擎测试（feature `html-deep`）：转换链兜底触发、空输出防呆、
+//! html-deep 引擎测试（feature `html`）：转换链兜底触发、空输出防呆、
 //! math 保真路由、主内容提取、链接绝对化。引擎行为契约
 //! 见 specmark/specs/html-deep/spec.md。
 

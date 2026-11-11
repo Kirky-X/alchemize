@@ -240,3 +240,78 @@ pub fn default_converters(
     let _ = html_deep;
     engines
 }
+
+#[cfg(test)]
+mod feature_registration_tests {
+    use super::*;
+
+    /// Assemble the default engine list the way the builder does: the two
+    /// config-driven engines (MinerU / html-deep) receive default configs so
+    /// their registration gates are exercised rather than skipped.
+    fn engine_names() -> Vec<&'static str> {
+        let slot = std::sync::Arc::new(std::sync::OnceLock::new());
+        let mineru = Some(MineruConfig::default());
+        let html_deep = Some(crate::application::builder::HtmlDeepEngineConfig::default());
+        default_converters(
+            &mineru,
+            None,
+            None,
+            VideoProcessingMode::default(),
+            &html_deep,
+            &slot,
+        )
+        .iter()
+        .map(|c| c.name())
+        .collect()
+    }
+
+    /// 每个能力 feature 的注册在场性：feature 开 → 引擎必须在场；feature 关 →
+    /// 引擎必须缺席。把「cfg 漏改导致的静默丢失/越界注册」变成测试失败。
+    #[test]
+    fn feature_gates_register_exactly_the_enabled_engines() {
+        let names = engine_names();
+
+        macro_rules! assert_gated {
+            ($feature:literal, $engine:literal) => {
+                #[cfg(feature = $feature)]
+                assert!(
+                    names.contains(&$engine),
+                    "feature '{}' is on but engine '{}' is not registered",
+                    $feature,
+                    $engine
+                );
+                #[cfg(not(feature = $feature))]
+                assert!(
+                    !names.contains(&$engine),
+                    "feature '{}' is off but engine '{}' is registered",
+                    $feature,
+                    $engine
+                );
+            };
+        }
+
+        assert_gated!("html", "html-deep");
+        assert_gated!("pdf-local", "pdfium");
+        assert_gated!("legacy-office", "legacy-office");
+        assert_gated!("legacy-office", "legacy-ppt");
+        assert_gated!("email", "eml");
+        assert_gated!("tar", "tar");
+        assert_gated!("gzip", "gz");
+        assert_gated!("xz", "xz");
+        assert_gated!("zstd", "zst");
+        assert_gated!("sevenz", "7z");
+        assert_gated!("parquet", "parquet");
+        assert_gated!("sqlite", "sqlite");
+        assert_gated!("bibtex", "bib");
+        assert_gated!("pdf-cloud", "mineru");
+
+        // `.tgz` is a combined capability: present only with both features.
+        #[cfg(all(feature = "tar", feature = "gzip"))]
+        assert!(names.contains(&"tar-gz"), "tar+gzip: tar-gz must register");
+        #[cfg(not(all(feature = "tar", feature = "gzip")))]
+        assert!(
+            !names.contains(&"tar-gz"),
+            "tar-gz must stay unregistered unless both tar and gzip are on"
+        );
+    }
+}

@@ -80,6 +80,16 @@ mcp = ["sdforge/mcp"]
 html = ["dep:scraper", "dep:dom_smoothie", "dep:ego_tree", "dep:regex", "dep:url", "dep:icu_properties"]
 # 全能力伞面：14 个转换能力 feature 全集合。
 full = ["pdf-cloud", "audio", "html", "tar", "gzip", "xz", "zstd", "sevenz", "parquet", "sqlite", "bibtex", "email", "legacy-office", "pdf-local"]
+# 新增一个格式 feature 的同步点（漏改任一处 = 引擎静默丢失）：
+#   1) 本文件的 feature 定义 + `full` 成员
+#   2) src/infrastructure/engines.rs 的逐条 #[cfg] 注册语句
+#   3) 容器族：engines.rs 外层 any(...) 集合与 containers/mod.rs 的 any(...)
+#      集合（tar/gzip/xz/zstd/sevenz 字面量在三处重复）
+#   4) containers/mod.rs 的 pub mod 门与 pub use 门
+#   5) 实现文件（containers/single.rs 等）的文件级 any(...) 与逐项 #[cfg]
+#   6) src/infrastructure/engines.rs tests：该 feature 的在场/缺席断言对
+# registration-existence tests 与 CI 的 feature-isolation job 会把「漏改」
+# 从静默丢失变成编译/测试失败。
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
@@ -127,23 +137,23 @@ url = { version = "2", default-features = false, features = ["std"], optional = 
 futures = { version = "0.3", default-features = false, features = ["std"], optional = true }
 # pdfium（Chrome PDF 引擎）绑定：运行时动态库加载，缺失降级
 pdfium-render = { version = "0.5", default-features = false, optional = true }
-# PDF 图片提取（feature pdfium）：结构遍历复用上方无条件 lopdf（crates.io
+# PDF 图片提取（feature pdf-local）：结构遍历复用上方无条件 lopdf（crates.io
 # 直连 0.47）；样本→PNG 重编码用 image（pdfium-render 已传递引用，
 # 仅补显式声明）
 image = { version = "0.23", default-features = false, features = ["png", "jpeg"], optional = true }
-# Unicode 属性数据库（feature html-deep）：行内样式"词后标点"决策需精确
+# Unicode 属性数据库（feature html）：行内样式"词后标点"决策需精确
 # P/S 分类（CommonMark 口径）；已在依赖树内，仅补显式声明
 icu_properties = { version = "2.3", default-features = false, features = ["compiled_data"], optional = true }
 # 轮询退避原语：MinerU 三客户端共享 poll_delay 走 limiteron delay_for_attempt
 limiteron = { version = "0.3.0-rc.10", default-features = false, features = ["retry"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
 # 自研转录引擎门面：Qwen3-ASR ONNX 三图 + silero VAD（load-dynamic ort）。
-# path 依赖是刻意的 monorepo 布局：编译 asr feature 要求同级存在 ../vecboost。
+# path 依赖是刻意的 monorepo 布局：编译 audio feature 要求同级存在 ../vecboost。
 # 代价：cargo publish 会因 path 依赖被拒——发布前须切换为 registry 依赖
 # 或把 vecboost 并入本工作区。
 vecboost = { path = "../vecboost", version = "0.3.0-rc.3", default-features = false, features = ["transcribe"], optional = true }
 
-# 归档容器族（feature containers）
+# 归档容器族（feature tar/gzip/xz/zstd/sevenz — 按格式拆分）
 tar = { version = "0.4", default-features = false, optional = true }
 flate2 = { version = "1", default-features = false, optional = true }
 xz2 = { version = "0.1", default-features = false, optional = true }
@@ -153,12 +163,12 @@ sevenz-rust2 = { version = "0.25", default-features = false, features = [
     "compress",
 ], optional = true }
 
-# 结构化数据（feature data）
+# 结构化数据（feature parquet/sqlite/bibtex — 按格式拆分）
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "lz4", "zstd", "flate2-rust_backend", "brotli"], optional = true }
 rusqlite = { version = "0.39", default-features = false, features = ["bundled"], optional = true }
 biblatex = { version = "0.12", default-features = false, optional = true }
 
-# 邮件（feature eml）：mail-parser 是活跃维护的 MIME 解析器（mail crate 的
+# 邮件（feature email）：mail-parser 是活跃维护的 MIME 解析器（mail crate 的
 # mail-internals 带 RUSTSEC-2023-0054 UAF 且无修复版本）
 mail-parser = { version = "1.0", default-features = false, optional = true }
 

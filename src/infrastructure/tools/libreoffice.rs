@@ -3,7 +3,7 @@
 
 //! LibreOffice headless external tool — runtime probe + document conversion.
 //!
-//! Only used when the `libreoffice` feature is compiled in and `soffice`
+//! Only used when the `legacy-office` feature is compiled in and `soffice`
 //! resolves on PATH. Probe is a 5-second `--version` call; conversions run in
 //! an isolated profile directory (`-env:UserInstallation`) so a running
 //! desktop LibreOffice never conflicts, with a 300-second timeout and

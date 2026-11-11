@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! Legacy Office engine (feature `libreoffice`): `.doc`/`.ppt`/`.rtf` through
+//! Legacy Office engine (feature `legacy-office`): `.doc`/`.ppt`/`.rtf` through
 //! a headless LibreOffice round-trip.
 //!
 //! Strategy: convert the legacy format to its OOXML equivalent (`.docx` /

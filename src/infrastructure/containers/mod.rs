@@ -27,6 +27,10 @@ pub mod tar;
 
 mod base;
 
+// The shared skeleton is used by different converters depending on which
+// per-format features are enabled; a single-format build legitimately leaves
+// part of this re-export list unused.
+#[allow(unused_imports)]
 pub(crate) use base::{
     acquire_depth, charge_chain_bytes, check_entry_size, check_total_bytes, fallback_entry,
     is_metadata_entry, read_limited, with_depth_scope,

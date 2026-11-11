@@ -37,7 +37,7 @@ mod logging;
 /// - `--no-remote` → `--no_remote true`（裸旗标语义归一；sdforge long 名
 ///   取参数标识符的下划线形式且 bool 恒为取值式）
 /// - `--base-url` → `--base_url`、`--extract-main` → `--extract_main true`
-///   （同下划线归一；仅 convert 语境，html-deep feature 未编译时端点侧诚实告警）
+///   （同下划线归一；仅 convert 语境，html feature 未编译时端点侧诚实告警）
 /// - `--` 之后原样透传（位置参数字面量，不重写）
 fn normalize_argv(raw: Vec<String>) -> Vec<String> {
     use std::collections::VecDeque;
