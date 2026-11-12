@@ -8,6 +8,8 @@ pub mod domain;
 mod feature_assertions;
 pub mod i18n;
 pub mod infrastructure;
+#[cfg(feature = "kit")]
+pub mod integrations;
 
 pub use application::builder::{Alchemize, AlchemizeBuilder, HtmlDeepEngineConfig, MineruConfig};
 pub use application::registry::ConverterRegistry;

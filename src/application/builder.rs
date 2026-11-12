@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::application::ports::{TranscribeProvider, VisionProvider};
+use crate::application::ports::{Converter, TranscribeProvider, VisionProvider};
 use crate::application::registry::ConverterRegistry;
 use crate::domain::asset::{AssetSink, DirSink, InlineSink};
 use crate::domain::error::AlchemizeError;
@@ -252,6 +252,10 @@ pub struct AlchemizeBuilder {
     asset_mode: AssetMode,
     no_remote: bool,
     html_deep: Option<HtmlDeepEngineConfig>,
+    /// Host-supplied engines registered before the registry is wrapped in
+    /// its Arc (kit integration path; participates in normal priority
+    /// routing and `no_remote` exclusion via `Converter::is_remote`).
+    host_converters: Vec<Box<dyn Converter>>,
 }
 
 /// Maximum file size default: 100 MB.
@@ -275,7 +279,19 @@ impl AlchemizeBuilder {
             asset_mode: AssetMode::default(),
             no_remote: false,
             html_deep: None,
+            host_converters: Vec::new(),
         }
+    }
+
+    /// Register a host-supplied [`Converter`] into the assembled registry.
+    ///
+    /// Participates in normal priority routing (highest `Converter::priority`
+    /// tried first) and the `no_remote` exclusion (`Converter::is_remote`).
+    /// Registered before the registry is wrapped in its `Arc`, so the engine
+    /// is visible to every dispatch path (facade, containers, zip nesting).
+    pub fn with_host_converter(mut self, converter: Box<dyn Converter>) -> Self {
+        self.host_converters.push(converter);
+        self
     }
 
     /// Set the html-deep engine configuration (engine registered when the
@@ -366,6 +382,12 @@ impl AlchemizeBuilder {
             &html_deep,
             &container_registry_slot,
         ) {
+            registry.register(converter);
+        }
+        // Host-supplied engines (kit integration path) registered last;
+        // `ConverterRegistry::register` re-sorts by priority, so ordering
+        // here does not affect routing.
+        for converter in self.host_converters {
             registry.register(converter);
         }
 

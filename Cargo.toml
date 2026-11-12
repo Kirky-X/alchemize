@@ -118,6 +118,9 @@ sevenz = ["dep:sevenz-rust2"]
 # MCP 工具面：`alch mcp` 子命令（sdforge rmcp stdio 服务；原独立二进制
 # alch-mcp 已折叠，单二进制形态）。隐含 cli——子命令寄居 alch 命令树。
 mcp = ["cli", "sdforge/mcp"]
+# kit: trait-kit AsyncKit 依赖注入集成模块（src/integrations/kit；核心
+# trait 不重写，只加适配层）。
+kit = ["dep:trait-kit"]
 # 全能力伞面：全部转换类 feature（不含 cli/mcp）。
 full = [
     "text",
@@ -261,6 +264,12 @@ sevenz-rust2 = { version = "0.25", default-features = false, features = [
 # ── CLI / MCP
 # sdforge：#[forge] 端点 → CliBuilder + rmcp stdio（MSRV 1.97.1 的来源）
 sdforge = { version = "0.5.0-rc.10", features = ["cli"], optional = true }
+# trait-kit：AsyncKit 依赖注入（仅 kit feature；async 为 AsyncAutoBuilder
+# 必需，i18n 供后续格式化面统一接入）。
+trait-kit = { version = "0.5.0-rc.13", default-features = false, features = [
+    "async",
+    "i18n",
+], optional = true }
 # CLI 日志前端：全仓 tracing 埋点的消费者。默认不装配（ALCHEMIZE_LOG
 # 未设/off 时零开销）；default-features = false 裁掉 i18n/cache 依赖树。
 inklog = { version = "0.3.0-rc.12", default-features = false, optional = true }
@@ -277,6 +286,8 @@ sys-locale = { version = "0.3", default-features = false }
 http = { version = "1.5", default-features = false, features = ["std"] }
 proptest = { version = "1.0", default-features = false, features = ["std"] }
 tempfile = { version = "3", default-features = false, features = ["getrandom"] }
+# kit 模块测试的 async runtime（tokio 为无条件核心依赖，dev 下沿用）
+tokio = { version = "1.0", default-features = false, features = ["rt", "rt-multi-thread", "macros"] }
 tokio-test = { version = "0.4", default-features = false }
 # 炸弹 PDF 测试构造（FlateDecode 压缩炸弹样本，零新增供应链）
 flate2 = "1"
