@@ -1,25 +1,28 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! Fluent message catalog — `locales/{en,zh}/messages.ftl` embedded at
-//! compile time via [`include_str!`]; the disk/embedded pair is the same
-//! file, so it is in sync by construction (limiteron 房规，守卫测试
+//! Message catalog — `locales/{en,zh}/messages.ftl` embedded at compile
+//! time via [`include_str!`] and registered into the sdforge i18n host
+//! registry (the library-layer i18n base). The disk/embedded pair is the
+//! same file, so it is in sync by construction (守卫测试
 //! `test_locales_dir_matches_embedded` 兜底）。
 //!
-//! Bundles are `fluent_bundle::concurrent::FluentBundle` (Send + Sync),
-//! cached in [`OnceLock`] statics. Lookup chain: current language →
-//! `"en"` → the key itself (never panics, never empty).
+//! Lookup chain (sdforge `translate_for`): host registration for the
+//! requested locale → host registration for `"en"` → the key itself (never
+//! panics, never empty). This crate registers both locales verbatim, so the
+//! chain behaves exactly like the previous dual-bundle implementation:
+//! requested language (zh-* → zh bucket) → English → the key.
 
 use std::sync::OnceLock;
-
-use fluent_bundle::concurrent::FluentBundle;
-use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
-use unic_langid::LanguageIdentifier;
 
 /// Embedded English FTL resource.
 pub(crate) const EN_FTL: &str = include_str!("../../locales/en/messages.ftl");
 /// Embedded Chinese FTL resource.
 pub(crate) const ZH_FTL: &str = include_str!("../../locales/zh/messages.ftl");
+
+/// Registration runs once (idempotent re-registration; the guard only
+/// skips the repeated parse).
+static REGISTERED: OnceLock<()> = OnceLock::new();
 
 /// Translate `key` under the current locale, falling back to English, then
 /// to the key itself.
@@ -28,70 +31,108 @@ pub fn translate(key: &str, args: &[(&str, String)]) -> String {
     translate_for(&lang, key, args)
 }
 
-/// Translate `key` for an explicit language tag. Unsupported/unknown
-/// languages fall back to English, then to the key.
+/// Translate `key` for an explicit language tag. Any language whose primary
+/// subtag is `zh` resolves to the Chinese catalog (`zh-CN`/`zh-TW`/`zh-HK`
+/// → `zh`); everything else resolves to English. Unsupported/unknown
+/// languages therefore fall back to English, then to the key.
 pub fn translate_for(lang: &str, key: &str, args: &[(&str, String)]) -> String {
-    format_from_bundle(lang, key, args)
-        .or_else(|| format_from_bundle("en", key, args))
-        .unwrap_or_else(|| key.to_string())
-}
-
-/// Cached concurrent Fluent bundles (thread-safe, built once).
-static EN_BUNDLE: OnceLock<FluentBundle<FluentResource>> = OnceLock::new();
-static ZH_BUNDLE: OnceLock<FluentBundle<FluentResource>> = OnceLock::new();
-
-/// Format a message from the Fluent catalog for the given language.
-///
-/// Any language whose primary subtag is `zh` resolves to the Chinese
-/// bundle (`zh-CN`/`zh-TW`/`zh-HK` → `zh`); everything else resolves to
-/// the English bundle. Missing keys return `None` so callers can apply
-/// their own fallback.
-fn format_from_bundle(lang: &str, key: &str, args: &[(&str, String)]) -> Option<String> {
-    let bundle = match lang.split('-').next() {
-        Some("zh") => ZH_BUNDLE.get_or_init(build_zh_bundle),
-        _ => EN_BUNDLE.get_or_init(build_en_bundle),
+    ensure_registered();
+    let locale = match lang.split('-').next() {
+        Some("zh") => "zh",
+        _ => "en",
     };
-
-    let msg = bundle.get_message(key)?;
-    let pattern = msg.value()?;
-
-    let mut fluent_args = FluentArgs::new();
-    for (name, value) in args {
-        fluent_args.set(*name, FluentValue::from(value.clone()));
-    }
-    let mut errors = Vec::new();
-    let formatted = bundle.format_pattern(pattern, Some(&fluent_args), &mut errors);
-    Some(formatted.to_string())
+    let owned: Vec<(String, String)> = args
+        .iter()
+        .map(|(n, v)| ((*n).to_string(), v.clone()))
+        .collect();
+    let refs: Vec<(&str, String)> = owned.iter().map(|(n, v)| (n.as_str(), v.clone())).collect();
+    sdforge::i18n::translate_for(locale, key, &refs)
 }
 
-/// Build the English bundle (locale `en-US`).
-fn build_en_bundle() -> FluentBundle<FluentResource> {
-    build_bundle(EN_FTL, "en-US")
-}
-
-/// Build the Chinese bundle (locale `zh-CN`).
-fn build_zh_bundle() -> FluentBundle<FluentResource> {
-    build_bundle(ZH_FTL, "zh-CN")
-}
-
-/// Shared bundle construction: one resource, no overload functions, no
-/// custom formatter. Placeable expressions and selectors are supported by
-/// fluent-bundle itself.
+/// Register both locale catalogs into the sdforge host registry (once,
+/// idempotent).
 ///
-/// Isolating is disabled: Unicode bidi isolates (FSI/PDI) around every
-/// placeable would change even the English output byte-for-byte, breaking
-/// the spec-pinned CLI contract. Hostile-content defense stays at the
-/// diagnostic layer (`sanitize_ext` strips bidi controls from user-supplied
-/// extensions before they reach a message).
-fn build_bundle(ftl: &str, lang: &str) -> FluentBundle<FluentResource> {
-    let res = FluentResource::try_new(ftl.to_string()).expect("embedded FTL must parse");
-    let langid: LanguageIdentifier = lang.parse().expect("hardcoded langid must parse");
-    let mut bundle = FluentBundle::new_concurrent(vec![langid]);
-    bundle.set_use_isolating(false);
-    bundle
-        .add_resource(res)
-        .expect("single resource cannot overlap");
-    bundle
+/// sdforge lookup order: host registration (highest priority) → built-in
+/// en catalog → the key itself. Registering every key under both `"en"` and
+/// `"zh"` makes the effective chain "requested locale → en → key", matching
+/// the pre-switch dual-bundle semantics byte for byte. Keys are dash ids
+/// here (no dot mapping — this catalog's FTL ids are the caller-facing keys).
+pub fn ensure_registered() {
+    REGISTERED.get_or_init(|| {
+        register_locale("en", EN_FTL);
+        register_locale("zh", ZH_FTL);
+    });
+}
+
+/// Register one locale's catalog entries.
+fn register_locale(locale: &str, ftl: &'static str) {
+    for (key, value) in parse_entries(ftl) {
+        sdforge::i18n::register_translation(locale, key, &value);
+    }
+}
+
+/// Parse single-line `key = value` entries (skip blanks and `#` comments).
+///
+/// The catalog convention is single-line patterns only (guard tests assert
+/// no continuation lines), so the value is the trimmed line remainder.
+/// `{ $name }` placeholders are canonicalized to the compact `{$name}` form:
+/// sdforge's missing-argument rendering echoes the registered template
+/// placeholder verbatim, and the compact form matches Fluent's missing-arg
+/// echo byte for byte (same normalization as sdforge's kit bridge).
+fn parse_entries(ftl: &'static str) -> impl Iterator<Item = (&'static str, String)> {
+    ftl.lines().filter_map(|line| {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            return None;
+        }
+        let (id, raw_value) = trimmed.split_once('=')?;
+        let id = id.trim();
+        if id.is_empty() {
+            return None;
+        }
+        let value = raw_value.trim();
+        let value = compact_placeholders(value);
+        Some((id, value))
+    })
+}
+
+/// Canonicalize `{ $name }` placeholders to `{$name}`; non-`$` braces pass
+/// through untouched (advance one char, keep contents — sdforge
+/// `format_template` semantics).
+fn compact_placeholders(value: &str) -> String {
+    if !value.contains('{') {
+        return value.to_string();
+    }
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(open) = rest.find('{') {
+        let Some(close_rel) = rest[open..].find('}') else {
+            // No closing brace: keep the remainder verbatim (catalog guards
+            // assert this never happens).
+            out.push_str(rest);
+            return out;
+        };
+        let inner = rest[open + 1..open + close_rel].trim();
+        let placeholder = inner
+            .strip_prefix('$')
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        match placeholder {
+            Some(name) => {
+                out.push_str(&rest[..open]);
+                out.push_str("{$");
+                out.push_str(name);
+                out.push('}');
+                rest = &rest[open + close_rel + 1..];
+            }
+            None => {
+                out.push_str(&rest[..open + 1]);
+                rest = &rest[open + 1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]
@@ -124,8 +165,7 @@ mod tests {
     fn en_and_zh_key_sets_match() {
         // Key extraction by line scan: an FTL message id is a line starting
         // with a non-space token followed by `=` (comments and multiline
-        // patterns are indented or start with `#`). Avoids fluent-bundle's
-        // AST (not exported under default-features = false).
+        // patterns are indented or start with `#`).
         fn keys(ftl: &str) -> Vec<String> {
             let mut out: Vec<String> = ftl
                 .lines()
@@ -138,6 +178,23 @@ mod tests {
             out
         }
         assert_eq!(keys(EN_FTL), keys(ZH_FTL), "en/zh key sets must match");
+    }
+
+    /// Catalog convention guard: no continuation lines (all messages are
+    /// single-line `key = value`), so the line parser equals Fluent parsing
+    /// for this catalog.
+    #[test]
+    fn catalog_is_single_line_only() {
+        for (name, ftl) in [("en", EN_FTL), ("zh", ZH_FTL)] {
+            let continuations: Vec<&str> = ftl
+                .lines()
+                .filter(|l| !l.is_empty() && l.starts_with([' ', '\t']))
+                .collect();
+            assert!(
+                continuations.is_empty(),
+                "{name} catalog must stay single-line; found: {continuations:?}"
+            );
+        }
     }
 
     #[test]
@@ -159,13 +216,55 @@ mod tests {
         );
     }
 
+    /// Missing-argument echo matches Fluent semantics: the compact
+    /// `{$name}` placeholder text is preserved.
+    #[test]
+    fn missing_args_echo_compact_placeholder() {
+        assert_eq!(
+            translate_for("en", "unsupported-format", &[]),
+            "unsupported format: {$ext}"
+        );
+        assert_eq!(
+            translate_for("zh", "unsupported-format", &[]),
+            "不支持的格式：{$ext}"
+        );
+    }
+
+    /// zh-* variants resolve to the Chinese catalog (primary-subtag rule).
+    #[test]
+    fn zh_variants_resolve_to_chinese_catalog() {
+        for tag in ["zh", "zh-CN", "zh-TW", "zh-HK", "zh-Hans"] {
+            assert_eq!(
+                translate_for(tag, "test-args", &[("n", "7".into())]),
+                "值 7",
+                "tag {tag} must use the zh catalog"
+            );
+        }
+    }
+
     #[test]
     fn isolating_is_disabled_en_matches_key_text() {
-        // With isolating off, the en bundle must render exactly the FTL
-        // pattern text (no FSI/PDI around the placeable).
+        // The en catalog must render exactly the FTL pattern text (no
+        // Unicode isolates around the placeable).
         assert_eq!(
             translate_for("en", "unsupported-format", &[("ext", "xyz".into())]),
             "unsupported format: xyz"
         );
+    }
+
+    /// Registration is verbatim: every registered (locale, key) serves its
+    /// parsed catalog value (post placeholder-canonicalization).
+    #[test]
+    fn registration_serves_catalog_verbatim() {
+        ensure_registered();
+        for (locale, ftl) in [("en", EN_FTL), ("zh", ZH_FTL)] {
+            for (key, value) in parse_entries(ftl) {
+                assert_eq!(
+                    sdforge::i18n::translate_for(locale, key, &[]),
+                    value,
+                    "sdforge registry must serve ({locale}, {key}) verbatim"
+                );
+            }
+        }
     }
 }

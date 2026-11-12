@@ -479,8 +479,9 @@ mod feature_registration_tests {
             // Every declared feature must be a conversion feature, `full`
             // itself, `default`, or a non-conversion tool face — so adding a
             // Cargo feature without wiring it into `full`/enabled_features
-            // cannot ship unguarded.
-            let tool_faces = ["default", "cli", "mcp", "full"];
+            // cannot ship unguarded. (`kit` is the trait-kit integration
+            // gate — adapter modules only, no converter surface.)
+            let tool_faces = ["default", "cli", "mcp", "full", "kit"];
             for key in parse_cargo_feature_keys(&cargo) {
                 assert!(
                     full.contains(key) || tool_faces.contains(&key),

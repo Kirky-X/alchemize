@@ -45,7 +45,7 @@ required-features = ["full"]
 # 本仓必须开启同名 feature，否则 alch 命令树为空（forms/doctor/convert 不可达）。
 # default 只含 CLI 骨架 + 文本转换：其余格式全部按需开启（--features pdf,docx...）。
 default = ["cli", "text"]
-cli = ["dep:sdforge", "dep:inklog"]
+cli = ["dep:inklog"]
 
 # ── 格式族（每个格式一个 feature；deps 全部 optional，经 dep: 引用）──────────
 # 纯文本 / 代码围栏（default 成员）
@@ -262,8 +262,6 @@ sevenz-rust2 = { version = "0.25", default-features = false, features = [
 ], optional = true }
 
 # ── CLI / MCP
-# sdforge：#[forge] 端点 → CliBuilder + rmcp stdio（MSRV 1.97.1 的来源）
-sdforge = { version = "0.5.0-rc.10", features = ["cli"], optional = true }
 # trait-kit：AsyncKit 依赖注入（仅 kit feature；async 为 AsyncAutoBuilder
 # 必需，i18n 供后续格式化面统一接入）。
 trait-kit = { version = "0.5.0-rc.13", default-features = false, features = [
@@ -275,10 +273,10 @@ trait-kit = { version = "0.5.0-rc.13", default-features = false, features = [
 inklog = { version = "0.3.0-rc.12", default-features = false, optional = true }
 
 # ── i18n（无条件：用户可见消息国际化，用户决策不做 feature 隔离）
-# Fluent 消息目录（limiteron/inklog/dbnexus 同款口径：常驻编译、并发包）
-fluent-bundle = { version = "0.16", default-features = false }
-# BCP-47 语言标签解析（bundle locale 声明）
-unic-langid = { version = "0.9", default-features = false }
+# sdforge i18n 宿主注册基座：消息目录注册 + 查询（宿主注册优先于内置
+# 目录）。非 optional——i18n 是库 API 面（tr/tr_args），不做 feature 隔离。
+# features=["cli"] 为本仓既有要求（#[forge] 端点）。
+sdforge = { version = "0.5.0-rc.10", features = ["cli"] }
 # 检测链尾段（POSIX 环境变量之后的平台 locale）
 sys-locale = { version = "0.3", default-features = false }
 
