@@ -264,7 +264,7 @@ sevenz-rust2 = { version = "0.25", default-features = false, features = [
 # ── CLI / MCP
 # trait-kit：AsyncKit 依赖注入（仅 kit feature；async 为 AsyncAutoBuilder
 # 必需，i18n 供后续格式化面统一接入）。
-trait-kit = { version = "0.5.0-rc.13", default-features = false, features = [
+trait-kit = { version = "0.5.0-rc.14", default-features = false, features = [
     "async",
     "i18n",
 ], optional = true }
@@ -276,7 +276,7 @@ inklog = { version = "0.3.0-rc.12", default-features = false, optional = true }
 # sdforge i18n 宿主注册基座：消息目录注册 + 查询（宿主注册优先于内置
 # 目录）。非 optional——i18n 是库 API 面（tr/tr_args），不做 feature 隔离。
 # features=["cli"] 为本仓既有要求（#[forge] 端点）。
-sdforge = { version = "0.5.0-rc.10", features = ["cli"] }
+sdforge = { version = "0.5.0-rc.11", features = ["cli"] }
 # 检测链尾段（POSIX 环境变量之后的平台 locale）
 sys-locale = { version = "0.3", default-features = false }
 

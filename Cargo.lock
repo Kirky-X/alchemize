@@ -5552,9 +5552,9 @@ dependencies = [
 
 [[package]]
 name = "sdforge"
-version = "0.5.0-rc.10"
+version = "0.5.0-rc.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44a5dbdd22c0682ce5e77e7a4dc5cea9b4dc0176fc13bc8f81677eba0113cb04"
+checksum = "2f432e54ec9aabe6168af38f7e3be498edfee3045217115ba16270c953b559f8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7356,13 +7356,11 @@ dependencies = [
  "character_converter",
  "chrono",
  "confers",
- "fluent-bundle",
  "futures",
  "garde",
  "hex",
  "hf-hub 1.0.0",
  "hound",
- "icu",
  "inklog",
  "limiteron",
  "log",
@@ -7385,9 +7383,7 @@ dependencies = [
  "tokenizers",
  "tokio",
  "trait-kit",
- "unic-langid",
  "whatlang",
- "writeable",
  "xxhash-rust",
  "zeroize",
 ]
