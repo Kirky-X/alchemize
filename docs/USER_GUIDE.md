@@ -137,7 +137,7 @@ ALCHEMIZE_LOG=debug alch convert paper.pdf > paper.md   # 日志全在 stderr，
 - 默认（未设或 `off`）：不装配任何 subscriber，输出形态与无日志版本逐字节一致。
 - 设级后：`error` 到 `trace` 全部级别（含 `info`/`debug`）只写 stderr，stdout 只承载转换产物。
 - 非法值：stderr 打一行提示后按 `off` 继续，不静默吞错。
-- 同一开关对 `alch-mcp` 生效；MCP 的 stdout 承载 JSON-RPC，日志同样只走 stderr。
+- 同一开关对 `alch mcp` 子命令生效；MCP 的 stdout 承载 JSON-RPC，日志同样只走 stderr。
 
 ### 📥 MinerU 端点
 
@@ -219,12 +219,12 @@ alch convert saved-page.html --base-url "https://origin.example/path/"
 ### 🤖 MCP 服务（feature `mcp`）
 
 ```bash
-cargo build --release --features mcp   # 产出 alch-mcp
+cargo build --release --features mcp   # 产出 alch（mcp 子命令随 feature 编入）
 # 在 MCP 客户端配置中以 stdio 方式接入：
-# { "command": "/path/to/alch-mcp" }
+# { "command": "/path/to/alch", "args": ["mcp"] }
 ```
 
-`alch-mcp` 经 sdforge（rmcp，stdio 传输——传输面无网络出口，convert 工具本身的网络能力随 `pdf-cloud` 特性）把 convert / doctor / formats 暴露为 MCP 工具，参数 schema 由端点签名生成；与 CLI 共享同一份端点定义。
+`alch mcp` 子命令经 sdforge（rmcp，stdio 传输——传输面无网络出口，convert 工具本身的网络能力随 `pdf-cloud` 特性）把 convert / doctor / formats 暴露为 MCP 工具，参数 schema 由端点签名生成；与 CLI 共享同一份端点定义（原独立 `alch-mcp` 二进制已折叠为本子命令）。
 
 ### 🔭 作为库集成
 

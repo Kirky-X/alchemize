@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! sdforge `#[forge]` 端点层 —— `alch`（CLI）与 `alch-mcp`（MCP stdio）
-//! 共享的参数元数据单一来源。
+//! sdforge `#[forge]` 端点层 —— `alch` CLI 与其 `alch mcp` 子命令
+//! （MCP stdio）共享的参数元数据单一来源。
 //!
 //! 契约与错误映射：`specmark/specs/cli-output/spec.md`。领域 stderr 行
 //! （`unsupported format` / attempts 明细）由本层先行输出；`ApiError`

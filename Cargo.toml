@@ -40,11 +40,6 @@ name = "bench_real"
 harness = false
 required-features = ["full"]
 
-[[bin]]
-name = "alch-mcp"
-path = "src/bin/alch_mcp.rs"
-required-features = ["mcp"]
-
 [features]
 # sdforge 宏生成的 CLI 注册项带 #[cfg(feature = "cli")]，按调用方 crate 解析——
 # 本仓必须开启同名 feature，否则 alch 命令树为空（forms/doctor/convert 不可达）。
@@ -120,8 +115,9 @@ zstd = ["dep:zstd"]
 sevenz = ["dep:sevenz-rust2"]
 
 # ── 工具面 ───────────────────────────────────────────────────────────────────
-# MCP 工具面：sdforge rmcp stdio 服务（alch-mcp）
-mcp = ["dep:sdforge", "dep:inklog", "sdforge/mcp"]
+# MCP 工具面：`alch mcp` 子命令（sdforge rmcp stdio 服务；原独立二进制
+# alch-mcp 已折叠，单二进制形态）。隐含 cli——子命令寄居 alch 命令树。
+mcp = ["cli", "sdforge/mcp"]
 # 全能力伞面：全部转换类 feature（不含 cli/mcp）。
 full = [
     "text",

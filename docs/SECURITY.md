@@ -99,7 +99,7 @@ cargo update -d          # 更新漏洞通告数据库
 
 ### SSRF 防护
 
-全部网络出口集中在 MinerU 后端（feature `pdf-cloud`），下载 URL 必须通过 `ValidatedFileUrl` 校验（`validated_url.rs`）。MCP 面（`alch-mcp`）走 stdio 传输——**传输面无网络出口**（convert 工具在 `pdf-cloud` 特性与端点环境变量齐备时可出网，属业务能力而非传输）；HTTP/gRPC/WS 协议未启用：
+全部网络出口集中在 MinerU 后端（feature `pdf-cloud`），下载 URL 必须通过 `ValidatedFileUrl` 校验（`validated_url.rs`）。MCP 面（`alch mcp` 子命令）走 stdio 传输——**传输面无网络出口**（convert 工具在 `pdf-cloud` 特性与端点环境变量齐备时可出网，属业务能力而非传输）；HTTP/gRPC/WS 协议未启用：
 
 - 仅允许 HTTPS scheme；
 - 拒绝环回（`127.0.0.0/8`、`::1`、`localhost`）、`0.0.0.0/8`、广播地址；

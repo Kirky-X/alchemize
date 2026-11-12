@@ -43,11 +43,10 @@ write-failed = write failed: { $source }
 asset-write-failed = asset write failed: { $source }
 converted-to = converted { $input } -> { $output } [{ $quality }] (engine: { $engine })
 
-# ── main.rs / alch_mcp.rs — runner messages ─────────────────────────────
+# ── main.rs / mcp_cmd.rs — runner messages ──────────────────────────────
 alch-logging-init-failed = alch: logging init failed: { $source }
 alch-log-shutdown-failed = alch: log shutdown failed: { $source }
-alch-mcp-logging-init-failed = alch-mcp: logging init failed: { $source }
-alch-mcp-log-shutdown-failed = alch-mcp: log shutdown failed: { $source }
+mcp-stdio-server-failed = alch mcp: stdio server failed: { $source }
 
 # ── application/registry.rs — fallback-chain logging ────────────────────
 converter-failed-trying-next = converter failed, trying next

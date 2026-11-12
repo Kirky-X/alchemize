@@ -7,9 +7,17 @@
 
 use std::process::{Command, Stdio};
 
+/// Spawn helper for the `alch` binary with the locale pinned to English.
+///
+/// The assertions in this file pin English catalog text; without the pin
+/// they break on any machine whose detected locale is `zh*` (the catalog
+/// answers in Chinese). `ALCHEMIZE_LANG` is the highest-precedence probe
+/// in the detection chain, so it wins over the host locale.
 fn alch() -> Command {
     let bin = env!("CARGO_BIN_EXE_alch");
-    Command::new(bin)
+    let mut cmd = Command::new(bin);
+    cmd.env("ALCHEMIZE_LANG", "en");
+    cmd
 }
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {

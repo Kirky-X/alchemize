@@ -210,7 +210,7 @@ alch formats
 | `parquet`/`sqlite`/`bibtex` | 结构化数据引擎，按格式拆分的三个 feature | parquet 流式 10 万行截断、sqlite 只读、biblatex 条目 |
 | `tar`/`gzip`/`xz`/`zstd`/`sevenz` | 归档容器族，按格式拆分的五个 feature | 递归转换，魔数检测内层格式；`.tgz` 需 `tar`+`gzip` 同时开启 |
 | `cli` | CLI 骨架（sdforge + inklog） | **default 成员**；`[[bin]] alch` 的 required-features 为 `cli` |
-| `mcp` | MCP 工具面（`alch-mcp` stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；不随 default |
+| `mcp` | MCP 工具面（`alch mcp` 子命令，stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；隐含 `cli`，不随 default |
 | `full` | 全部 28 个转换类 feature（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | |
 
 **default 行为（破坏性变更）**：`default = ["cli", "text"]` —— 默认构建只编译 CLI 骨架与纯文本转换。`alch convert x.pdf` / `x.docx` 在默认构建下没有候选引擎，返回 `unsupported format`（退出码 2）。需要哪些格式就显式开启对应 feature（如 `--features pdf,docx`）；`--features full` 恢复全部能力。

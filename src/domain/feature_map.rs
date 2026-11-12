@@ -188,6 +188,10 @@ pub fn features_for_extension(ext: &str) -> Option<&'static [&'static str]> {
 /// Compile-time truth (each entry is behind its own `cfg`), so a build that
 /// lacks a feature reports it honestly instead of probing the environment.
 pub fn enabled_features() -> Vec<&'static str> {
+    // `mut` is consumed only by the cfg-gated pushes below; a build with all
+    // format features off (e.g. a downstream `default-features = false`) makes
+    // it unused, so silence that state instead of breaking the gated builds.
+    #[allow(unused_mut)]
     let mut features = Vec::new();
     macro_rules! collect {
         ($($feature:literal),+ $(,)?) => {

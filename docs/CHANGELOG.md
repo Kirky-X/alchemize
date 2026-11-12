@@ -9,6 +9,8 @@ alchemize 所有显著变更记录于此文件。
 
 ### 破坏性变更
 
+- **`alch-mcp` 二进制折叠为 `alch mcp` 子命令**：删除 `[[bin]] alch-mcp` 与 `src/bin/alch_mcp.rs`；`sdforge::mcp::serve_stdio` 逻辑迁入 `alch mcp`（feature `mcp`，现隐含 `cli`）。工具面（convert/doctor/formats）、stdio 传输与日志契约（stdout 承载 JSON-RPC、全部日志走 stderr）不变；MCP 客户端配置由 `"command": "alch-mcp"` 改为 `"command": "alch", "args": ["mcp"]`。
+
 - **default 收窄为 `["cli", "text"]`**：默认构建只编译 CLI 骨架与纯文本/代码围栏转换；PDF/docx/html 等格式的转换器与依赖全部按 feature 门控。未启用对应 feature 时 `alch convert x.pdf` 没有候选引擎，返回 `unsupported format`（退出码 2）。需要显式 `--features pdf,docx,...`，或 `--features full` 恢复全量能力。`[[bin]] alch` 同步新增 `required-features = ["cli"]`。
 - **新增 15 个格式 feature**（此前这些转换器无条件编译，或 `html` 只含深链）：`text`/`csv`/`html`/`pdf`/`docx`/`pptx`/`odt`/`odp`/`epub`/`ipynb`/`zip`/`latex`/`pandoc`/`media`/`heic`。`html` 现在同时含 htmd 基础链与自研深链，无 `html` feature 时 html 转换完全不可用。既有 feature 调整：`pdf-local = ["pdf", ...]`、`audio = ["media", ...]`、`legacy-office` 增加 quick-xml/zip/tempfile、媒体族统一为 `media`、`heic` 独立。
 - **依赖全部 optional 化**：除核心 9 个（`serde`/`serde_json`/`thiserror`/`tracing`/`tokio`/`async-trait`/`anyhow`/`base64`/`sha2`）外，全部依赖 `optional = true` 且只经 feature 的 `dep:` 引用激活；声明统一为 `default-features = false` + 显式 features。

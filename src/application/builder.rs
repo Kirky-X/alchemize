@@ -353,7 +353,7 @@ impl AlchemizeBuilder {
         // after the registry is wrapped in its Arc — before any conversion
         // can run. The slot is weak: the registry holds the converters that
         // hold the slot, so a strong reference would form an Arc cycle and
-        // leak the whole registry per build (alch-mcp builds per request).
+        // leak the whole registry per build (`alch mcp` tool calls build per request).
         let container_registry_slot: std::sync::Arc<
             std::sync::OnceLock<std::sync::Weak<ConverterRegistry>>,
         > = std::sync::Arc::new(std::sync::OnceLock::new());

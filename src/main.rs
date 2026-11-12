@@ -24,6 +24,11 @@ mod forge_app;
 #[path = "logging.rs"]
 mod logging;
 
+// `alch mcp` 子命令：inventory 注册项在模块链接期收集（feature `mcp`）。
+#[cfg(feature = "mcp")]
+#[path = "mcp_cmd.rs"]
+mod mcp_cmd;
+
 /// 契约恢复层：sdforge 生成的参数面与本仓 CLI 契约之间的差异在此归一。
 ///
 /// 规则（按 token 序处理）：
@@ -101,8 +106,8 @@ fn main() {
     // init_all_plugins 触碰 inventory 注册，防止链接器优化掉端点注册项。
     sdforge::init_all_plugins();
 
-    // multi_thread 运行时：与 alch-mcp 的 #[tokio::main] 默认一致（MCP
-    // 工具包装器内部使用 tokio::task::block_in_place，要求 multi-thread）。
+    // multi_thread 运行时：MCP 工具包装器内部使用 tokio::task::block_in_place，
+    // 要求 multi-thread（`alch mcp` 子命令与 convert 端点共享本运行时）。
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

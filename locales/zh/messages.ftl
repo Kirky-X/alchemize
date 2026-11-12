@@ -43,11 +43,10 @@ write-failed = 写入失败：{ $source }
 asset-write-failed = 资产写入失败：{ $source }
 converted-to = 已转换 { $input } -> { $output } [{ $quality }]（引擎：{ $engine }）
 
-# ── main.rs / alch_mcp.rs — runner messages ─────────────────────────────
+# ── main.rs / mcp_cmd.rs — runner messages ──────────────────────────────
 alch-logging-init-failed = alch：日志初始化失败：{ $source }
 alch-log-shutdown-failed = alch：日志关闭失败：{ $source }
-alch-mcp-logging-init-failed = alch-mcp：日志初始化失败：{ $source }
-alch-mcp-log-shutdown-failed = alch-mcp：日志关闭失败：{ $source }
+mcp-stdio-server-failed = alch mcp：stdio 服务失败：{ $source }
 
 # ── application/registry.rs — fallback-chain logging ────────────────────
 converter-failed-trying-next = 转换器失败，尝试下一个

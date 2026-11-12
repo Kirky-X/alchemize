@@ -3,7 +3,7 @@
 
 //! CLI 日志前端 — inklog subscriber 的唯一装配点。
 //!
-//! 由 `alch`（main.rs）与 `alch-mcp`（bin/alch_mcp.rs）经 `#[path]` 共享
+//! 由 `alch` CLI（main.rs，含 `alch mcp` 子命令路径）经 `#[path]` 装配
 //! 同一份实现；lib 不装配 subscriber（库惯例：前端归宿主装配，alchemize
 //! 作为库被集成时由下游决定日志去向）。
 //!

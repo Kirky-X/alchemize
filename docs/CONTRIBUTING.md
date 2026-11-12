@@ -61,7 +61,7 @@ cargo build --features full
 | `audio` | vecboost 转录门面（自动带入 `media`） | 需模型 bundle + `ORT_DYLIB_PATH` |
 | `legacy-office` / `email` / `parquet` / `sqlite` / `bibtex` | 旧版 Office / 邮件 / 结构化数据 | 各自独立 |
 | `tar`/`gzip`/`xz`/`zstd`/`sevenz` | 归档容器族 | `.tgz` 需 `tar`+`gzip` |
-| `mcp` | MCP 工具面（alch-mcp，rmcp stdio） | 不随 default |
+| `mcp` | MCP 工具面（`alch mcp` 子命令，rmcp stdio；隐含 `cli`） | 不随 default |
 | `cli`（default） | CLI 骨架（sdforge + inklog） | `[[bin]] alch` 的 required-features |
 | `full` | 全部 28 个转换类 feature（不含 `cli`/`mcp`） | |
 

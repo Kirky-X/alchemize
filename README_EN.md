@@ -210,7 +210,7 @@ Exit codes: `0` success (including degraded output); `1` other errors; `2` unsup
 | `parquet`/`sqlite`/`bibtex` | structured data engines, split into three per-format features | streaming parquet with a 100k-row cap, read-only sqlite, biblatex entries |
 | `tar`/`gzip`/`xz`/`zstd`/`sevenz` | archive family, split into five per-format features | recursive conversion, magic-byte detection of the inner format; `.tgz` needs both `tar` and `gzip` |
 | `cli` | CLI skeleton (sdforge + inklog) | **default member**; `[[bin]] alch` has `required-features = ["cli"]` |
-| `mcp` | MCP tool surface (`alch-mcp` stdio server) | convert/doctor/formats exposed as MCP tools; not part of default |
+| `mcp` | MCP tool surface (`alch mcp` subcommand, stdio server) | convert/doctor/formats exposed as MCP tools; implies `cli`, not part of default |
 | `full` | All 28 conversion features (format family + backends/data/containers; excludes `cli`/`mcp`) | |
 
 **Default behavior (breaking change)**: `default = ["cli", "text"]` — the default build compiles only the CLI skeleton and plain-text conversion. `alch convert x.pdf` / `x.docx` has no candidate engine in a default build and returns `unsupported format` (exit code 2). Enable the features you need explicitly (e.g. `--features pdf,docx`); `--features full` restores all capabilities.

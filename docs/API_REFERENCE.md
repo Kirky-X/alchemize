@@ -55,7 +55,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 | `email` / `parquet` / `sqlite` / `bibtex` | 对应格式引擎 | 关 |
 | `tar` / `gzip` / `xz` / `zstd` / `sevenz` | 归档容器族 | 关 |
 | `cli` | CLI 骨架（`[[bin]] alch` 的 required-features） | **开** |
-| `mcp` | `alch-mcp` 工具面 | 关 |
+| `mcp` | `alch mcp` 子命令工具面（隐含 `cli`） | 关 |
 | `full` | 全部 28 个转换类 feature 集合（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | 关 |
 
 附加（非 feature）导出：`domain::feature_map` 提供 `EXTENSION_FEATURES` 映射表与 `features_for_extension` / `missing_features` / `enabled_features` 数据面，用于判断「某扩展名需要哪些能力 feature」「本构建开启了哪些」；CLI 的 `unsupported format: … requires the 'pdf' feature` 提示即由此拼装。
@@ -285,7 +285,7 @@ URL 校验拒绝的六类原因：`InvalidScheme`（非 HTTPS）、`LoopbackAddr
 
 ### MCP（`mcp` 特性）
 
-- 装配产物：`alch-mcp` 二进制——`sdforge::mcp::serve_stdio(build())` 承载 convert / doctor / formats 三个 MCP 工具（`#[forge(tool_name)]` 注册，参数 schema 由端点签名生成），stdio 传输——传输面无网络出口（convert 工具本身的网络能力随 `pdf-cloud` 特性）。
+- 装配形态：`alch mcp` 子命令（原独立 `alch-mcp` 二进制已折叠，feature `mcp` 隐含 `cli`）——`sdforge::mcp::serve_stdio(build())` 承载 convert / doctor / formats 三个 MCP 工具（`#[forge(tool_name)]` 注册，参数 schema 由端点签名生成），stdio 传输——传输面无网络出口（convert 工具本身的网络能力随 `pdf-cloud` 特性）。
 - CLI 同源：三个端点同时以 `cli = true` 注册进 `alch`（CliBuilder + 自定义 runner，退出码 0/1/2/3 契约见主 spec cli-output）。
 - 注意：根级内置全局 `--format text|json`（sdforge 输出格式）；convert 的扩展名覆盖参数名为 `input_format`，CLI 侧由 runner 在 convert 语境把 `--format` 归一为 `--input_format`。
 
