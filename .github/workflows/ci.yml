@@ -33,6 +33,11 @@ jobs:
   test:
     name: test + coverage (global ≥ + diff ≥)
     runs-on: ubuntu-latest
+    # secrets 只能在 env/with 里取值（step 级 if 引用 secrets 上下文会令
+    # workflow 校验失败：run 以 0 job/0s 失败，"workflow file issue"）。
+    # 因此 token 先落到 job env，step 用 env.CODECOV_TOKEN 门控。
+    env:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     steps:
       # fetch-depth: 0 供 diff-cover 对比基线分支计算变更行覆盖率。
       # 代价：全历史 checkout，超大仓库可达分钟级；fork PR 会把全量历史拉进 runner——
@@ -50,6 +55,9 @@ jobs:
       # cli 已在 default 中（default = ["cli","text"]），--features full 即含 cli；
       # tests/cli.rs 的门 all(cli, full) 因此在此 job 全量执行。
       - run: cargo test --features full --no-fail-fast
+      # mcp 面（alch mcp 子命令，二进制折叠后唯一入口）：full 伞面不含
+      # mcp，工具注册面 + 子命令单元测试 + stdin EOF 端到端在此单独执行。
+      - run: cargo test --bin alch --test mcp_registration --features "full,mcp"
       - name: Coverage global (fail under 89% lines)
         run: cargo llvm-cov --features full --fail-under-lines 89 --lcov --output-path lcov.info
       # diff coverage：只对相对基线分支新增/修改的行设阈值——新代码 0 覆盖也能拉高全局覆盖率的盲区由这层堵住
@@ -64,11 +72,10 @@ jobs:
           uv tool run diff-cover lcov.info --fail-under 90 \
             --compare-branch "origin/${BASE_BRANCH}"
       - name: Upload to Codecov (可选)
-        # token 收紧到本 step：仅上传时可见。step 级 if 读不到自身 env 块，
-        # 用 secrets context 判断（step if 可用）。
-        if: ${{ secrets.CODECOV_TOKEN != '' }}
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        # 仅在配置了 token 时上传（fork PR 拿不到 secrets，自动跳过）。
+        # 判定用 job env 而非 secrets 上下文：step if 中的 secrets 会让
+        # workflow 文件校验直接失败（见上方 job env 注释）。
+        if: ${{ env.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v4
         with:
           files: ./lcov.info
