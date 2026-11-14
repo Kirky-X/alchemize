@@ -11,7 +11,10 @@
 
 #![cfg(feature = "msg")]
 
+use std::borrow::Cow;
 use std::io::{Cursor, Read as _};
+
+use base64::Engine as _;
 
 use async_trait::async_trait;
 
@@ -22,7 +25,8 @@ use crate::domain::result::ConvertResult;
 
 const PROPS_STREAM: &str = "__properties_version1.0";
 const ATTACH_PREFIX: &str = "__attach_version1.0_";
-const BOUNDARY: &str = "ALCHMSGBOUND";
+/// Standard base64 (headers RFC 2047 + attachment transfer encoding).
+const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
 /// Property tags used by the minimal layer: `(id, description)`.
 const SUBJECT: u32 = 0x0037;
@@ -88,104 +92,10 @@ impl Converter for MsgConverter {
             .await
             .map_err(|e| AlchemizeError::other(format!("failed to read MSG input: {e}")))?;
 
-        let mut cf = cfb::CompoundFile::open(Cursor::new(bytes))
-            .map_err(|e| AlchemizeError::other(format!("MSG compound file open failed: {e}")))?;
-
-        let props = read_prop_records(&mut cf, "/")?;
-        let codepage = inline_u32(&props, MESSAGE_CODEPAGE, PT_I4).unwrap_or(65001);
-        let mut lossy = false;
-
-        let subject = read_string(&mut cf, "/", &props, SUBJECT, codepage, &mut lossy);
-        // Modern Outlook writes SenderName/SMTP as 0x0C1A/0x0C1F; older
-        // writers (and forward originals) fall back to 0x0042/0x0044.
-        let sender_name = read_string(&mut cf, "/", &props, SENDER_NAME, codepage, &mut lossy)
-            .or_else(|| {
-                read_string(
-                    &mut cf,
-                    "/",
-                    &props,
-                    SENDER_NAME_LEGACY,
-                    codepage,
-                    &mut lossy,
-                )
-            });
-        // Prefer the address form that actually looks like an e-mail: the
-        // SMTP-specific properties first, then the generic address tags
-        // (0x0C1F may hold an X.500 DN for Exchange-internal senders).
-        let addr_candidates = [SENDER_SMTP_ADDR, SENDER_SMTP, SENDER_EMAIL];
-        let sender_addr = addr_candidates
-            .iter()
-            .filter_map(|id| read_string(&mut cf, "/", &props, *id, codepage, &mut lossy))
-            .find(|addr| addr.contains('@'))
-            .or_else(|| {
-                addr_candidates
-                    .iter()
-                    .filter_map(|id| read_string(&mut cf, "/", &props, *id, codepage, &mut lossy))
-                    .find(|addr| !addr.is_empty())
-            });
-        let from = match (sender_name, sender_addr) {
-            (Some(name), Some(addr)) => Some(format!("{name} <{addr}>")),
-            (None, Some(addr)) => Some(addr),
-            (Some(name), None) => Some(name),
-            _ => None,
-        };
-        let to = read_string(&mut cf, "/", &props, DISPLAY_TO, codepage, &mut lossy);
-        let text_body = read_string(&mut cf, "/", &props, BODY_TEXT, codepage, &mut lossy);
-        let html_body = read_bytes(&mut cf, "/", &props, BODY_HTML);
-        let date = inline_u64(&props, CREATION_TIME, PT_FILETIME).map(filetime_to_rfc2822);
-
-        // Attachment storages, in their numbered order.
-        let mut attach_paths: Vec<String> = cf
-            .walk()
-            .filter(|e| {
-                e.is_storage()
-                    && e.path()
-                        .file_name()
-                        .is_some_and(|name| name.to_string_lossy().starts_with(ATTACH_PREFIX))
-            })
-            .map(|e| e.path().to_string_lossy().into_owned())
-            .collect();
-        attach_paths.sort();
-        let mut attachments = Vec::new();
-        for path in &attach_paths {
-            let records = read_prop_records(&mut cf, path)?;
-            let name = read_string(
-                &mut cf,
-                path,
-                &records,
-                ATTACH_FILENAME,
-                codepage,
-                &mut lossy,
-            )
-            .unwrap_or_else(|| format!("attachment-{}", attachments.len()));
-            let size = inline_u32(&records, ATTACH_SIZE, PT_I4).unwrap_or(0) as usize;
-            attachments.push((name, size, read_bytes(&mut cf, path, &records, ATTACH_DATA)));
-        }
-
-        let html_body_text = html_body
-            .as_deref()
-            .map(String::from_utf8_lossy)
-            .map(|cow| cow.into_owned());
-        let attach_refs: Vec<(&str, &[u8])> = attachments
-            .iter()
-            .map(|(name, _size, data)| (name.as_str(), data.as_deref().unwrap_or(&[])))
-            .collect();
-        let mime = build_mime(MimeInput {
-            subject: subject.as_deref(),
-            from: from.as_deref(),
-            to: to.as_deref(),
-            date: date.as_deref(),
-            text_body: text_body.as_deref(),
-            html_body: html_body_text.as_deref(),
-            attachments: &attach_refs,
-        });
-
-        let mut result = crate::infrastructure::document::eml::convert_eml_bytes(&mime, "msg")?;
-        result.metadata["msg_codepage"] = serde_json::json!(codepage);
-        if lossy {
-            result.metadata["lossy_decode"] = serde_json::json!(true);
-        }
-        Ok(result)
+        // CFB 解析 + MIME 重建是 CPU 密集段，与 pdf/chm 一致包 spawn_blocking。
+        tokio::task::spawn_blocking(move || convert_sync(bytes))
+            .await
+            .map_err(|e| AlchemizeError::other(format!("MSG extraction task failed: {e}")))?
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -201,6 +111,106 @@ impl Converter for MsgConverter {
     }
 }
 
+/// The whole (synchronous) MSG conversion: MAPI read → MIME rebuild → the
+/// shared eml renderer. Runs on the blocking pool.
+fn convert_sync(bytes: Vec<u8>) -> Result<ConvertResult, AlchemizeError> {
+    let mut cf = cfb::CompoundFile::open(Cursor::new(bytes))
+        .map_err(|e| AlchemizeError::other(format!("MSG compound file open failed: {e}")))?;
+
+    let props = read_prop_records(&mut cf, "/")?;
+    let codepage = inline_u32(&props, MESSAGE_CODEPAGE, PT_I4).unwrap_or(65001);
+    let mut lossy = false;
+
+    let subject = read_string(&mut cf, "/", &props, SUBJECT, codepage, &mut lossy);
+    // Modern Outlook writes SenderName/SMTP as 0x0C1A/0x0C1F; older
+    // writers (and forward originals) fall back to 0x0042/0x0044.
+    let sender_name =
+        read_string(&mut cf, "/", &props, SENDER_NAME, codepage, &mut lossy).or_else(|| {
+            read_string(
+                &mut cf,
+                "/",
+                &props,
+                SENDER_NAME_LEGACY,
+                codepage,
+                &mut lossy,
+            )
+        });
+    // Prefer the address form that actually looks like an e-mail: the
+    // SMTP-specific properties first, then the generic address tags
+    // (0x0C1F may hold an X.500 DN for Exchange-internal senders).
+    let addr_candidates = [SENDER_SMTP_ADDR, SENDER_SMTP, SENDER_EMAIL];
+    let sender_addr = addr_candidates
+        .iter()
+        .filter_map(|id| read_string(&mut cf, "/", &props, *id, codepage, &mut lossy))
+        .find(|addr| addr.contains('@'))
+        .or_else(|| {
+            addr_candidates
+                .iter()
+                .filter_map(|id| read_string(&mut cf, "/", &props, *id, codepage, &mut lossy))
+                .find(|addr| !addr.is_empty())
+        });
+    let from = match (sender_name, sender_addr) {
+        (Some(name), Some(addr)) => Some(format!("{name} <{addr}>")),
+        (None, Some(addr)) => Some(addr),
+        (Some(name), None) => Some(name),
+        _ => None,
+    };
+    let to = read_string(&mut cf, "/", &props, DISPLAY_TO, codepage, &mut lossy);
+    let text_body = read_string(&mut cf, "/", &props, BODY_TEXT, codepage, &mut lossy);
+    let html_body = read_bytes(&mut cf, "/", &props, BODY_HTML);
+    let date = inline_u64(&props, CREATION_TIME, PT_FILETIME).map(filetime_to_rfc2822);
+
+    // Attachment storages, in their numbered order.
+    let mut attach_paths: Vec<String> = cf
+        .walk()
+        .filter(|e| {
+            e.is_storage()
+                && e.path()
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with(ATTACH_PREFIX))
+        })
+        .map(|e| e.path().to_string_lossy().into_owned())
+        .collect();
+    attach_paths.sort();
+    let mut attachments = Vec::new();
+    for path in &attach_paths {
+        let records = read_prop_records(&mut cf, path)?;
+        let name = read_string(
+            &mut cf,
+            path,
+            &records,
+            ATTACH_FILENAME,
+            codepage,
+            &mut lossy,
+        )
+        .unwrap_or_else(|| format!("attachment-{}", attachments.len()));
+        let size = inline_u32(&records, ATTACH_SIZE, PT_I4).unwrap_or(0) as usize;
+        attachments.push((name, size, read_bytes(&mut cf, path, &records, ATTACH_DATA)));
+    }
+
+    let html_body_text = html_body.as_deref().map(String::from_utf8_lossy);
+    let attach_refs: Vec<(&str, &[u8])> = attachments
+        .iter()
+        .map(|(name, _size, data)| (name.as_str(), data.as_deref().unwrap_or(&[])))
+        .collect();
+    let mime = build_mime(MimeInput {
+        subject: subject.as_deref(),
+        from: from.as_deref(),
+        to: to.as_deref(),
+        date: date.as_deref(),
+        text_body: text_body.as_deref(),
+        html_body: html_body_text.as_deref(),
+        attachments: &attach_refs,
+    });
+
+    let mut result = crate::infrastructure::document::eml::convert_eml_bytes(&mime, "msg")?;
+    result.metadata["msg_codepage"] = serde_json::json!(codepage);
+    if lossy {
+        result.metadata["lossy_decode"] = serde_json::json!(true);
+    }
+    Ok(result)
+}
+
 struct MimeInput<'a> {
     subject: Option<&'a str>,
     from: Option<&'a str>,
@@ -213,12 +223,61 @@ struct MimeInput<'a> {
 
 /// Rebuild a plain, deterministic RFC 822 message the eml renderer accepts.
 fn build_mime(input: MimeInput<'_>) -> Vec<u8> {
-    let mut out = String::new();
+    let mut parts: Vec<(String, Cow<'_, [u8]>)> = Vec::new();
+    match (input.text_body, input.html_body) {
+        (Some(text), Some(html)) => {
+            parts.push((
+                "text/plain; charset=utf-8".into(),
+                Cow::Borrowed(text.as_bytes()),
+            ));
+            parts.push((
+                "text/html; charset=utf-8".into(),
+                Cow::Borrowed(html.as_bytes()),
+            ));
+        }
+        (Some(text), None) => parts.push((
+            "text/plain; charset=utf-8".into(),
+            Cow::Borrowed(text.as_bytes()),
+        )),
+        (None, Some(html)) => parts.push((
+            "text/html; charset=utf-8".into(),
+            Cow::Borrowed(html.as_bytes()),
+        )),
+        (None, None) => {}
+    }
+    // MAPI strings may carry quotes or CR/LF; both would let a body forge
+    // parts or inject headers into the rebuilt message.
+    for (name, data) in input.attachments {
+        let safe_name: String = name
+            .chars()
+            .map(|c| match c {
+                '"' => '\'',
+                c if c.is_control() => ' ',
+                c => c,
+            })
+            .collect();
+        parts.push((
+            format!("application/octet-stream; name=\"{safe_name}\""),
+            Cow::Borrowed(data),
+        ));
+    }
+
+    let boundary = boundary_for(&parts);
+    // Sizes are known up front: reserve once instead of doubling a
+    // multi-megabyte buffer through incremental growth.
+    let estimate: usize = 4096
+        + parts
+            .iter()
+            .map(|(ct, body)| ct.len() + body.len() + body.len() / 3 + 128)
+            .sum::<usize>();
+    let mut out = String::with_capacity(estimate);
+
     let header = |out: &mut String, name: &str, value: Option<&str>| {
-        if let Some(value) = value
-            && !value.is_empty()
-        {
-            out.push_str(&format!("{name}: {}\r\n", encode_header_value(value)));
+        if let Some(value) = value.filter(|v| !v.is_empty()) {
+            out.push_str(name);
+            out.push_str(": ");
+            out.push_str(&encode_header_value(value));
+            out.push_str("\r\n");
         }
     };
     header(&mut out, "From", input.from);
@@ -226,38 +285,6 @@ fn build_mime(input: MimeInput<'_>) -> Vec<u8> {
     header(&mut out, "Subject", input.subject);
     header(&mut out, "Date", input.date);
     out.push_str("MIME-Version: 1.0\r\n");
-
-    let mut parts: Vec<(String, Vec<u8>)> = Vec::new();
-    match (input.text_body, input.html_body) {
-        (Some(text), Some(html)) => {
-            parts.push((
-                "text/plain; charset=utf-8".to_string(),
-                text.as_bytes().to_vec(),
-            ));
-            parts.push((
-                "text/html; charset=utf-8".to_string(),
-                html.as_bytes().to_vec(),
-            ));
-        }
-        (Some(text), None) => parts.push((
-            "text/plain; charset=utf-8".to_string(),
-            text.as_bytes().to_vec(),
-        )),
-        (None, Some(html)) => parts.push((
-            "text/html; charset=utf-8".to_string(),
-            html.as_bytes().to_vec(),
-        )),
-        (None, None) => {}
-    }
-    for (name, data) in input.attachments {
-        parts.push((
-            format!(
-                "application/octet-stream; name=\"{}\"",
-                name.replace('"', "'")
-            ),
-            data.to_vec(),
-        ));
-    }
 
     if parts.len() == 1 && input.attachments.is_empty() {
         // Single body part: no multipart framing needed.
@@ -268,10 +295,10 @@ fn build_mime(input: MimeInput<'_>) -> Vec<u8> {
     }
 
     out.push_str(&format!(
-        "Content-Type: multipart/mixed; boundary=\"{BOUNDARY}\"\r\n\r\n"
+        "Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n"
     ));
-    for (content_type, data) in &parts {
-        out.push_str(&format!("--{BOUNDARY}\r\nContent-Type: {content_type}\r\n"));
+    for (content_type, body) in &parts {
+        out.push_str(&format!("--{boundary}\r\nContent-Type: {content_type}\r\n"));
         let is_attachment = content_type.starts_with("application/octet-stream");
         if is_attachment {
             let name = content_type
@@ -286,17 +313,39 @@ fn build_mime(input: MimeInput<'_>) -> Vec<u8> {
         }
         out.push_str("\r\n");
         if is_attachment {
-            for chunk in base64_encode(data).as_bytes().chunks(76) {
-                out.push_str(&String::from_utf8_lossy(chunk));
+            // Stream the base64 straight into the output: the raw bytes
+            // never get copied, and the encoded form never exists as a
+            // separate allocation. 57 raw bytes = 76 encoded chars, so the
+            // padding only ever lands on the final row.
+            const ROW: usize = 57;
+            let mut row = [0u8; 76];
+            for chunk in body.chunks(ROW) {
+                let written = BASE64
+                    .encode_slice(chunk, &mut row)
+                    .expect("76 bytes always fit 57 input bytes");
+                out.push_str(std::str::from_utf8(&row[..written]).expect("base64 is ASCII"));
                 out.push_str("\r\n");
             }
         } else {
-            out.push_str(&String::from_utf8_lossy(data));
+            out.push_str(&String::from_utf8_lossy(body));
             out.push_str("\r\n");
         }
     }
-    out.push_str(&format!("--{BOUNDARY}--\r\n"));
+    out.push_str(&format!("--{boundary}--\r\n"));
     out.into_bytes()
+}
+
+/// Derive the multipart boundary from the part contents: a body that
+/// contains the fixed default boundary cannot collide with a hash of
+/// itself.
+fn boundary_for(parts: &[(String, Cow<'_, [u8]>)]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for (content_type, body) in parts {
+        content_type.hash(&mut hasher);
+        body.hash(&mut hasher);
+    }
+    format!("alch_{:016x}", hasher.finish())
 }
 
 /// Read all `__properties_version1.0` records under `storage` ("/" for the
@@ -314,7 +363,16 @@ fn read_prop_records(
         .read_to_end(&mut bytes)
         .map_err(|e| AlchemizeError::other(format!("MSG properties read failed: {e}")))?;
     let mut records = Vec::new();
-    for chunk in bytes.as_chunks::<16>().0 {
+    let (chunks, rest) = bytes.as_chunks::<16>();
+    if !rest.is_empty() {
+        // A truncated tail means the stream is not a whole number of
+        // records — say so instead of silently dropping it.
+        tracing::warn!(
+            "msg: {} trailing bytes in properties stream ignored",
+            rest.len()
+        );
+    }
+    for chunk in chunks {
         let tag = u32::from_le_bytes(chunk[0..4].try_into().unwrap());
         records.push(PropRecord {
             id: tag >> 16,
@@ -390,14 +448,15 @@ fn read_string(
         _ => return None,
     };
     Some(match record.prop_type {
-        PT_UNICODE => String::from_utf16_lossy(
-            &bytes
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|pair| u16::from_le_bytes(*pair))
-                .collect::<Vec<_>>(),
-        ),
+        // encoding_rs 一步到位（含错误信号）：坏 UTF-16 置 lossy，而不是
+        // 无声地丢 replacement char。
+        PT_UNICODE => {
+            let (text, _, had_errors) = encoding_rs::UTF_16LE.decode(&bytes);
+            if had_errors {
+                *lossy = true;
+            }
+            text.into_owned()
+        }
         PT_STRING8 => decode_codepage(&bytes, codepage, lossy),
         _ => String::from_utf8_lossy(&bytes).into_owned(),
     })
@@ -473,43 +532,23 @@ fn filetime_to_rfc2822(ticks: u64) -> String {
     )
 }
 
-/// Non-ASCII header values become RFC 2047 encoded-words (UTF-8/base64);
-/// ASCII passes through untouched.
+/// Header values go through two sanity passes: CR/LF and other controls
+/// are stripped (a MAPI string property must not inject or forge headers
+/// in the rebuilt MIME), then non-ASCII text becomes an RFC 2047
+/// encoded-word (UTF-8/base64).
 fn encode_header_value(value: &str) -> String {
-    if value.is_ascii() {
-        return value.to_string();
+    let cleaned: String = value
+        .chars()
+        .map(|c| match c {
+            '\r' | '\n' => ' ',
+            c if c.is_control() => ' ',
+            c => c,
+        })
+        .collect();
+    if cleaned.is_ascii() {
+        return cleaned;
     }
-    format!("=?utf-8?B?{}?=", base64_encode(value.as_bytes()))
-}
-
-/// Minimal standard base64 encoder (avoids a new dependency for ~30 lines).
-fn base64_encode(data: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.as_chunks::<3>().0 {
-        let n = (u32::from(chunk[0]) << 16) | (u32::from(chunk[1]) << 8) | u32::from(chunk[2]);
-        for shift in [18u32, 12, 6, 0] {
-            out.push(TABLE[(n >> shift) as usize & 0x3f] as char);
-        }
-    }
-    match data.len() % 3 {
-        1 => {
-            let n = u32::from(data[data.len() - 1]) << 16;
-            out.push(TABLE[(n >> 18) as usize & 0x3f] as char);
-            out.push(TABLE[(n >> 12) as usize & 0x3f] as char);
-            out.push_str("==");
-        }
-        2 => {
-            let n =
-                (u32::from(data[data.len() - 2]) << 16) | (u32::from(data[data.len() - 1]) << 8);
-            for shift in [18u32, 12, 6] {
-                out.push(TABLE[(n >> shift) as usize & 0x3f] as char);
-            }
-            out.push('=');
-        }
-        _ => {}
-    }
-    out
+    format!("=?utf-8?B?{}?=", BASE64.encode(cleaned.as_bytes()))
 }
 
 #[cfg(test)]
@@ -721,13 +760,6 @@ mod tests {
             filetime_to_rfc2822(ticks),
             "Mon, 09 Nov 2026 10:00:00 +0000"
         );
-    }
-
-    #[test]
-    fn base64_matches_known_vectors() {
-        assert_eq!(base64_encode(b"hello"), "aGVsbG8=");
-        assert_eq!(base64_encode(b"hell"), "aGVsbA==");
-        assert_eq!(base64_encode(b"abc"), "YWJj");
     }
 
     #[test]

@@ -27,22 +27,13 @@ const MAX_ENTRY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
 
 /// CHM converter: HTML topics in, one merged Markdown document out.
-pub struct ChmConverter {
-    html: crate::infrastructure::document::HtmlConverter,
-}
+#[derive(Default)]
+pub struct ChmConverter;
 
 impl ChmConverter {
     /// Create a new CHM converter.
     pub fn new() -> Self {
-        Self {
-            html: crate::infrastructure::document::HtmlConverter::new(),
-        }
-    }
-}
-
-impl Default for ChmConverter {
-    fn default() -> Self {
-        Self::new()
+        Self
     }
 }
 
@@ -53,119 +44,11 @@ impl Converter for ChmConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        // libchm only opens real paths: pass through `Path`, spool `Bytes`
-        // through a temp file (same approach as the pdfium/heic engines).
-        let keep_alive;
-        let path: PathBuf = match &input {
-            Input::Path(p) => p.clone(),
-            Input::Bytes { data, .. } => {
-                let mut tmp = tempfile::NamedTempFile::new().map_err(|e| {
-                    AlchemizeError::other(format!("failed to create temp file for CHM: {e}"))
-                })?;
-                std::io::Write::write_all(&mut tmp, data).map_err(|e| {
-                    AlchemizeError::other(format!("failed to spool CHM input: {e}"))
-                })?;
-                keep_alive = tmp;
-                keep_alive.path().to_path_buf()
-            }
-        };
-
-        let mut chm = libchm::ChmFile::open(&path)
-            .map_err(|e| AlchemizeError::other(format!("CHM open failed: {e}")))?;
-
-        let entries = chm
-            .entries(libchm::EntrySel::ALL)
-            .map_err(|e| AlchemizeError::other(format!("CHM enumeration failed: {e}")))?;
-        let entry_count = entries.len();
-
-        let topic_paths: Vec<String> = entries
-            .iter()
-            .filter(|e| !e.is_dir() && is_topic_path(&e.path))
-            .map(|e| e.path.clone())
-            .collect();
-        // Decompressed length is known up front: drop oversized topics here
-        // instead of reading and discarding them.
-        let len_by_lower: HashMap<String, u64> = entries
-            .iter()
-            .map(|e| {
-                (
-                    e.path.trim_start_matches('/').to_ascii_lowercase(),
-                    e.length,
-                )
-            })
-            .collect();
-        let toc = read_toc_order(&mut chm, &entries);
-        let ordered = order_topics(&topic_paths, &toc);
-
-        if ordered.is_empty() {
-            // No HTML topics: an entry inventory is the honest fallback.
-            let mut out = String::from("# CHM entry inventory\n\n");
-            for entry in &entries {
-                out.push_str(&format!(
-                    "- {}\n",
-                    crate::infrastructure::document::shared::escape_markdown_label(&entry.path)
-                ));
-            }
-            let metadata = serde_json::json!({
-                "source_format": "chm",
-                "topic_count": 0,
-                "entry_count": entry_count,
-                "truncated": false,
-            });
-            return Ok(
-                ConvertResult::with_metadata(out, ContentType::Document, metadata)
-                    .with_quality(ConversionQuality::LocalFallback),
-            );
-        }
-
-        let mut out = String::new();
-        let mut rendered = 0usize;
-        let mut truncated = false;
-        for topic in select_within_budget(
-            &ordered,
-            &len_by_lower,
-            MAX_TOPICS,
-            MAX_ENTRY_BYTES,
-            MAX_TOTAL_BYTES,
-        ) {
-            let bytes = match chm.read_path(topic) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    // A single unreadable topic must not sink the document;
-                    // skip it and say so.
-                    truncated = true;
-                    eprintln!("chm: skipping unreadable topic {topic}: {e}");
-                    continue;
-                }
-            };
-
-            let html = String::from_utf8_lossy(&bytes);
-            let converted = self
-                .html
-                .convert_str(&html)
-                .map_err(|e| AlchemizeError::other(format!("CHM topic {topic} failed: {e}")))?;
-            out.push_str(&format!(
-                "## {}\n\n",
-                crate::infrastructure::document::shared::escape_markdown_label(topic)
-            ));
-            out.push_str(converted.markdown.trim());
-            out.push_str("\n\n");
-            rendered += 1;
-        }
-        if ordered.len() > MAX_TOPICS {
-            truncated = true;
-        }
-
-        let metadata = serde_json::json!({
-            "source_format": "chm",
-            "topic_count": rendered,
-            "entry_count": entry_count,
-            "truncated": truncated,
-        });
-        Ok(
-            ConvertResult::with_metadata(out, ContentType::Document, metadata)
-                .with_quality(ConversionQuality::LocalFull),
-        )
+        // 同步枚举/LZX 解压/html 渲染是 CPU 密集段，与 pdf/pdfium 一致包
+        // spawn_blocking，避免钉死 async worker；panic 经 JoinError 显性化。
+        tokio::task::spawn_blocking(move || convert_sync(input))
+            .await
+            .map_err(|e| AlchemizeError::other(format!("CHM extraction task failed: {e}")))?
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -195,9 +78,133 @@ fn is_topic_path(path: &str) -> bool {
     lower.ends_with(".htm") || lower.ends_with(".html")
 }
 
+/// The whole (synchronous) CHM conversion: enumerate → order → budget →
+/// render. Runs on the blocking pool.
+fn convert_sync(input: Input) -> Result<ConvertResult, AlchemizeError> {
+    // libchm only opens real paths: pass through `Path`, spool `Bytes`
+    // through a temp file (heic does the same; pdfium reads in memory).
+    let keep_alive;
+    let path: PathBuf = match &input {
+        Input::Path(p) => p.clone(),
+        Input::Bytes { data, .. } => {
+            let mut tmp = tempfile::NamedTempFile::new().map_err(|e| {
+                AlchemizeError::other(format!("failed to create temp file for CHM: {e}"))
+            })?;
+            std::io::Write::write_all(&mut tmp, data)
+                .map_err(|e| AlchemizeError::other(format!("failed to spool CHM input: {e}")))?;
+            keep_alive = tmp;
+            keep_alive.path().to_path_buf()
+        }
+    };
+
+    let html = crate::infrastructure::document::HtmlConverter::new();
+    let mut chm = libchm::ChmFile::open(&path)
+        .map_err(|e| AlchemizeError::other(format!("CHM open failed: {e}")))?;
+
+    let entries = chm
+        .entries(libchm::EntrySel::ALL)
+        .map_err(|e| AlchemizeError::other(format!("CHM enumeration failed: {e}")))?;
+    let entry_count = entries.len();
+
+    let topic_paths: Vec<String> = entries
+        .iter()
+        .filter(|e| !e.is_dir() && is_topic_path(&e.path))
+        .map(|e| e.path.clone())
+        .collect();
+    // Decompressed length is known up front: drop oversized topics here
+    // instead of reading and discarding them. Reads go through the
+    // enumerated entry itself (never a fresh directory lookup), so a
+    // duplicate-path entry cannot slip a different length past the budget.
+    let idx_by_lower: HashMap<String, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(idx, e)| (e.path.trim_start_matches('/').to_ascii_lowercase(), idx))
+        .collect();
+    let len_by_lower: HashMap<String, u64> = idx_by_lower
+        .iter()
+        .map(|(key, idx)| (key.clone(), entries[*idx].length))
+        .collect();
+    let toc = read_toc_order(&mut chm, &entries);
+    let ordered = order_topics(&topic_paths, &toc);
+
+    if ordered.is_empty() {
+        // No HTML topics: an entry inventory is the honest fallback.
+        let mut out = String::from("# CHM entry inventory\n\n");
+        for entry in &entries {
+            out.push_str(&format!(
+                "- {}\n",
+                crate::infrastructure::document::shared::escape_markdown_label(&entry.path)
+            ));
+        }
+        let metadata = serde_json::json!({
+            "source_format": "chm",
+            "topic_count": 0,
+            "entry_count": entry_count,
+            "truncated": false,
+        });
+        return Ok(
+            ConvertResult::with_metadata(out, ContentType::Document, metadata)
+                .with_quality(ConversionQuality::LocalFallback),
+        );
+    }
+
+    let mut out = String::new();
+    let mut rendered = 0usize;
+    let mut truncated = false;
+    let (selected, dropped) = select_within_budget(
+        &ordered,
+        &len_by_lower,
+        MAX_TOPICS,
+        MAX_ENTRY_BYTES,
+        MAX_TOTAL_BYTES,
+    );
+    truncated |= dropped;
+    for topic in selected {
+        let bytes = match idx_by_lower
+            .get(topic.trim_start_matches('/').to_ascii_lowercase().as_str())
+            .and_then(|&idx| chm.read(&entries[idx]).ok())
+        {
+            Some(bytes) => bytes,
+            None => {
+                // A single unreadable topic must not sink the document;
+                // skip it and say so. (A render failure still fails the
+                // whole conversion: skip = we never got the bytes, fail =
+                // we had them but they are unusable.)
+                truncated = true;
+                let safe: String = topic.chars().filter(|c| !c.is_control()).collect();
+                tracing::warn!("chm: skipping unreadable topic {safe}");
+                continue;
+            }
+        };
+
+        let html_body = String::from_utf8_lossy(&bytes);
+        let converted = html
+            .convert_str(&html_body)
+            .map_err(|e| AlchemizeError::other(format!("CHM topic {topic} failed: {e}")))?;
+        out.push_str(&format!(
+            "## {}\n\n",
+            crate::infrastructure::document::shared::escape_markdown_label(topic)
+        ));
+        out.push_str(converted.markdown.trim());
+        out.push_str("\n\n");
+        rendered += 1;
+    }
+
+    let metadata = serde_json::json!({
+        "source_format": "chm",
+        "topic_count": rendered,
+        "entry_count": entry_count,
+        "truncated": truncated,
+    });
+    Ok(
+        ConvertResult::with_metadata(out, ContentType::Document, metadata)
+            .with_quality(ConversionQuality::LocalFull),
+    )
+}
+
 /// Parse the `.hhc` table of contents and return the `Local` targets in
-/// document order. A malformed or missing `.hhc` yields an empty list —
-/// ordering then falls back to lexicographic paths.
+/// document order. A malformed, missing, or over-budget `.hhc` yields an
+/// empty list — ordering then falls back to lexicographic paths.
 fn read_toc_order(chm: &mut libchm::ChmFile, entries: &[libchm::Entry]) -> Vec<String> {
     let Some(hhc) = entries
         .iter()
@@ -205,7 +212,13 @@ fn read_toc_order(chm: &mut libchm::ChmFile, entries: &[libchm::Entry]) -> Vec<S
     else {
         return Vec::new();
     };
-    let Ok(bytes) = chm.read_path(&hhc.path) else {
+    // The directory-declared length is attacker-controlled input; the
+    // per-entry budget applies to `.hhc` too, before any allocation.
+    if hhc.length as usize > MAX_ENTRY_BYTES {
+        tracing::warn!("chm: skipping oversized table of contents");
+        return Vec::new();
+    }
+    let Ok(bytes) = chm.read(hhc) else {
         return Vec::new();
     };
     extract_local_targets(&String::from_utf8_lossy(&bytes))
@@ -271,36 +284,33 @@ fn order_topics<'a>(topic_paths: &'a [String], toc_targets: &[String]) -> Vec<&'
 /// Apply the three render budgets to the ordered topic list: drop topics
 /// whose decompressed length exceeds `max_entry`, keep at most `max_topics`,
 /// and stop before the cumulative `max_total` would overflow. Returns the
-/// renderable topics in order.
+/// renderable topics in order plus whether anything was dropped — every
+/// budget drop must surface as `truncated` in the metadata.
 fn select_within_budget<'a>(
     ordered: &[&'a str],
     len_by_lower: &HashMap<String, u64>,
     max_topics: usize,
     max_entry: usize,
     max_total: usize,
-) -> Vec<&'a str> {
+) -> (Vec<&'a str>, bool) {
+    let mut dropped = ordered.len() > max_topics;
     let mut selected: Vec<&'a str> = Vec::new();
     let mut total = 0usize;
     for topic in ordered.iter().take(max_topics) {
         let key = topic.trim_start_matches('/').to_ascii_lowercase();
-        if len_by_lower
-            .get(&key)
-            .is_some_and(|len| *len as usize > max_entry)
-        {
+        let len = len_by_lower.get(&key).copied().unwrap_or(0) as usize;
+        if len > max_entry {
+            dropped = true;
             continue;
         }
-        let next = len_by_lower
-            .get(&key)
-            .copied()
-            .unwrap_or(0)
-            .min(usize::MAX as u64) as usize;
-        if total + next > max_total {
+        if total + len > max_total {
+            dropped = true;
             break;
         }
-        total += next;
+        total += len;
         selected.push(topic);
     }
-    selected
+    (selected, dropped)
 }
 
 #[cfg(test)]
@@ -363,7 +373,7 @@ mod tests {
             ("big.htm".to_string(), 17u64 * 1024 * 1024), // > 16 MiB
             ("ok.htm".to_string(), 100u64),
         ]);
-        let selected = select_within_budget(
+        let (selected, dropped) = select_within_budget(
             &topics.iter().map(String::as_str).collect::<Vec<_>>(),
             &lens,
             512,
@@ -371,6 +381,8 @@ mod tests {
             256 * 1024 * 1024,
         );
         assert_eq!(selected, vec!["/ok.htm"]);
+        // The oversized drop must surface so metadata can report it.
+        assert!(dropped);
     }
 
     #[test]
@@ -381,8 +393,9 @@ mod tests {
             .iter()
             .map(|t| (t.trim_matches('/').to_string(), 10u64))
             .collect();
-        let selected = select_within_budget(&refs, &lens, 512, 1024, usize::MAX / 2);
+        let (selected, dropped) = select_within_budget(&refs, &lens, 512, 1024, usize::MAX / 2);
         assert_eq!(selected.len(), 512);
+        assert!(dropped);
     }
 
     #[test]
@@ -396,8 +409,10 @@ mod tests {
             .iter()
             .map(|t| (t.trim_matches('/').to_string(), 15u64 * 1024 * 1024))
             .collect();
-        let selected = select_within_budget(&refs, &lens, 512, 16 * 1024 * 1024, 256 * 1024 * 1024);
+        let (selected, dropped) =
+            select_within_budget(&refs, &lens, 512, 16 * 1024 * 1024, 256 * 1024 * 1024);
         assert_eq!(selected.len(), 17);
+        assert!(dropped);
     }
 
     #[tokio::test]
