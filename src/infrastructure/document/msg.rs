@@ -264,11 +264,21 @@ fn build_mime(input: MimeInput<'_>) -> Vec<u8> {
 
     let boundary = boundary_for(&parts);
     // Sizes are known up front: reserve once instead of doubling a
-    // multi-megabyte buffer through incremental growth.
+    // multi-megabyte buffer through incremental growth. Base64 rows are
+    // 78 output bytes per 57 input bytes (76 chars + CRLF); text bodies
+    // write through with a trailing CRLF.
     let estimate: usize = 4096
         + parts
             .iter()
-            .map(|(ct, body)| ct.len() + body.len() + body.len() / 3 + 128)
+            .map(|(ct, body)| {
+                ct.len()
+                    + 128
+                    + if ct.starts_with("application/octet-stream") {
+                        body.len().div_ceil(57) * 78
+                    } else {
+                        body.len() + 2
+                    }
+            })
             .sum::<usize>();
     let mut out = String::with_capacity(estimate);
 
@@ -448,10 +458,11 @@ fn read_string(
         _ => return None,
     };
     Some(match record.prop_type {
-        // encoding_rs 一步到位（含错误信号）：坏 UTF-16 置 lossy，而不是
-        // 无声地丢 replacement char。
+        // PT_UNICODE 语义固定为 UTF-16LE：decode_with_bom_removal 剥掉
+        // 误当 BOM 的前两字节，但不允许流首字节改写解码器选择；坏 UTF-16
+        // 置 lossy，而不是无声地丢 replacement char。
         PT_UNICODE => {
-            let (text, _, had_errors) = encoding_rs::UTF_16LE.decode(&bytes);
+            let (text, had_errors) = encoding_rs::UTF_16LE.decode_with_bom_removal(&bytes);
             if had_errors {
                 *lossy = true;
             }
@@ -767,6 +778,70 @@ mod tests {
         assert_eq!(encode_header_value("plain"), "plain");
         let encoded = encode_header_value("季度数字");
         assert!(encoded.starts_with("=?utf-8?B?"), "{encoded}");
+    }
+
+    #[test]
+    fn header_control_chars_are_stripped() {
+        // Controls collapse to spaces: the value stays on ONE header line,
+        // so no new header or part can be injected.
+        let cleaned = encode_header_value("a\r\nX-Evil: injected\r\n");
+        assert!(!cleaned.contains('\r'), "{cleaned}");
+        assert!(!cleaned.contains('\n'), "{cleaned}");
+    }
+
+    #[test]
+    fn attachment_name_cannot_forge_parts() {
+        let forged = "a\".bin\r\nContent-Type: text/html\r\n\r\nFORGED-PART";
+        let out = build_mime(MimeInput {
+            subject: None,
+            from: None,
+            to: None,
+            date: None,
+            text_body: Some("body"),
+            html_body: None,
+            attachments: &[(forged, b"x")],
+        });
+        let text = String::from_utf8_lossy(&out);
+        // Injection is structural: CR/LF are gone, so the only Content-Type
+        // lines are the three real ones (multipart header + body part +
+        // attachment part), and FORGED-PART never starts a body line of
+        // its own — it survives only inside the quoted filename.
+        assert_eq!(
+            text.lines()
+                .filter(|l| l.starts_with("Content-Type:"))
+                .count(),
+            3,
+            "{text}"
+        );
+        assert!(!text.contains("\r\n\r\nFORGED-PART"), "{text}");
+    }
+
+    #[test]
+    fn boundary_tracks_content() {
+        let mk = |body: &[u8]| boundary_for(&[("text/plain".to_string(), Cow::Borrowed(body))]);
+        assert_ne!(mk(b"one"), mk(b"two"));
+    }
+
+    #[test]
+    fn reserve_covers_large_attachment_without_realloc() {
+        // 1 MiB attachment: a correct single reserve keeps capacity within
+        // the slack of the final length (no doubling growth happened).
+        let data = vec![0x41u8; 1024 * 1024];
+        let out = build_mime(MimeInput {
+            subject: Some("big"),
+            from: None,
+            to: None,
+            date: None,
+            text_body: Some("body"),
+            html_body: None,
+            attachments: &[("big.bin", &data)],
+        });
+        assert!(
+            out.capacity() <= out.len() + 8192,
+            "capacity {} vs len {}",
+            out.capacity(),
+            out.len()
+        );
     }
 
     /// A message carrying only the modern SMTP sender property (0x0C1F):
