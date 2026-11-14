@@ -42,31 +42,11 @@ impl Converter for EmlConverter {
             .to_bytes()
             .await
             .map_err(|e| AlchemizeError::other(format!("failed to read EML input: {e}")))?;
-
-        let parsed = mail_parser::MessageParser::default()
-            .parse(&bytes[..])
-            .ok_or_else(|| {
-                AlchemizeError::other("EML parse failed: not a valid RFC 822 message")
-            })?;
-
-        let markdown = render_message(&parsed);
-        let attachments = collect_attachments(&parsed);
-
-        let metadata = serde_json::json!({
-            "source_format": "eml",
-            "subject": parsed.subject().unwrap_or_default(),
-            "attachment_count": attachments.len(),
-            "attachments": attachments,
-        });
-
-        Ok(
-            ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
-                .with_quality(ConversionQuality::LocalFull),
-        )
+        convert_eml_bytes(&bytes, "eml")
     }
 
     fn supported_extensions(&self) -> &[&str] {
-        &["eml"]
+        &["eml", "mht", "mhtml"]
     }
 
     fn priority(&self) -> u8 {
@@ -76,6 +56,34 @@ impl Converter for EmlConverter {
     fn availability(&self) -> Availability {
         Availability::Available
     }
+}
+
+/// Parse and render raw RFC 822 bytes into the standard message result
+/// (headers + best body + attachment inventory). Shared with the `msg`
+/// engine, which rebuilds a MIME message before handing bytes over here.
+/// `source_format` labels the metadata; behavior is format-identical.
+pub(crate) fn convert_eml_bytes(
+    bytes: &[u8],
+    source_format: &'static str,
+) -> Result<ConvertResult, AlchemizeError> {
+    let parsed = mail_parser::MessageParser::default()
+        .parse(bytes)
+        .ok_or_else(|| AlchemizeError::other("EML parse failed: not a valid RFC 822 message"))?;
+
+    let markdown = render_message(&parsed);
+    let attachments = collect_attachments(&parsed);
+
+    let metadata = serde_json::json!({
+        "source_format": source_format,
+        "subject": parsed.subject().unwrap_or_default(),
+        "attachment_count": attachments.len(),
+        "attachments": attachments,
+    });
+
+    Ok(
+        ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
+            .with_quality(ConversionQuality::LocalFull),
+    )
 }
 
 /// Render headers plus the best available body part.
@@ -125,6 +133,17 @@ fn render_message(parsed: &mail_parser::Message<'_>) -> String {
     if let Some(html) = parsed.body_html(0) {
         let html = html.trim();
         if !html.is_empty() {
+            // With the html feature on (e.g. an MHTML page), render through
+            // the HTML chain; without it, the raw markup stays honest.
+            #[cfg(feature = "html")]
+            if let Ok(converted) =
+                crate::infrastructure::document::HtmlConverter::new().convert_str(html)
+                && !converted.markdown.trim().is_empty()
+            {
+                out.push_str(converted.markdown.trim());
+                out.push('\n');
+                return out;
+            }
             let fence = fence_for(html);
             out.push_str(&format!("{fence}html\n"));
             out.push_str(html);
@@ -263,7 +282,46 @@ Content-Type: text/html; charset=utf-8\r
     fn contract() {
         let c = EmlConverter::new();
         assert_eq!(c.name(), "eml");
-        assert_eq!(c.supported_extensions(), &["eml"]);
+        assert_eq!(c.supported_extensions(), &["eml", "mht", "mhtml"]);
         assert_eq!(c.availability(), Availability::Available);
+    }
+
+    /// A minimal MHTML page: multipart/related with an HTML root part —
+    /// the shape a browser "save as single file" produces.
+    fn sample_mhtml() -> Vec<u8> {
+        let body = "\
+From: <saved-by-browser@example.invalid>\r
+Subject: Archived page\r
+MIME-Version: 1.0\r
+Content-Type: multipart/related; boundary=\"MHTBOUND\"; type=\"text/html\"\r
+\r
+--MHTBOUND\r
+Content-Type: text/html; charset=utf-8\r
+Content-Transfer-Encoding: 8bit\r
+\r
+<html><head><title>Archived</title></head>\r
+<body><h1>Weekly Report</h1><p>Key <b>numbers</b> inside.</p></body></html>\r
+--MHTBOUND\r
+Content-Type: text/css\r
+\r
+body { color: black }\r
+--MHTBOUND--\r
+";
+        body.as_bytes().to_vec()
+    }
+
+    #[tokio::test]
+    async fn mhtml_related_root_part_renders() {
+        let result = EmlConverter::new()
+            .convert(Input::bytes(sample_mhtml(), "page.mhtml"))
+            .await
+            .unwrap();
+        assert!(
+            result.markdown.contains("Weekly Report"),
+            "{}",
+            result.markdown
+        );
+        // The CSS side part is an attachment, not body prose.
+        assert!(result.metadata["attachment_count"].as_u64() >= Some(1));
     }
 }

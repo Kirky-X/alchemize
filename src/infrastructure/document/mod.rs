@@ -6,6 +6,8 @@
 //! Every converter family is gated by its own capability feature (see
 //! `Cargo.toml`); modules with no optional dependencies stay unconditional.
 
+#[cfg(feature = "chm")]
+pub mod chm;
 #[cfg(feature = "csv")]
 pub mod csv;
 #[cfg(feature = "docx")]
@@ -23,6 +25,8 @@ pub mod html_deep;
 pub mod ipynb;
 #[cfg(feature = "latex")]
 pub mod latex_source;
+#[cfg(feature = "msg")]
+pub mod msg;
 #[cfg(any(
     feature = "docx",
     feature = "pptx",
@@ -47,6 +51,8 @@ pub mod text;
 #[cfg(feature = "zip")]
 pub mod zip;
 
+#[cfg(feature = "chm")]
+pub use chm::ChmConverter;
 #[cfg(feature = "csv")]
 pub use csv::CsvConverter;
 #[cfg(feature = "docx")]
@@ -61,6 +67,8 @@ pub use html::HtmlConverter;
 pub use ipynb::IpynbConverter;
 #[cfg(feature = "latex")]
 pub use latex_source::LatexSourceConverter;
+#[cfg(feature = "msg")]
+pub use msg::MsgConverter;
 #[cfg(feature = "docx")]
 pub use office::DocxDeepConverter;
 #[cfg(feature = "odp")]
