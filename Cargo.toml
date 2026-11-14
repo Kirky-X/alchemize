@@ -41,9 +41,7 @@ harness = false
 required-features = ["full"]
 
 [features]
-# sdforge 宏生成的 CLI 注册项带 #[cfg(feature = "cli")]，按调用方 crate 解析——
-# 本仓必须开启同名 feature，否则 alch 命令树为空（forms/doctor/convert 不可达）。
-# default 只含 CLI 骨架 + 文本转换：其余格式全部按需开启（--features pdf,docx...）。
+# cli 是 sdforge 宏注册的硬要求（缺它命令树为空）；default 只含 CLI+文本，其余格式按需开启
 default = ["cli", "text"]
 cli = ["dep:inklog"]
 
@@ -98,8 +96,7 @@ heic = ["dep:tempfile"]
 # ── 后端档位 ─────────────────────────────────────────────────────────────────
 # 音频转写：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
 audio = ["media", "dep:vecboost", "dep:reqwest", "dep:tempfile", "reqwest/multipart"]
-# 旧格式引擎（doc/ppt/rtf，外部 soffice 二进制 + 临时 profile）。
-# 转换产物交给 OOXML 深解析器，故复用 quick-xml/zip。
+# 旧格式引擎（doc/ppt/rtf，外部 soffice + 临时 profile）；产物交 OOXML 深解析器
 legacy-office = ["dep:tempfile", "dep:quick-xml", "dep:zip", "dep:flate2"]
 
 # ── 数据 / 容器 / 邮件 ───────────────────────────────────────────────────────
@@ -107,12 +104,9 @@ parquet = ["dep:parquet", "dep:bytes"]
 sqlite = ["dep:rusqlite", "dep:tempfile"]
 bibtex = ["dep:biblatex"]
 email = ["dep:mail-parser"]
-# msg 重建 MIME 后交给 eml 转换路径，故依赖 email；cfb 读 OLE 复合文件；
-# encoding_rs 供 MAPI 001E 单字节字符串按 codepage 兜底解码。
+# msg 重建 MIME 复用 eml 路径（依赖 email）；cfb 读 OLE；encoding_rs 供 codepage 兜底
 msg = ["email", "dep:cfb", "dep:encoding_rs"]
-# CHM 编译帮助文档：libchm 纯 Rust 读条目（含 LZX），主题走现有 html 链
-# （chm 蕴含 html——帮助文档本质是 HTML，不维护无 html 的降级第二路径）；
-# tempfile 供 Bytes 输入落盘（libchm 只认路径）。
+# CHM：libchm 纯 Rust 读条目（含 LZX）；蕴含 html（主题走 html 链）；tempfile 供 Bytes 落盘
 chm = ["html", "dep:libchm", "dep:tempfile"]
 # 归档容器族按格式隔离；组合格式 .tgz 需 tar+gzip 同时开启（cfg(all)）。
 tar = ["dep:tar"]
@@ -122,11 +116,9 @@ zstd = ["dep:zstd"]
 sevenz = ["dep:sevenz-rust2"]
 
 # ── 工具面 ───────────────────────────────────────────────────────────────────
-# MCP 工具面：`alch mcp` 子命令（sdforge rmcp stdio 服务；原独立二进制
-# alch-mcp 已折叠，单二进制形态）。隐含 cli——子命令寄居 alch 命令树。
+# MCP 工具面：alch mcp 子命令（隐含 cli，寄居 alch 命令树）
 mcp = ["cli", "sdforge/mcp"]
-# kit: trait-kit AsyncKit 依赖注入集成模块（src/integrations/kit；核心
-# trait 不重写，只加适配层）。
+# kit：trait-kit AsyncKit 依赖注入适配层（核心 trait 不重写）
 kit = ["dep:trait-kit"]
 # 全能力伞面：全部转换类 feature（不含 cli/mcp）。
 full = [
@@ -161,26 +153,10 @@ full = [
     "zstd",
     "sevenz",
 ]
-# 新增一个格式 feature 的同步点（漏改任一处 = 引擎静默丢失）：
-#   1) 本文件的 feature 定义 + `full` 成员
-#   2) src/infrastructure/engines.rs 的逐条 #[cfg] 注册语句
-#   3) 容器族：engines.rs 外层 any(...) 集合与 containers/mod.rs 的 any(...)
-#      集合（tar/gzip/xz/zstd/sevenz 字面量在三处重复）
-#   4) containers/mod.rs 的 pub mod 门与 pub use 门
-#   5) 实现文件（containers/single.rs 等）的文件级 any(...) 与逐项 #[cfg]
-#   6) src/infrastructure/engines.rs tests：该 feature 的在场/缺席断言对
-#   7) src/feature_assertions.rs：full 成员守卫表 + CI feature-isolation 的
-#      循环列表（29 配置）
-#   8) src/domain/feature_map.rs：扩展名映射 + enabled_features 清单
-#      （Cargo `full` 集合相等断言；映射表由 engines.rs 的 binding/coverage
-#      三重机器守卫锚定，CI 循环集合亦由该测试比对）
-# 双重兜底：full 守卫（漏加成员 = 编译错误）与 CI 的「无 cli 仅 --lib」行
-# （漏依赖边 = 下游构建失败）把「漏改」从静默丢失变成构建失败。
+# 新格式 feature 同步点（漏改任一处=引擎静默丢失）：①本文件 feature+full ②engines.rs #[cfg] 注册 ③容器族 any(...) 三处字面量 ④containers/mod.rs 门 ⑤实现文件门控 ⑥engines.rs 断言对 ⑦feature_assertions full 表+CI 循环列表 ⑧feature_map 映射+enabled_features；full 守卫与 CI 无 cli 行兜底把漏改变构建失败
 
 [dependencies]
-# ── 核心（无条件）：公开 API 类型 / 错误 / 异步运行时 / 日志 / 资产内联与哈希
-# 门控它们需要重构 ConvertResult、AlchemizeError、Input::to_bytes、InlineSink
-# 等公开面，收益与风险不成比例（见 specmark 变更 dependency-feature-gating）。
+# ── 核心（无条件）：公开 API 面（ConvertResult/AlchemizeError/Input 等），门控需重构公开 API，不做
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 async-trait = { version = "0.1", default-features = false }
 base64 = { version = "0.23", default-features = false, features = ["std"] }
@@ -192,9 +168,7 @@ tokio = { version = "1.0", default-features = false, features = ["rt", "rt-multi
 tracing = { version = "0.1", default-features = false }
 
 # ── 文档族（全部 optional，经 dep: 由格式 feature 激活）
-# 编码探测（GBK/Big5/Shift-JIS/... 优先 CJK，lossy 兜底）。alloc 必须显式
-# 开启：Encoding::decode 在 0.8.44 由 `alloc` feature 门控（此前被无条件依赖
-# 树的 feature 统一顺带激活）。
+# 编码探测（CJK 优先，lossy 兜底）；alloc 必须显式（decode 由 alloc 门控）
 encoding_rs = { version = "0.8", default-features = false, features = ["alloc"], optional = true }
 csv = { version = "1.4", default-features = false, optional = true }
 # html 基础链（htmd）与 epub 共用
@@ -228,16 +202,11 @@ futures = { version = "0.3", default-features = false, features = ["std"], optio
 # 轮询退避原语：MinerU 三客户端共享 poll_delay 走 limiteron delay_for_attempt
 limiteron = { version = "0.3", default-features = false, features = ["retry"], optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
-# 自研转录引擎门面：Qwen3-ASR ONNX 三图 + silero VAD（load-dynamic ort）。
-# registry 依赖：path 依赖会被 cargo publish 拒收，且编译 audio feature
-# 不再要求同级存在 ../vecboost。
+# 自研转录门面（Qwen3-ASR ONNX + silero VAD）；registry 依赖（path 会被 publish 拒收）
 vecboost = { version = "0.3", default-features = false, features = ["transcribe"], optional = true }
 
 # ── 沙箱 / 子进程工具依赖
-# pdfium（Chrome PDF 引擎）绑定：运行时动态库加载，缺失降级。
-# 0.9 起 bindings 由 pdfium 版本 feature 生成：必须选一个 pdfium_xxxx。
-# 6295 是距本机 e2e 动态库（chromium/6309）最近的一档；运行时 e2e 兼容性
-# 待更新 pdfium 二进制后验证（specmark dependency-feature-gating Deferred）。
+# pdfium 绑定（运行时动态库，缺失降级）；须选一个 pdfium_xxxx，6295 对齐本机 e2e 库
 pdfium-render = { version = "0.9", default-features = false, features = [
     "pdfium_6295",
     "image_025",
@@ -249,13 +218,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 # ── 数据 / 容器 / 邮件
 bytes = { version = "1.0", default-features = false, features = ["std"], optional = true }
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "lz4", "zstd", "flate2-rust_backend", "brotli"], optional = true }
-# 0.41 会引入 libsqlite3-sys 0.39（links=sqlite3），与 limiteron→dbnexus→
-# sea-orm→sqlx-sqlite 的 libsqlite3-sys u003c0.38 硬冲突；0.39 是当前可共存的
-# 最高版本（上游 sqlx 放宽后解除）。
+# 锁 0.39：0.41 要 sys ^0.39，与 sqlx-sqlite 0.9 的 <0.38 冲突（经 sdforge→dbnexus embedded→sea-orm 链，2026-11-15 实测）
 rusqlite = { version = "0.39", default-features = false, features = ["bundled"], optional = true }
 biblatex = { version = "0.12", default-features = false, optional = true }
-# mail-parser 是活跃维护的 MIME 解析器（mail crate 的 mail-internals 带
-# RUSTSEC-2023-0054 UAF 且无修复版本）
+# mail-parser 活跃维护；勿用 mail crate 系（RUSTSEC-2023-0054 UAF 无修复）
 mail-parser = { version = "1.0", default-features = false, optional = true }
 # cfb 读 OLE 复合文件（.msg 容器层，MS-OXMSG）；写能力仅测试构造 fixture 用。
 cfb = { version = "0.16", default-features = false, optional = true }
@@ -263,8 +229,7 @@ cfb = { version = "0.16", default-features = false, optional = true }
 libchm = { version = "0.3", default-features = false, optional = true }
 # 归档容器族
 tar = { version = "0.4", default-features = false, optional = true }
-# rust_backend 必须显式选择：default-features = false 下 flate2 无 zlib 后端
-# （此前被其他依赖的 feature 统一顺带激活）。
+# rust_backend 必须显式：default-features=false 下无 zlib 后端
 flate2 = { version = "1", default-features = false, features = ["rust_backend"], optional = true }
 xz2 = { version = "0.1", default-features = false, optional = true }
 zstd = { version = "0.14", default-features = false, optional = true }
@@ -274,20 +239,16 @@ sevenz-rust2 = { version = "0.25", default-features = false, features = [
 ], optional = true }
 
 # ── CLI / MCP
-# trait-kit：AsyncKit 依赖注入（仅 kit feature；async 为 AsyncAutoBuilder
-# 必需，i18n 供后续格式化面统一接入）。
+# trait-kit：AsyncKit 依赖注入（async 必需，i18n 供格式化面）
 trait-kit = { version = "0.5", default-features = false, features = [
     "async",
     "i18n",
 ], optional = true }
-# CLI 日志前端：全仓 tracing 埋点的消费者。默认不装配（ALCHEMIZE_LOG
-# 未设/off 时零开销）；default-features = false 裁掉 i18n/cache 依赖树。
+# CLI 日志前端：默认零开销（ALCHEMIZE_LOG 未设时）；关 default 裁 i18n/cache 树
 inklog = { version = "0.3", default-features = false, optional = true }
 
 # ── i18n（无条件：用户可见消息国际化，用户决策不做 feature 隔离）
-# sdforge i18n 宿主注册基座：消息目录注册 + 查询（宿主注册优先于内置
-# 目录）。非 optional——i18n 是库 API 面（tr/tr_args），不做 feature 隔离。
-# features=["cli"] 为本仓既有要求（#[forge] 端点）。
+# i18n 宿主注册基座（无条件：i18n 是库 API 面，用户决策不隔离）；features=["cli"] 为 #[forge] 端点要求
 sdforge = { version = "0.5", features = ["cli"] }
 # 检测链尾段（POSIX 环境变量之后的平台 locale）
 sys-locale = { version = "0.3", default-features = false }
