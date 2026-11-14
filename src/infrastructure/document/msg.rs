@@ -26,9 +26,15 @@ const BOUNDARY: &str = "ALCHMSGBOUND";
 
 /// Property tags used by the minimal layer: `(id, description)`.
 const SUBJECT: u32 = 0x0037;
-const SENDER_NAME: u32 = 0x0042;
+/// PidTagSenderName (modern); 0x0042 OriginalSenderName is the legacy fallback.
+const SENDER_NAME: u32 = 0x0C1A;
+const SENDER_NAME_LEGACY: u32 = 0x0042;
+/// PidTagSenderEmailAddress (modern); 0x0044 OriginalSenderEmailAddress fallback.
 const SENDER_EMAIL: u32 = 0x0044;
 const SENDER_SMTP: u32 = 0x0C1F;
+/// PidTagSenderSmtpAddress — real SMTP for Exchange-internal senders whose
+/// 0x0C1F carries an X.500 DN.
+const SENDER_SMTP_ADDR: u32 = 0x5D0A;
 const DISPLAY_TO: u32 = 0x0E04;
 const CREATION_TIME: u32 = 0x3007;
 const BODY_TEXT: u32 = 0x1000;
@@ -90,12 +96,33 @@ impl Converter for MsgConverter {
         let mut lossy = false;
 
         let subject = read_string(&mut cf, "/", &props, SUBJECT, codepage, &mut lossy);
-        // SMTP address (0x0C1F) is what modern Outlook writes; legacy
-        // 0x0044 (possibly an X.500 DN) is the fallback.
-        let sender_name = read_string(&mut cf, "/", &props, SENDER_NAME, codepage, &mut lossy);
-        let sender_addr = read_string(&mut cf, "/", &props, SENDER_SMTP, codepage, &mut lossy)
-            .filter(|addr| !addr.is_empty())
-            .or_else(|| read_string(&mut cf, "/", &props, SENDER_EMAIL, codepage, &mut lossy));
+        // Modern Outlook writes SenderName/SMTP as 0x0C1A/0x0C1F; older
+        // writers (and forward originals) fall back to 0x0042/0x0044.
+        let sender_name = read_string(&mut cf, "/", &props, SENDER_NAME, codepage, &mut lossy)
+            .or_else(|| {
+                read_string(
+                    &mut cf,
+                    "/",
+                    &props,
+                    SENDER_NAME_LEGACY,
+                    codepage,
+                    &mut lossy,
+                )
+            });
+        // Prefer the address form that actually looks like an e-mail: the
+        // SMTP-specific properties first, then the generic address tags
+        // (0x0C1F may hold an X.500 DN for Exchange-internal senders).
+        let addr_candidates = [SENDER_SMTP_ADDR, SENDER_SMTP, SENDER_EMAIL];
+        let sender_addr = addr_candidates
+            .iter()
+            .filter_map(|id| read_string(&mut cf, "/", &props, *id, codepage, &mut lossy))
+            .find(|addr| addr.contains('@'))
+            .or_else(|| {
+                addr_candidates
+                    .iter()
+                    .filter_map(|id| read_string(&mut cf, "/", &props, *id, codepage, &mut lossy))
+                    .find(|addr| !addr.is_empty())
+            });
         let from = match (sender_name, sender_addr) {
             (Some(name), Some(addr)) => Some(format!("{name} <{addr}>")),
             (None, Some(addr)) => Some(addr),
@@ -754,5 +781,128 @@ mod tests {
             result.markdown
         );
         assert!(result.markdown.contains("SMTP only"), "{}", result.markdown);
+    }
+
+    /// Real-file regression (ascii.msg from msg-parser-rs): modern Outlook
+    /// files carry sender as 0x0C1A/0x0C1F and may lack 0x0044 entirely —
+    /// the legacy-only chain used to drop From entirely.
+    #[tokio::test]
+    async fn modern_sender_tags_render_from_without_legacy() {
+        let name = b"from@domain.com".to_vec();
+        let smtp = b"from@domain.com".to_vec();
+        let subject = b"no legacy sender".to_vec();
+        let mut props = prop_record(
+            (SENDER_NAME << 16) | PT_STRING8,
+            var_value(name.len() as u32),
+        );
+        props.extend(prop_record(
+            (SENDER_SMTP << 16) | PT_STRING8,
+            var_value(smtp.len() as u32),
+        ));
+        props.extend(prop_record(
+            (SUBJECT << 16) | PT_STRING8,
+            var_value(subject.len() as u32),
+        ));
+        props.extend(prop_record(
+            (MESSAGE_CODEPAGE << 16) | PT_I4,
+            u32_value(65001),
+        ));
+
+        let mut cf = cfb::CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+        cf.create_stream("/__properties_version1.0")
+            .unwrap()
+            .write_all(&props)
+            .unwrap();
+        cf.create_stream(format!("/__substg1.0_{SENDER_NAME:04X}001E"))
+            .unwrap()
+            .write_all(&name)
+            .unwrap();
+        cf.create_stream(format!("/__substg1.0_{SENDER_SMTP:04X}001E"))
+            .unwrap()
+            .write_all(&smtp)
+            .unwrap();
+        cf.create_stream(format!("/__substg1.0_{SUBJECT:04X}001E"))
+            .unwrap()
+            .write_all(&subject)
+            .unwrap();
+        let bytes = cf.into_inner().into_inner();
+
+        let result = MsgConverter::new()
+            .convert(Input::bytes(bytes, "modern.msg"))
+            .await
+            .unwrap();
+        assert!(
+            result.markdown.contains("from@domain.com"),
+            "{}",
+            result.markdown
+        );
+    }
+
+    /// Exchange-internal senders carry an X.500 DN in 0x0C1F; the real SMTP
+    /// address lives in 0x5D0A (PidTagSenderSmtpAddress) and must win.
+    #[tokio::test]
+    async fn smtp_address_property_wins_over_dn() {
+        let name = utf16("Satya");
+        let dn = utf16("/O=EXCHANGELABS/OU=GROUP/CN=RECIPIENTS/CN=SATYA");
+        let smtp = utf16("Satya.Nagisetti@netapp.com");
+        let subject = utf16("DN vs SMTP");
+        let mut props = prop_record(
+            (SENDER_NAME << 16) | PT_UNICODE,
+            var_value(name.len() as u32),
+        );
+        props.extend(prop_record(
+            (SENDER_SMTP << 16) | PT_UNICODE,
+            var_value(dn.len() as u32),
+        ));
+        props.extend(prop_record(
+            (SENDER_SMTP_ADDR << 16) | PT_UNICODE,
+            var_value(smtp.len() as u32),
+        ));
+        props.extend(prop_record(
+            (SUBJECT << 16) | PT_UNICODE,
+            var_value(subject.len() as u32),
+        ));
+        props.extend(prop_record(
+            (MESSAGE_CODEPAGE << 16) | PT_I4,
+            u32_value(65001),
+        ));
+
+        let mut cf = cfb::CompoundFile::create(Cursor::new(Vec::new())).unwrap();
+        cf.create_stream("/__properties_version1.0")
+            .unwrap()
+            .write_all(&props)
+            .unwrap();
+        cf.create_stream(format!("/__substg1.0_{SENDER_NAME:04X}001F"))
+            .unwrap()
+            .write_all(&name)
+            .unwrap();
+        cf.create_stream(format!("/__substg1.0_{SENDER_SMTP:04X}001F"))
+            .unwrap()
+            .write_all(&dn)
+            .unwrap();
+        cf.create_stream(format!("/__substg1.0_{SENDER_SMTP_ADDR:04X}001F"))
+            .unwrap()
+            .write_all(&smtp)
+            .unwrap();
+        cf.create_stream(format!("/__substg1.0_{SUBJECT:04X}001F"))
+            .unwrap()
+            .write_all(&subject)
+            .unwrap();
+        let bytes = cf.into_inner().into_inner();
+
+        let result = MsgConverter::new()
+            .convert(Input::bytes(bytes, "dn.msg"))
+            .await
+            .unwrap();
+        assert!(
+            result.markdown.contains("Satya.Nagisetti@netapp.com"),
+            "{}",
+            result.markdown
+        );
+        assert!(
+            !result.markdown.contains("EXCHANGELABS"),
+            "DN must not leak into From: {}",
+            result.markdown
+        );
     }
 }
