@@ -29,7 +29,7 @@ cargo audit              # 运行安全审计
 cargo update -d          # 更新漏洞通告数据库
 ```
 
-关键依赖策略：ZIP 容器解析用 `zip` 9.x（RUSTSEC-2026-0367/0368/0369/0429 影响的 extract 系列路径不在使用面内，自锁 9.4.1）；TLS 走 rustls；`vecboost` 为同工作区 path 依赖（发布顺序 vecboost 先行）。
+关键依赖策略：ZIP 容器解析用 `zip` 9.x（RUSTSEC-2026-0367/0368/0369/0429 影响的 extract 系列路径不在使用面内，自锁 9.4.1）；TLS 走 rustls；`vecboost` 经 crates.io registry 引入（0.3）。
 
 ### 依赖审批流程
 

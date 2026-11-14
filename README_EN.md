@@ -375,7 +375,7 @@ Four defense lines: structured error handling for untrusted input (no panics); S
 
 ### 🛠️ Development Environment
 
-Rust 1.91+, one command to get started: `cargo build --features full` (requires sibling crate vecboost). See [🤝 Contributing](docs/CONTRIBUTING.md).
+Rust 1.97.1+, one command to get started: `cargo build --features full`. See [🤝 Contributing](docs/CONTRIBUTING.md).
 
 ### 💖 Ways to Contribute
 

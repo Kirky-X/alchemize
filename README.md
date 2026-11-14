@@ -207,7 +207,7 @@ alch formats
 | --- | --- | --- |
 | `pdf-local` | 本地 PDF 高保真引擎（pdfium-render） | 自动带入 `pdf`；运行时探测动态库，缺失降级到 pdf-extract。嵌入图提取走 lopdf 结构遍历（DCT/JPX 直通，样本重编码 PNG，不支持项显性计数） |
 | `pdf-cloud` | MinerU 云端 PDF 引擎（reqwest/limiteron） | 端点经 `ALCHEMIZE_MINERU_URL` 配置后才注册 |
-| `audio` | vecboost 转录门面 + Whisper 兼容 API | 自动带入 `media`；Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
+| `audio` | vecboost 转录门面 + Whisper 兼容 API | 自动带入 `media`；Qwen3-ASR ONNX + silero VAD，registry 依赖 vecboost |
 | `legacy-office` | 旧版二进制 Office 引擎（外部 soffice） | doc/rtf→docx、ppt/pps/pot→pptx 后进深解析链；缺席自动降级 |
 | `email` | 邮件引擎（mail-parser） | 头部/正文/附件清单；eml/mht/mhtml 三扩展，正文 HTML 在 `html` 开启时走 html 链 |
 | `msg` | Outlook 邮件引擎（cfb + 最小 MAPI 层） | `.msg` OLE 复合文件→重建 MIME→复用 eml 渲染；8 类核心属性 + 附件清单；自动带入 `email` |
@@ -378,7 +378,7 @@ cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
 <tr><td align="center">✅</td><td>CLI 与诊断</td><td>sdforge 封装（CLI+MCP 双面）、convert/doctor/formats、退出码语义化、引擎偏好与资产模式</td></tr>
 <tr><td align="center">✅</td><td>文档与合规</td><td>七篇文档套件（结构对齐 confers）、双语 README、SPDX 版权头 59/59、覆盖率 90.49%</td></tr>
 <tr><td align="center">✅</td><td>供应链收口</td><td>anydoc 依赖已移除，zip 仅 9.4.1；cargo audit 漏洞归零（仅余 unmaintained 提示）</td></tr>
-<tr><td align="center">🔲</td><td>发布</td><td>首次 crates.io 发布（vecboost 先行）+ crates.io/docs.rs 徽章</td></tr>
+<tr><td align="center">🔲</td><td>发布</td><td>首次 crates.io 发布 + crates.io/docs.rs 徽章</td></tr>
 <tr><td align="center">🔲</td><td>CI 与质量</td><td>GitHub Actions 三档矩阵 + codecov 覆盖率徽章</td></tr>
 <tr><td align="center">🔲</td><td>性能</td><td>criterion 基准 → 补 PERFORMANCE 篇真实数据</td></tr>
 <tr><td align="center">🔲</td><td>ASR 真链路</td><td>模型 bundle 就绪后跑真模型端到端（现以 #[ignore] 标注）</td></tr>
@@ -392,7 +392,7 @@ cargo llvm-cov --features full # 覆盖率（门禁 ≥90%）
 
 ### 🛠️ 开发环境
 
-Rust 1.91+，`cargo build --features full` 一键起（依赖兄弟仓 vecboost）。详见 [🤝 贡献指南](docs/CONTRIBUTING.md#-环境准备)。
+Rust 1.97.1+，`cargo build --features full` 一键起。详见 [🤝 贡献指南](docs/CONTRIBUTING.md#-环境准备)。
 
 ### 💖 贡献方式
 

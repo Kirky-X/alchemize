@@ -5422,9 +5422,9 @@ dependencies = [
 
 [[package]]
 name = "sdforge"
-version = "0.5.0-rc.11"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f432e54ec9aabe6168af38f7e3be498edfee3045217115ba16270c953b559f8"
+checksum = "13d1cdf6dbca2778f69b96c2eeb8f367b8f2d254d1fc19e6db04c78b00e9b6f0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5444,9 +5444,9 @@ dependencies = [
 
 [[package]]
 name = "sdforge-macros"
-version = "0.5.0-rc.10"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3f951765518c454435a8af4a8ba1902852409f699dede4631967f9597692bbb"
+checksum = "7df0ba593d6ed05759fc8db18c601101bba3917f11b0dcb16e4be4458d5a53e6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7219,6 +7219,8 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 [[package]]
 name = "vecboost"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c60f9464a41a5c82c2322cf04238ce1a6c7730149898e362a81fa91b53fc6963"
 dependencies = [
  "anyhow",
  "argon2",

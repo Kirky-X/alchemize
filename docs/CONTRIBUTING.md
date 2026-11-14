@@ -42,11 +42,11 @@ git remote add upstream https://github.com/Kirky-X/alchemize.git
 # 安装项目依赖并构建
 cargo build
 
-# full 档依赖同工作区兄弟仓 vecboost（path 依赖 ../vecboost）
+# full 档依赖 vecboost（registry 依赖，无需同级兄弟仓）
 cargo build --features full
 ```
 
-注意：`full` 档要求 `../vecboost` 存在（path 依赖）；发布顺序 vecboost 先于 alchemize 发到 crates.io。
+注意：`audio`（含于 `full`）经 crates.io 的 vecboost 转录门面工作；本地 ASR 推理另需模型 bundle 与 `ORT_DYLIB_PATH`（见上表 `audio` 行）。
 
 ### 特性标志
 

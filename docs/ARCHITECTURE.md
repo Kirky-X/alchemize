@@ -104,7 +104,7 @@ flowchart TB
 | `heic` | `infrastructure/media/heic.rs` | sips 或元数据降级（独立 feature） |
 | `pdf-local` | `infrastructure/document/pdfium.rs`、`pdf_images.rs` | pdfium 高保真（自动带入 `pdf`）+ 嵌入图提取 |
 | `pdf-cloud` | `infrastructure/remote/mineru/` | 云端 PDF：`client`/`factory`（按文件大小选 agent/precision 客户端）、`backoff`（limiteron 轮询退避）、`http_limit`（响应体积分级上限）、`validated_url`（SSRF 校验）、`wrapper`（Converter 适配，priority 5 链尾） |
-| `audio` | `infrastructure/media/asr/` | `vecboost.rs`（自研 transcribe 门面：Qwen3-ASR ONNX 三件套 + silero VAD，path 依赖兄弟仓）与 `whisper_api.rs`（Whisper 兼容云端后端，仅显式注入激活） |
+| `audio` | `infrastructure/media/asr/` | `vecboost.rs`（自研 transcribe 门面：Qwen3-ASR ONNX 三件套 + silero VAD，registry 依赖 vecboost）与 `whisper_api.rs`（Whisper 兼容云端后端，仅显式注入激活） |
 | `legacy-office` | `document/office/legacy_office.rs`、`tools/libreoffice.rs` | 旧版二进制 Office（外部 soffice） |
 | `tar`/`gzip`/`xz`/`zstd`/`sevenz` | `infrastructure/containers/` | 容器族；RegistrySlot 弱引用回填 |
 | `parquet`/`sqlite`/`bibtex` | `infrastructure/data/` | parquet / sqlite / biblatex |
@@ -114,7 +114,7 @@ feature 关闭的引擎根本不出现在 `engines.rs` 装配列表中（`engine
 
 ### crate 组织
 
-alchemize 为**单 crate**（`[package]` + `[lib]` + `[[bin]] alch`），无 workspace 子成员、无子 crate。与兄弟仓的关系是 path 依赖：`vecboost`（feature `audio` 下）——发布顺序约束为 vecboost 先于 alchemize 发到 crates.io。
+alchemize 为**单 crate**（`[package]` + `[lib]` + `[[bin]] alch`），无 workspace 子成员、无子 crate。与兄弟仓 vecboost 的关系是 registry 依赖（feature `audio` 下，`vecboost = "0.3"`），无同级目录要求。
 
 ## 🌊 数据流
 

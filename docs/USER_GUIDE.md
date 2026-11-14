@@ -21,7 +21,7 @@ Alchemize 把任意文档炼成 Markdown：一份 PDF、一个 Word、一段音�
 
 ### 📌 前置条件
 
-- **Rust 1.91+**（`Cargo.toml` 的 `rust-version`，edition 2024）
+- **Rust 1.97.1+**（`Cargo.toml` 的 `rust-version`，edition 2024）
 - 可选：`ffmpeg`（视频抽轨）、`pandoc`（LaTeX 高保真路径）——均在 PATH 探测，缺失时对应能力降级或报错
 
 ```bash

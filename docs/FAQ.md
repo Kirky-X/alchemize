@@ -27,7 +27,7 @@
 
 ### ❓ 支持哪些平台？
 
-任何 Rust 1.91+ 支持的平台（macOS/Linux/Windows）。外部二进制依赖（ffmpeg/pandoc）按 PATH 探测，缺失时对应能力降级。ASR 本地推理另需 onnxruntime 动态库。
+任何 Rust 1.97.1+ 支持的平台（macOS/Linux/Windows）。外部二进制依赖（ffmpeg/pandoc）按 PATH 探测，缺失时对应能力降级。ASR 本地推理另需 onnxruntime 动态库。
 
 ### ❓ 如何参与贡献？
 
@@ -76,7 +76,7 @@ cargo build --release --no-default-features --features cli,text  # 等价显式�
 
 ### ❓ 不同特性组合的依赖数量差别有多大？
 
-default 档只含核心 9 依赖 + `encoding_rs`（文本），没有任何网络/云/Office/容器依赖（reqwest/limiteron/futures/lopdf/quick-xml/zip/htmd 均为可选）；`pdf` 引入 lopdf，`pdf-cloud` 引入 reqwest+limiteron+futures，`audio` 引入 vecboost（ort/ONNX 栈，path 依赖）。特性关闭的引擎不参与编译，二进制更小、审计面更小。
+default 档只含核心 9 依赖 + `encoding_rs`（文本），没有任何网络/云/Office/容器依赖（reqwest/limiteron/futures/lopdf/quick-xml/zip/htmd 均为可选）；`pdf` 引入 lopdf，`pdf-cloud` 引入 reqwest+limiteron+futures，`audio` 引入 vecboost（ort/ONNX 栈，registry 依赖）。特性关闭的引擎不参与编译，二进制更小、审计面更小。
 
 ### ❓ 系统要求是什么？
 
