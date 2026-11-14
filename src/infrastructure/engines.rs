@@ -231,6 +231,18 @@ pub fn default_converters(
         crate::infrastructure::document::EmlConverter::new(),
     ));
 
+    // Outlook .msg — feature gated（依赖 email，重建 MIME 复用 eml 渲染链）。
+    #[cfg(feature = "msg")]
+    engines.push(Box::new(
+        crate::infrastructure::document::MsgConverter::new(),
+    ));
+
+    // Compiled HTML Help — feature gated（chm 蕴含 html，主题走 html 链）。
+    #[cfg(feature = "chm")]
+    engines.push(Box::new(
+        crate::infrastructure::document::ChmConverter::new(),
+    ));
+
     // Structured data engines — per-format features (capability-named).
     #[cfg(feature = "parquet")]
     engines.push(Box::new(
@@ -345,6 +357,8 @@ mod feature_registration_tests {
         assert_gated!("legacy-office", "legacy-office");
         assert_gated!("legacy-office", "legacy-ppt");
         assert_gated!("email", "eml");
+        assert_gated!("msg", "msg");
+        assert_gated!("chm", "chm");
         assert_gated!("tar", "tar");
         assert_gated!("gzip", "gz");
         assert_gated!("xz", "xz");

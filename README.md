@@ -154,7 +154,9 @@ alch formats
 | 音频 | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio（ASR 可选） | `media`（+`audio` 转录） |
 | 视频 | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video（ffmpeg + ASR/Vision 可选） | `media`（+`audio` 转录） |
 | 字幕 | srt, vtt, ass, ssa, lrc | subtitle | `media` |
-| 邮件 | eml | eml | `email` |
+| 邮件 / 网页存档 | eml / mht, mhtml | eml（头部/正文/附件清单；`html` 开启时正文走 html 链） | `email` |
+| Outlook 邮件 | msg | msg→MIME 重建→eml 路径（cfb + 最小 MAPI 层） | `msg`（蕴含 `email`） |
+| 帮助文档 | chm | chm（hhc 目录序 → html 链逐主题合并） | `chm`（蕴含 `html`） |
 | 结构化数据 | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `parquet` / `sqlite` / `bibtex` |
 | 归档 | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip 递归 / tar 族递归 / 7z 递归 | `zip` / `tar`/`gzip`/`xz`/`zstd`/`sevenz` |
 
@@ -174,11 +176,11 @@ alch formats
 | --- | --- | --- |
 | 最小化（default） | `cargo build` | 仅 CLI + 纯文本/代码围栏（`default = ["cli", "text"]`）；PDF/Office 等需显式开启格式 feature |
 | 常用文档 | `cargo build --features pdf,docx,pptx,odt,odp,html,epub,csv,ipynb,zip` | 文档转换主路径 + zip 递归；按需追加其他格式 |
-| 全功能 | `cargo build --features full` | 全部 28 个转换类 feature（含 MinerU 云端 PDF、本地 ASR、容器/数据/邮件） |
+| 全功能 | `cargo build --features full` | 全部 30 个转换类 feature（含 MinerU 云端 PDF、本地 ASR、容器/数据/邮件/帮助文档） |
 
 ### 📋 功能矩阵
 
-**格式族（15 个，一格式一 feature）**
+**格式族（16 个，一格式一 feature）**
 
 | feature | 门控能力 | 说明 |
 | --- | --- | --- |
@@ -197,6 +199,7 @@ alch formats
 | `pandoc` | PandocGenericConverter | org/rst/asciidoc/opml/mediawiki 等通用格式 |
 | `media` | image / audio / video / subtitle 四转换器 | 图片、音视频抽轨、字幕解析；转录后端另开 `audio` |
 | `heic` | HeicConverter | sips 或元数据降级；独立 feature |
+| `chm` | ChmConverter（libchm，纯 Rust 含 LZX） | CHM 编译帮助文档→md：`.hhc` 目录序优先（否则路径字典序），逐主题走 html 链；上限 512 主题/16MiB 单条/256MiB 累计，超限 `truncated` 标注；蕴含 `html` |
 
 **后端 / 数据 / 容器 / 工具面**
 
@@ -206,12 +209,13 @@ alch formats
 | `pdf-cloud` | MinerU 云端 PDF 引擎（reqwest/limiteron） | 端点经 `ALCHEMIZE_MINERU_URL` 配置后才注册 |
 | `audio` | vecboost 转录门面 + Whisper 兼容 API | 自动带入 `media`；Qwen3-ASR ONNX + silero VAD，path 依赖兄弟仓 vecboost |
 | `legacy-office` | 旧版二进制 Office 引擎（外部 soffice） | doc/rtf→docx、ppt/pps/pot→pptx 后进深解析链；缺席自动降级 |
-| `email` | 邮件引擎（mail-parser） | 头部/正文/附件清单 |
+| `email` | 邮件引擎（mail-parser） | 头部/正文/附件清单；eml/mht/mhtml 三扩展，正文 HTML 在 `html` 开启时走 html 链 |
+| `msg` | Outlook 邮件引擎（cfb + 最小 MAPI 层） | `.msg` OLE 复合文件→重建 MIME→复用 eml 渲染；8 类核心属性 + 附件清单；自动带入 `email` |
 | `parquet`/`sqlite`/`bibtex` | 结构化数据引擎，按格式拆分的三个 feature | parquet 流式 10 万行截断、sqlite 只读、biblatex 条目 |
 | `tar`/`gzip`/`xz`/`zstd`/`sevenz` | 归档容器族，按格式拆分的五个 feature | 递归转换，魔数检测内层格式；`.tgz` 需 `tar`+`gzip` 同时开启 |
 | `cli` | CLI 骨架（sdforge + inklog） | **default 成员**；`[[bin]] alch` 的 required-features 为 `cli` |
 | `mcp` | MCP 工具面（`alch mcp` 子命令，stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；隐含 `cli`，不随 default |
-| `full` | 全部 28 个转换类 feature（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | |
+| `full` | 全部 30 个转换类 feature（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | |
 
 **default 行为（破坏性变更）**：`default = ["cli", "text"]` —— 默认构建只编译 CLI 骨架与纯文本转换。`alch convert x.pdf` / `x.docx` 在默认构建下没有候选引擎，返回 `unsupported format`（退出码 2）。需要哪些格式就显式开启对应 feature（如 `--features pdf,docx`）；`--features full` 恢复全部能力。
 
@@ -429,6 +433,8 @@ Apache-2.0（[LICENSE](LICENSE)）。全部源文件带 SPDX 头；自其他仓�
 - [pdf-extract](https://github.com/jrmuizel/pdf-extract)（MIT）——PDF 文本层提取。
 - [quick-xml](https://github.com/tafia/quick-xml)（MIT/Apache-2.0）——OOXML/ODF/OMML 事件流。
 - [sevenz-rust2](https://github.com/hasenbanck/sevenz-rust2)（Apache-2.0）与 [tar](https://github.com/alexcrichton/tar-rs)/[flate2](https://github.com/rust-lang/flate2)/[xz2](https://github.com/alexcrichton/xz2-rs)/[zstd](https://github.com/gyscos/zstd-rs)（MIT/Apache-2.0）——归档容器。
+- [libchm](https://github.com/trypsynth/libchm)（MIT）——CHM 编译帮助文档解析（纯 Rust，含 LZX 解压）。
+- [cfb](https://github.com/mdsteele/rust-cfb)（MIT）——OLE Compound File 读取（Outlook .msg 容器层）。
 - [parquet](https://github.com/apache/arrow-rs)（Apache-2.0）、[rusqlite](https://github.com/rusqlite/rusqlite)（MIT）、[biblatex](https://github.com/typst/biblatex)（MIT）——结构化数据引擎。
 - [mail-parser](https://github.com/stalwartlabs/mail-parser)（Apache-2.0/MIT）——EML 解析。
 - [LibreOffice](https://www.libreoffice.org/)（MPL-2.0）——旧版二进制 Office 转换（可选外部工具）。

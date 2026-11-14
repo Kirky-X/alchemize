@@ -107,6 +107,13 @@ parquet = ["dep:parquet", "dep:bytes"]
 sqlite = ["dep:rusqlite", "dep:tempfile"]
 bibtex = ["dep:biblatex"]
 email = ["dep:mail-parser"]
+# msg 重建 MIME 后交给 eml 转换路径，故依赖 email；cfb 读 OLE 复合文件；
+# encoding_rs 供 MAPI 001E 单字节字符串按 codepage 兜底解码。
+msg = ["email", "dep:cfb", "dep:encoding_rs"]
+# CHM 编译帮助文档：libchm 纯 Rust 读条目（含 LZX），主题走现有 html 链
+# （chm 蕴含 html——帮助文档本质是 HTML，不维护无 html 的降级第二路径）；
+# tempfile 供 Bytes 输入落盘（libchm 只认路径）。
+chm = ["html", "dep:libchm", "dep:tempfile"]
 # 归档容器族按格式隔离；组合格式 .tgz 需 tar+gzip 同时开启（cfg(all)）。
 tar = ["dep:tar"]
 gzip = ["dep:flate2"]
@@ -143,6 +150,8 @@ full = [
     "audio",
     "legacy-office",
     "email",
+    "msg",
+    "chm",
     "parquet",
     "sqlite",
     "bibtex",
@@ -249,6 +258,10 @@ biblatex = { version = "0.12", default-features = false, optional = true }
 # mail-parser 是活跃维护的 MIME 解析器（mail crate 的 mail-internals 带
 # RUSTSEC-2023-0054 UAF 且无修复版本）
 mail-parser = { version = "1.0", default-features = false, optional = true }
+# cfb 读 OLE 复合文件（.msg 容器层，MS-OXMSG）；写能力仅测试构造 fixture 用。
+cfb = { version = "0.16", default-features = false, optional = true }
+# libchm 纯 Rust 读 CHM 条目（含 LZX 解压），MIT，零 C 绑定。
+libchm = { version = "0.3", default-features = false, optional = true }
 # 归档容器族
 tar = { version = "0.4", default-features = false, optional = true }
 # rust_backend 必须显式选择：default-features = false 下 flate2 无 zlib 后端

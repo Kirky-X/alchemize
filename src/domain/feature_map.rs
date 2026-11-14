@@ -24,7 +24,7 @@
 /// Almost every format needs exactly one feature; combined formats need
 /// several — `.tgz`/`.tar.gz` need both `tar` and `gzip`. Only extensions a
 /// converter (or the facade's zip converter) really declares appear here:
-/// alias spellings the engines do not accept (`docm`, `msg`, `xhtml`, …)
+/// alias spellings the engines do not accept (`docm`, `xhtml`, …)
 /// are deliberately absent, because a hint that does not actually fix the
 /// conversion is worse than no hint.
 pub const EXTENSION_FEATURES: &[(&str, &[&str])] = &[
@@ -172,6 +172,13 @@ pub const EXTENSION_FEATURES: &[(&str, &[&str])] = &[
     ("pot", &["legacy-office"]),
     // E-mail
     ("eml", &["email"]),
+    // MHTML（MIME 系归档网页，与 eml 同一引擎）
+    ("mht", &["email"]),
+    ("mhtml", &["email"]),
+    // Outlook .msg（OLE 复合文件，重建 MIME 走 eml 路径）
+    ("msg", &["msg"]),
+    // Compiled HTML Help（容器式文档，单 feature）
+    ("chm", &["chm"]),
 ];
 
 /// Capability features a conversion of `ext` requires, if known.
@@ -222,6 +229,8 @@ pub fn enabled_features() -> Vec<&'static str> {
         "audio",
         "legacy-office",
         "email",
+        "msg",
+        "chm",
         "parquet",
         "sqlite",
         "bibtex",
@@ -271,8 +280,8 @@ mod tests {
     #[test]
     fn undeclared_alias_spellings_get_no_hint() {
         for alias in [
-            "docm", "dotx", "dotm", "pptm", "potx", "potm", "xhtml", "ltx", "msg", "pq", "bibtex",
-            "sub", "gzip", "zstd", "xyz", "xlsx",
+            "docm", "dotx", "dotm", "pptm", "potx", "potm", "xhtml", "ltx", "pq", "bibtex", "sub",
+            "gzip", "zstd", "xyz", "xlsx",
         ] {
             assert_eq!(features_for_extension(alias), None, "{alias}");
         }
