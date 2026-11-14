@@ -102,6 +102,28 @@ pub enum AssetMode {
     Inline,
 }
 
+/// Hard input ceiling enforced at every conversion entry — the async facade
+/// port ([`Alchemize::convert`]/[`Alchemize::convert_pref`]) and the sync
+/// port ([`Alchemize::convert_sync`]) alike — on top of the per-instance
+/// configurable `max_file_size`: a host may raise the instance ceiling,
+/// never past this bound. Aligned with the zip container's 1 GiB
+/// aggregate-extraction precedent (`zip::MAX_TOTAL_EXTRACTED_BYTES`).
+pub const MAX_INPUT_BYTES: u64 = 1 << 30;
+
+/// Pure decision core for [`MAX_INPUT_BYTES`]: reject a known size over the
+/// ceiling with an error naming both the actual size and the limit; `None`
+/// (size undeterminable) passes and lets the later read fail naturally.
+fn check_input_size(len: Option<u64>) -> Result<(), AlchemizeError> {
+    if let Some(len) = len
+        && len > MAX_INPUT_BYTES
+    {
+        return Err(AlchemizeError::Other(format!(
+            "input size {len} bytes exceeds the hard input limit of {MAX_INPUT_BYTES} bytes (1 GiB)"
+        )));
+    }
+    Ok(())
+}
+
 /// Built converter facade over the registry.
 pub struct Alchemize {
     registry: std::sync::Arc<ConverterRegistry>,
@@ -114,7 +136,8 @@ pub struct Alchemize {
     asset_mode: AssetMode,
     no_remote: bool,
     /// Input size ceiling enforced at the facade before any dispatch
-    /// (`with_max_file_size`; default 100 MB).
+    /// (`with_max_file_size`; default 100 MB). Bounded above by the hard
+    /// [`MAX_INPUT_BYTES`] cap, which applies regardless of this setting.
     max_file_size: usize,
 }
 
@@ -130,10 +153,13 @@ impl Alchemize {
         input: &Input,
         prefer: Option<&str>,
     ) -> Result<ConvertResult, AlchemizeError> {
+        // Hard entry ceiling first: uniform across both ports and ahead of
+        // the per-instance ceiling, so a raised `max_file_size` cannot
+        // bypass it. A `None` size (unreadable metadata) is not intercepted
+        // — the later read fails naturally.
+        check_input_size(input.len())?;
         // Facade-level size ceiling: single point covering the registry
-        // dispatch and the zip branch (nested entries included). A `None`
-        // size (unreadable metadata) is not intercepted — the later read
-        // fails naturally.
+        // dispatch and the zip branch (nested entries included).
         if let Some(len) = input.len()
             && len as usize > self.max_file_size
         {
@@ -166,7 +192,9 @@ impl Alchemize {
     ///   async structure);
     /// - no sync-capable engine for the format → `NotSyncCapable` naming
     ///   the async-only engines;
-    /// - size ceiling enforced before dispatch, same as [`Self::convert_pref`].
+    /// - size ceilings enforced before dispatch, same as [`Self::convert_pref`]:
+    ///   the hard [`MAX_INPUT_BYTES`] cap first, then the per-instance
+    ///   `max_file_size`.
     ///
     /// Guard priority differs from the async port by design: category-based
     /// refusals (path input, zip/cbz) run before the size check, so a
@@ -190,6 +218,9 @@ impl Alchemize {
                 "zip/cbz requires nested async dispatch; use the async port".into(),
             ));
         }
+        // Hard entry ceiling, same as the async port; placed with the size
+        // guards (after category refusals) per the documented priority.
+        check_input_size(input.len())?;
         if let Some(len) = input.len()
             && len as usize > self.max_file_size
         {
@@ -603,6 +634,64 @@ mod tests {
         assert!(msg.contains("exceeds max_file_size"), "{msg}");
         assert!(msg.contains("11"), "{msg}");
         assert!(msg.contains("10"), "{msg}");
+    }
+
+    // -- 硬入口上限（MAX_INPUT_BYTES）----------------------------------------
+
+    /// 纯判定：超限 → Err，消息同时含实际大小与上限两个数值。
+    #[test]
+    fn check_input_size_rejects_oversized_input() {
+        let err = check_input_size(Some(MAX_INPUT_BYTES + 1)).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains(&format!("size {} bytes", MAX_INPUT_BYTES + 1)),
+            "{msg}"
+        );
+        assert!(
+            msg.contains(&format!("limit of {MAX_INPUT_BYTES} bytes")),
+            "{msg}"
+        );
+    }
+
+    /// 纯判定：边界值（恰等于上限）与小输入 → Ok。
+    #[test]
+    fn check_input_size_accepts_normal_sizes() {
+        assert!(check_input_size(Some(MAX_INPUT_BYTES)).is_ok());
+        assert!(check_input_size(Some(0)).is_ok());
+        assert!(check_input_size(Some(1024)).is_ok());
+    }
+
+    /// 纯判定：None（大小不可知）不拦截 → Ok，交给后续读取自然失败。
+    #[test]
+    fn check_input_size_accepts_unknown_size() {
+        assert!(check_input_size(None).is_ok());
+    }
+
+    /// 硬上限先于实例级上限：`with_max_file_size` 调到硬顶之上也无法绕过
+    /// （async 口；`vec![0u8; …]` 为惰性零页分配，不占实内存）。
+    #[tokio::test]
+    async fn hard_input_cap_binds_async_port_despite_raised_instance_ceiling() {
+        let alch = AlchemizeBuilder::new()
+            .with_max_file_size(usize::MAX)
+            .build();
+        let oversized = Input::bytes(vec![0u8; MAX_INPUT_BYTES as usize + 1], "huge.bin");
+        let err = alch.convert(&oversized).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("hard input limit"), "{msg}");
+        // 命中硬顶而非实例级上限（文案不含 max_file_size）。
+        assert!(!msg.contains("max_file_size"), "{msg}");
+    }
+
+    /// 硬上限同样约束同步口（先于分发；pdf 扩展名保证接线失效时也快速
+    /// 失败，不做真实解析）。
+    #[test]
+    fn convert_sync_enforces_hard_input_cap() {
+        let alch = AlchemizeBuilder::new()
+            .with_max_file_size(usize::MAX)
+            .build();
+        let input = Input::bytes(vec![0u8; MAX_INPUT_BYTES as usize + 1], "huge.pdf");
+        let err = alch.convert_sync(&input).unwrap_err();
+        assert!(err.to_string().contains("hard input limit"));
     }
 
     // -- facade 级 async/sync 零行为变化差分 ----------------------------------
