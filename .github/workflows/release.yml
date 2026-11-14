@@ -17,7 +17,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # 正则不含 build metadata（v1.2.3+build.5 拒绝）——9 语言模板同一约定，改需同步
       - name: Tag format (v<semver>)
         run: |
@@ -47,7 +47,7 @@ jobs:
           - { os: macos-latest, target: x86_64-apple-darwin }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -86,7 +86,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -110,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
