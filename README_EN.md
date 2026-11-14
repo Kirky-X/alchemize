@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/alchemize.svg" alt="Alchemize Logo" width="240">
+<img src="docs/assets/alchemize.png" alt="Alchemize Logo" width="240">
 
 [![Rust 2024](https://img.shields.io/badge/Rust-2024-edded?logo=rust&style=for-the-badge)](https://www.rust-lang.org/) [![Rustc 1.97.1+](https://img.shields.io/badge/Rustc-1.97.1+-orange.svg?style=for-the-badge)](https://www.rust-lang.org/) [![license](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
 
