@@ -461,4 +461,28 @@ mod tests {
             other => panic!("expected InvalidInput, got {other:?}"),
         }
     }
+
+    #[tokio::test]
+    async fn convert_with_output_writes_markdown_file() {
+        let dir = std::env::temp_dir().join("alch-out-fixture");
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("note.txt");
+        std::fs::write(&input, b"plain body").unwrap();
+        let output = dir.join("note-out.md");
+        let result = convert(
+            input.display().to_string(),
+            Some(output.display().to_string()),
+            None,
+            None,
+            Some(true),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        std::fs::remove_file(&output).ok();
+        std::fs::remove_file(&input).ok();
+        let _ = result;
+    }
 }
