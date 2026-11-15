@@ -244,3 +244,109 @@ fn deep_nesting_survives() {
     let out = conv(&html);
     assert_eq!(out, "deep");
 }
+
+// -- 95 攻坚补充（元素分支） --------------------------------------------------
+
+#[test]
+fn mathml_island_renders_inline_html() {
+    // 无 alttext 的 <math>：machine 分支直出 MathML 标记（inline_html 路径）。
+    let out = conv("<p>x<math><mi>a</mi><mo>+</mo><mi>b</mi></math>y</p>");
+    assert!(out.contains("<math"), "mathml markup present: {out}");
+    assert!(out.contains("x") && out.contains("y"));
+}
+
+#[test]
+fn mathml_hidden_alternative_is_skipped() {
+    // MathJax 双拷贝：aria-hidden 分支不进输出，DOM 序仍保序。
+    let out =
+        conv("<p><math aria-hidden=\"true\"><mi>ghost</mi></math><math><mi>real</mi></math></p>");
+    assert!(!out.contains("ghost"), "hidden copy leaked: {out}");
+    assert!(out.contains("real"), "{out}");
+}
+
+#[test]
+fn select_option_label_becomes_choice_text() {
+    let out = conv(
+        "<div><select><optgroup label=\"Group\"><option value=\"1\">One</option></optgroup></select></div>",
+    );
+    assert!(out.contains("Group"), "optgroup label: {out}");
+    assert!(out.contains("One"), "option text: {out}");
+}
+
+#[test]
+fn option_label_attribute_preferred() {
+    let out = conv("<div><select><option label=\"Short\">Long text</option></select></div>");
+    assert!(out.contains("Short"), "label attr: {out}");
+    assert!(
+        !out.contains("Long text"),
+        "inner text should not win: {out}"
+    );
+}
+
+#[test]
+fn code_block_with_link_falls_back_to_html() {
+    // code/pre 子树含链接：白名单净化 HTML 兜底（link 无法用围栏承载）。
+    let out = conv("<pre><code>see <a href=\"https://ok.example/x\">docs</a></code></pre>");
+    assert!(
+        out.contains("<code") || out.contains("<pre"),
+        "html fallback: {out}"
+    );
+    assert!(out.contains("docs"), "{out}");
+}
+
+#[test]
+fn pre_block_with_anchor_target_falls_back() {
+    // pre 内含被引用锚点：id 必须保留 → fallback。
+    let out = conv(
+        "<a href=\"#anchor\">ref</a><pre><code><span id=\"anchor\">payload</span></code></pre>",
+    );
+    assert!(out.contains("payload"), "{out}");
+    assert!(
+        out.contains("id=") || out.contains("#anchor"),
+        "anchor kept: {out}"
+    );
+}
+
+#[test]
+fn nested_heading_treated_as_container() {
+    // 标题嵌套标题：降级普通容器，内层标题仍成标题。
+    let out = conv("<h1>Outer <h2>Inner</h2> tail</h1>");
+    assert!(out.contains("Outer"), "{out}");
+    assert!(out.contains("Inner"), "{out}");
+}
+
+#[test]
+fn textarea_children_traversed() {
+    let out = conv("<div><textarea>typed &amp; saved</textarea></div>");
+    assert!(out.contains("typed"), "{out}");
+    assert!(out.contains("saved"), "{out}");
+}
+
+#[test]
+fn input_value_emitted_with_spaces() {
+    let out = conv("<div><input value=\"typed words\"></div>");
+    assert!(out.contains("typed words"), "{out}");
+}
+
+#[test]
+fn img_with_safe_src_becomes_image() {
+    let out = conv("<p>before<img src=\"https://safe.example/a.png\" alt=\"glyph\">after</p>");
+    assert!(out.contains("![glyph]"), "image syntax: {out}");
+    assert!(out.contains("https://safe.example/a.png"), "{out}");
+}
+
+#[test]
+fn video_with_safe_source_becomes_link() {
+    let out = conv(
+        "<div><video poster=\"https://safe.example/p.png\"><source src=\"https://safe.example/v.mp4\"></video></div>",
+    );
+    assert!(out.contains("p.png"), "poster: {out}");
+    assert!(out.contains("v.mp4"), "source link: {out}");
+}
+
+#[test]
+fn end_code_flushes_pending_raw() {
+    // 行内 code 空内容 + 相邻文本：EndCode 收尾不吞分隔。
+    let out = conv("<p>a<code></code>b</p>");
+    assert!(out.contains("a") && out.contains("b"), "{out}");
+}

@@ -666,3 +666,182 @@ mod tests {
         assert_eq!((decoded.dimensions()), (4, 4));
     }
 }
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+    use lopdf::{Stream, dictionary};
+
+    fn cmyk_image_dict() -> Dictionary {
+        dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Image",
+            "Width" => 4,
+            "Height" => 4,
+            "BitsPerComponent" => 8,
+            "ColorSpace" => "DeviceCMYK",
+        }
+    }
+
+    /// 40 unsupported-colorspace images：32 条入账 + 溢出合并成一行尾注。
+    #[test]
+    fn skip_ledger_caps_and_summarizes_overflow() {
+        let mut doc = Document::with_version("1.4");
+        let pages_id = doc.new_object_id();
+        let mut xobjs = dictionary! {};
+        for i in 0..40 {
+            let id = doc.add_object(Object::Stream(Stream::new(
+                cmyk_image_dict(),
+                vec![0u8; 64],
+            )));
+            xobjs.set(format!("Im{i}").as_bytes(), Object::Reference(id));
+        }
+        let resources_id = doc.add_object(dictionary! { "XObject" => xobjs });
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Resources" => Object::Reference(resources_id),
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog_id);
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+
+        let ex = extract_page_images(&buf);
+        assert!(ex.entries.is_empty());
+        // 32 条入账 + 第 33 条为溢出汇总行
+        assert_eq!(ex.skipped.len(), MAX_SKIP_REASONS + 1, "{:?}", ex.skipped);
+        let last = ex.skipped.last().unwrap();
+        assert!(last.contains("more skipped"), "summary line: {last}");
+        assert!(
+            last.contains(&(40 - MAX_SKIP_REASONS).to_string()),
+            "{last}"
+        );
+    }
+
+    /// /XObject 不是字典（这里给一个名字对象）→ 显式 skip，不 panic。
+    #[test]
+    fn xobject_not_a_dict_is_skipped() {
+        let mut doc = Document::with_version("1.4");
+        let pages_id = doc.new_object_id();
+        let resources_id = doc.add_object(dictionary! {
+            "XObject" => Object::Name(b"bogus".to_vec()),
+        });
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Resources" => Object::Reference(resources_id),
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog_id);
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+
+        let ex = extract_page_images(&buf);
+        assert!(ex.entries.is_empty());
+        assert_eq!(ex.skipped.len(), 1, "{:?}", ex.skipped);
+        assert!(ex.skipped[0].contains("not a dict"), "{:?}", ex.skipped);
+    }
+
+    /// Page 无 Resources → 走 Parent 链取继承资源（page_resources 循环体）。
+    #[test]
+    fn resources_inherited_from_parent_pages_node() {
+        let mut doc = Document::with_version("1.4");
+        let pages_id = doc.new_object_id();
+        let image_id = doc.add_object(Object::Stream(Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Image",
+                "Width" => 4,
+                "Height" => 4,
+                "BitsPerComponent" => 8,
+                "ColorSpace" => "DeviceRGB",
+            },
+            (0..48u8).collect::<Vec<_>>(),
+        )));
+        let resources_id = doc.add_object(dictionary! {
+            "XObject" => dictionary! { "Im0" => Object::Reference(image_id) },
+        });
+        // Page 不带 Resources；Pages 节点携带继承资源。
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1,
+                "Resources" => Object::Reference(resources_id),
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog_id);
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+
+        let ex = extract_page_images(&buf);
+        assert_eq!(ex.entries.len(), 1, "inherited: {:?}", ex.skipped);
+        assert_eq!(ex.positions, vec![(0, 0)]);
+    }
+
+    /// 非 Image 子类型（Form XObject）与悬空引用：is_image 门静默 continue，
+    /// 不入账、不 panic（ledger 只收 Image 相关 skip）。
+    #[test]
+    fn form_xobject_and_dangling_ref_are_silently_ignored() {
+        let mut doc = Document::with_version("1.4");
+        let pages_id = doc.new_object_id();
+        let form_id = doc.add_object(Object::Stream(Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Form",
+            },
+            b"".to_vec(),
+        )));
+        let dangling = Object::Reference((9_999, 0));
+        let resources_id = doc.add_object(dictionary! {
+            "XObject" => dictionary! {
+                "Form0" => Object::Reference(form_id),
+                "Dangling" => dangling,
+            },
+        });
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Resources" => Object::Reference(resources_id),
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog_id);
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+
+        let ex = extract_page_images(&buf);
+        assert!(ex.entries.is_empty());
+        assert!(ex.skipped.is_empty(), "{:?}", ex.skipped);
+    }
+}

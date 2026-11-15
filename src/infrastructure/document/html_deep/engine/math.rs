@@ -426,3 +426,86 @@ mod tests {
         assert_eq!(one("\\(\\)"), "");
     }
 }
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+
+    fn one(text: &str) -> String {
+        spans(text)
+            .into_iter()
+            .next()
+            .map(|(_, _, v)| v)
+            .unwrap_or_default()
+    }
+
+    /// 显式跨度拥有内部定界符：外层 \(...\) 内部的 $ 对不再拆出内层片段；
+    /// 载荷含裸 $ 被 normalized_span 整体拒绝（归一化失败 → 不产 span）。
+    #[test]
+    fn explicit_span_owns_inner_dollars() {
+        let all = spans(r"\(a $b$ c\)");
+        assert!(all.is_empty(), "raw-$ payload rejected wholesale: {all:?}");
+        // 对照：内部定界符不被二次扫描（扫描器不会先吃内层 $b$ 再拒外层）
+        assert_eq!(one(r"\(a b c\)"), "$a b c$");
+    }
+
+    /// \verb* 与非字母定界符：原样字面化载荷。
+    #[test]
+    fn verb_command_is_literalized() {
+        assert_eq!(one("$\\verb|x+y|$"), "$\\verb|x+y|$");
+        assert_eq!(one("$\\verb*|x+y|$"), "$\\verb*|x+y|$");
+        // 定界符须非空白非字母非 '<'：空白 → 拒绝；字母 run 并入命令名，
+        // "verbab" 不是 verb 命令 → 原样通过
+        assert_eq!(one("$\\verb |x|$"), "");
+        assert_eq!(one("$\\verbab$"), "$\\verbab$");
+    }
+
+    /// \verb 载荷含换行或 HTML 起始 → 拒绝（防注入）。
+    #[test]
+    fn verb_payload_with_newline_or_html_is_rejected() {
+        assert_eq!(one("$\\verb|x\ny|$"), "");
+        assert_eq!(one("$\\verb|x<y|$"), "");
+    }
+
+    /// 文本类命令（\text/\texttt/\hbox…）后跟 `{`：进入 text_depth 跟踪。
+    #[test]
+    fn text_command_brace_tracking() {
+        assert_eq!(one("$\\text{a &lt; b}$"), "$\\text{a &lt; b}$");
+        // text_depth > 0 时载荷含 HTML 起始（< 后跟字母）→ 整体拒绝
+        assert_eq!(one("$\\text{a <b}$"), "");
+        // < 后跟空白非 HTML 起始 → 字面保留（"< " 前缀改写）
+        assert!(one("$\\text{a < b}$").contains("< "), "literal lt kept");
+        // 未闭合 brace → 拒绝
+        assert_eq!(one("$\\texttt{x$"), "");
+    }
+
+    /// % 注释：删到行尾（含 \r\n），且不插入 token。
+    #[test]
+    fn percent_comment_stripped_to_eol() {
+        assert_eq!(one("$a%secret\nb$"), "$ab$");
+        assert_eq!(one("$a%secret\r\nb$"), "$ab$");
+        // 控制词后的注释拼接会改写控制词 → 补空格
+        assert_eq!(one("$\\alpha%note\nbeta$"), "$\\alpha beta$");
+    }
+
+    /// 空白折叠：多空白合并为一个间隔；escaped 空白字面化。
+    #[test]
+    fn whitespace_runs_collapse() {
+        assert_eq!(one("$a   \t\n  b$"), "$a b$");
+        assert_eq!(one("$a\\ b$"), "$a\\ b$");
+    }
+
+    /// `<` 在 text_depth 之外：以 `< ` 前缀字面化（非拒绝）。
+    #[test]
+    fn bare_lt_outside_text_is_escaped_prefix() {
+        let got = one("$a < b$");
+        assert!(got.contains("< "), "got {got:?}");
+    }
+
+    /// 载荷含 Markdown 资源语法（链接/图片）→ markdown_payload_is_safe 拒绝。
+    #[test]
+    fn markdown_resource_payload_rejected() {
+        assert_eq!(one("$[x](y)$"), "");
+        assert_eq!(one("$![x](y)$"), "");
+    }
+}

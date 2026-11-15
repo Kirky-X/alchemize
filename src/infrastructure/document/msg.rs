@@ -1012,4 +1012,112 @@ mod tests {
             result.markdown
         );
     }
+
+    // -- 95 攻坚：发件人回退与单部件 MIME 分型 ------------------------------
+
+    /// Minimal fixture with caller-chosen root property streams (no
+    /// attachments) — variants for the sender fallback and single-part
+    /// MIME framing paths.
+    fn minimal_msg(
+        with_sender_name: bool,
+        body_text: Option<&str>,
+        body_html: Option<&str>,
+    ) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut props = Vec::new();
+        props.extend(prop_record(
+            (MESSAGE_CODEPAGE << 16) | PT_I4,
+            u32_value(65001),
+        ));
+        let mut streams: Vec<(u32, Vec<u8>)> = Vec::new();
+        if with_sender_name {
+            let name = utf16("Alice");
+            props.extend(prop_record(
+                (SENDER_NAME << 16) | PT_UNICODE,
+                var_value(name.len() as u32),
+            ));
+            streams.push((SENDER_NAME, name));
+        }
+        {
+            let addr = utf16("alice@example.com");
+            props.extend(prop_record(
+                (SENDER_EMAIL << 16) | PT_UNICODE,
+                var_value(addr.len() as u32),
+            ));
+            streams.push((SENDER_EMAIL, addr));
+        }
+        if let Some(text) = body_text {
+            let body = utf16(text);
+            props.extend(prop_record(
+                (BODY_TEXT << 16) | PT_UNICODE,
+                var_value(body.len() as u32),
+            ));
+            streams.push((BODY_TEXT, body));
+        }
+        if let Some(html) = body_html {
+            props.extend(prop_record(
+                (BODY_HTML << 16) | PT_BINARY,
+                var_value(html.len() as u32),
+            ));
+            streams.push((BODY_HTML, html.as_bytes().to_vec()));
+        }
+        let cursor = Cursor::new(Vec::new());
+        let mut cf = cfb::CompoundFile::create(cursor).unwrap();
+        cf.create_stream(PROPS_STREAM)
+            .unwrap()
+            .write_all(&props)
+            .unwrap();
+        for (id, bytes) in streams {
+            let suffix = if id == BODY_HTML { "0102" } else { "001F" };
+            cf.create_stream(format!("/__substg1.0_{id:04X}{suffix}"))
+                .unwrap()
+                .write_all(&bytes)
+                .unwrap();
+        }
+        cf.into_inner().into_inner()
+    }
+
+    #[tokio::test]
+    async fn sender_addr_without_name_falls_back_to_addr() {
+        let result = MsgConverter::new()
+            .convert(Input::bytes(
+                minimal_msg(false, Some("body"), None),
+                "m.msg",
+            ))
+            .await
+            .unwrap();
+        let md = &result.markdown;
+        assert!(md.contains("alice@example.com"), "{md}");
+        assert!(!md.contains("Alice"), "no name: {md}");
+    }
+
+    #[tokio::test]
+    async fn text_only_body_single_part_framing() {
+        let result = MsgConverter::new()
+            .convert(Input::bytes(
+                minimal_msg(true, Some("plain body"), None),
+                "m.msg",
+            ))
+            .await
+            .unwrap();
+        let md = &result.markdown;
+        assert!(md.contains("plain body"), "{md}");
+        // 单部件 wire 无 html 段（间接证据：转换产物无 html 专有标记）
+        assert!(!md.contains("<p>"), "no html conversion: {md}");
+    }
+
+    #[tokio::test]
+    async fn html_only_body_single_part_framing() {
+        let result = MsgConverter::new()
+            .convert(Input::bytes(
+                minimal_msg(true, None, Some("<p>html body</p>")),
+                "m.msg",
+            ))
+            .await
+            .unwrap();
+        let md = &result.markdown;
+        // HTML 体经转换进 markdown；单部件 wire 下无 text/plain 段
+        assert!(md.contains("html body"), "{md}");
+        assert!(!md.contains("plain body"), "no text part: {md}");
+    }
 }
