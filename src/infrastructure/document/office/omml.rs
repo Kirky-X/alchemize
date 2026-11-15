@@ -693,3 +693,90 @@ mod edge_tests {
         assert!(got.contains("x_{i}"), "{got}");
     }
 }
+
+#[cfg(test)]
+mod edge_tests2 {
+    use super::*;
+
+    fn omml(inner: &str) -> Vec<u8> {
+        format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="w" xmlns:m="m"><w:body><w:p><m:oMath>{inner}</m:oMath></w:p></w:body></w:document>"#
+        )
+        .into_bytes()
+    }
+
+    fn convert(inner: &str) -> String {
+        let (out, _) = convert_document_omml(&omml(inner));
+        assert_eq!(out.len(), 1, "one island expected");
+        out[0].clone()
+    }
+
+    /// nary（求和/积分族）：sub/sup/e 三段 → \sum_{}^{} 前缀。
+    #[test]
+    fn nary_maps_to_sum() {
+        let got = convert(
+            r#"<m:nary><m:sub><m:r><m:t>i</m:t></m:r></m:sub><m:sup><m:r><m:t>n</m:t></m:r></m:sup><m:e><m:r><m:t>k</m:t></m:r></m:e></m:nary>"#,
+        );
+        assert_eq!(got, "\\sum_{i}^{n} k");
+    }
+
+    /// func：函数名 + 参数 → \left( \right)。
+    #[test]
+    fn func_maps_to_named_call() {
+        let got = convert(
+            r#"<m:func><m:fName><m:r><m:t>sin</m:t></m:r></m:fName><m:e><m:r><m:t>x</m:t></m:r></m:e></m:func>"#,
+        );
+        assert_eq!(got, "sin\\left(x\\right)");
+    }
+
+    /// acc / bar：单槽装饰映射 \hat / \overline。
+    #[test]
+    fn acc_and_bar_decorations() {
+        let got = convert(r#"<m:acc><m:e><m:r><m:t>a</m:t></m:r></m:e></m:acc>"#);
+        assert_eq!(got, "\\hat{a}");
+        let got = convert(r#"<m:bar><m:e><m:r><m:t>b</m:t></m:r></m:e></m:bar>"#);
+        assert_eq!(got, "\\overline{b}");
+    }
+
+    /// eqArr（方程组行）与 m（矩阵）：多子元素聚合 \\ 分隔。
+    #[test]
+    fn eqarr_and_matrix_aggregate_children() {
+        let got = convert(
+            r#"<m:eqArr><m:e><m:r><m:t>a</m:t></m:r></m:e><m:e><m:r><m:t>b</m:t></m:r></m:e></m:eqArr>"#,
+        );
+        assert_eq!(got, "\\begin{aligned}a \\\\ b\\end{aligned}");
+        let got = convert(
+            r#"<m:m><m:mr><m:r><m:t>1</m:t></m:r></m:mr><m:mr><m:r><m:t>2</m:t></m:r></m:mr></m:m>"#,
+        );
+        assert_eq!(got, "\\begin{matrix}1 \\\\ 2\\end{matrix}");
+    }
+
+    /// 空 sSubSup 子段（idx 未满）走 unknown-skip； End 分支收敛。
+    #[test]
+    fn ssubsup_with_missing_child_skips_unknown() {
+        let got = convert(
+            r#"<m:sSubSup><m:unknown><m:r><m:t>noise</m:t></m:r></m:unknown><m:e><m:r><m:t>x</m:t></m:r></m:e><m:sub><m:r><m:t>i</m:t></m:r></m:sub><m:sup><m:r><m:t>j</m:t></m:r></m:sup></m:sSubSup>"#,
+        );
+        assert_eq!(got, "x_{i}^{j}");
+    }
+
+    /// 嵌套分数内含实体（GeneralRef 在 collect_text_until 内解码）。
+    #[test]
+    fn nested_fraction_with_entity_decodes() {
+        let got = convert(
+            r#"<m:f><m:num><m:r><m:t>a &amp; b</m:t></m:r></m:num><m:den><m:r><m:t>c</m:t></m:r></m:den></m:f>"#,
+        );
+        // collect_text_until 对嵌套实体直出（未走 escape_latex）——钉住现行为
+        assert_eq!(got, "\\frac{a & b}{c}");
+    }
+
+    /// 非 oMath 的其它 XML（Err/Eof 前置）不产 island。
+    #[test]
+    fn document_without_math_yields_nothing() {
+        let (out, warnings) = convert_document_omml(
+            br#"<w:document xmlns:w="w"><w:body><w:p>plain</w:p></w:body></w:document>"#,
+        );
+        assert!(out.is_empty());
+        assert_eq!(warnings.converted, 0);
+    }
+}
