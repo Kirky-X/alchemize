@@ -115,7 +115,7 @@ git branch -d feat/my-engine
 ### 测试要求
 
 - 新增行为必须带钉住该行为的测试；修缺陷先写暴露缺陷的测试再修。
-- **覆盖率门禁 ≥89%**：`cargo llvm-cov --features full` 度量，当前 89.44%。（曾自 documented ≥90%，后续功能提交令水位漂移；回升 90 前以实测为准，diff 覆盖率门禁仍为 ≥90% 不降标。）
+- **覆盖率门禁 ≥90%**：`cargo llvm-cov --features full` 度量（2026-11-15 用户指令统一全家族最低 90）。实测 89.61%（发版轮），回升 90 前以补测试为目标、CI coverage job 会拦；diff 覆盖率门禁仍为 ≥90% 不降标。
 - 金样输出变更（`tests/golden.rs`）必须在提交说明中写明变更理由。
 - 测试三档都要过：`cargo test`（default 168，core + text 瘦身档）、`cargo test --features full`（912 passed，另 5 ignored）与 `cargo test --all-features`（917 passed，另 5 ignored，含 cli/mcp）。
 

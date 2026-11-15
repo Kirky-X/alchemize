@@ -61,8 +61,11 @@ jobs:
       # mcp 面（alch mcp 子命令，二进制折叠后唯一入口）：full 伞面不含
       # mcp，工具注册面 + 子命令单元测试 + stdin EOF 端到端在此单独执行。
       - run: cargo test --bin alch --test mcp_registration --features "full,mcp"
-      - name: Coverage global (fail under 89% lines)
-        run: cargo llvm-cov --features full --fail-under-lines 89 --lcov --output-path lcov.info
+      # 全局门禁 ≥90%（用户 2026-11-15 指令：全家族最低 90，llvm-cov 口径）；
+      # diff coverage 门禁 ≥90% 不变。实测 89.61%（2026-11-15 发版轮），回升 90
+      # 前本 job 会拦——按 CONTRIBUTING「不降标、以补测试回升」执行。
+      - name: Coverage global (fail under 90% lines)
+        run: cargo llvm-cov --features full --fail-under-lines 90 --lcov --output-path lcov.info
       # diff coverage：只对相对基线分支新增/修改的行设阈值——新代码 0 覆盖也能拉高全局覆盖率的盲区由这层堵住
       # （SKILL.md 核心原则 4 + references/coverage-standards.md「diff coverage」段的落地）
       # uvx 跑 diff-cover（setup-uv 自带缓存，避免 pipx 每次 CI 冷安装）
