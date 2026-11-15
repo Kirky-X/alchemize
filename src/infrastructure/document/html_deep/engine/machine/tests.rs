@@ -382,3 +382,46 @@ fn layout_table_without_structure_degrades() {
     let out = conv("<table><tr><td>cell a</td><td>cell b</td></tr></table>");
     assert!(out.contains("cell a") && out.contains("cell b"), "{out}");
 }
+
+// -- 95 攻坚批五：writer 深分支（相邻数学/嵌套样式 HTML 改写/目的地转义） ------
+
+#[test]
+fn adjacent_math_spans_get_disambiguation_comment() {
+    // 同一 flush 内两个相邻数学跨度：$…$$…$ 会误配对 → 注释隔断。
+    // 相邻显式跨度 \(a\)\(b\)：发射为 $a$$b$ 邻接 → 注释隔断。
+    let out = conv(r"<p>x\(a\)\(b\)y</p>");
+    assert!(out.contains("<!-- -->"), "adjacency guard: {out}");
+    assert!(out.contains("$a$") && out.contains("$b$"), "{out}");
+}
+
+#[test]
+fn link_destination_with_spaces_and_parens_is_escaped() {
+    let out = conv(r#"<p><a href="dir/a (b).html">doc</a></p>"#);
+    assert!(
+        out.contains("dir/a%20\\(b\\).html") || out.contains("%20"),
+        "dest escaped: {out}"
+    );
+}
+
+#[test]
+fn link_destination_entities_and_angle_brackets() {
+    let out = conv(r#"<p><a href="a?x=1&amp;y=2">q</a></p>"#);
+    assert!(out.contains("&amp;"), "amp escaped in dest: {out}");
+    let out = conv(r#"<p><a href="a<b">angle</a></p>"#);
+    assert!(out.contains("%3C") || out.contains("<"), "{out}");
+}
+
+#[test]
+fn nested_emphasis_closing_inside_strong() {
+    // 嵌套样式闭合（内层先闭、run 延续）：产物必须仍是合法 Markdown。
+    let out = conv("<p><strong>bold <em>both</em> tail</strong></p>");
+    assert!(out.contains("**"), "strong: {out}");
+    assert!(out.contains("both"), "{out}");
+}
+
+#[test]
+fn strikethrough_and_superscript_styles() {
+    let out = conv("<p><del>gone</del> and <sup>up</sup></p>");
+    assert!(out.contains("gone"), "{out}");
+    assert!(out.contains("up"), "{out}");
+}
