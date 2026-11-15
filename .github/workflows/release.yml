@@ -129,16 +129,23 @@ jobs:
           if [[ "$VERSION" == *-* ]]; then
             ARGS+=(--prerelease)
           fi
+          # find 收集（bash 无 globstar：artifacts/**/* 会漏一级目录的 checksums.txt）
+          FILES=$(find artifacts -type f | tr '\n' ' ')
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release ${TAG} already exists; skip creation, refresh artifacts only (idempotent)"
-            gh release upload "$TAG" artifacts/**/* --clobber
+            # shellcheck disable=SC2086
+            gh release upload "$TAG" $FILES --clobber
             exit 0
           fi
-          gh release create "$TAG" artifacts/**/* "${ARGS[@]}"
+          # shellcheck disable=SC2086
+          gh release create "$TAG" $FILES "${ARGS[@]}"
 
       # uniqueness 断言（最终一致性窗口轮询 5×3s——CodeNexus v0.4.0 attempt1
-      # 实录：create 成功后 2s 列表读到 0 致断言误杀、publish 被跳过）
+      # 实录：create 成功后 2s 列表读到 0 致断言误杀、publish 被跳过）。
+      # 仅对 tag 推送路径生效：dispatch 跑在分支上无版本 tag 可断言（家族
+      # 先例），幂等性由 create 步的 gh release view 守卫承担。
       - name: Verify release uniqueness
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
