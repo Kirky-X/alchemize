@@ -100,7 +100,7 @@ cargo build --release          # binary: target/release/alch
 # Opt in per format (example: PDF + Word + HTML; enable only the features you need)
 cargo build --release --features pdf,docx,html
 
-# Full build (all 28 conversion features: MinerU cloud + self-hosted office deep parsers + containers/data/e-mail + LibreOffice + local ASR)
+# Full build (all 30 conversion features: MinerU cloud + self-hosted office deep parsers + containers/data/e-mail + LibreOffice + local ASR)
 cargo build --release --features full
 
 # Install locally

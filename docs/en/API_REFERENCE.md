@@ -56,7 +56,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 | `tar` / `gzip` / `xz` / `zstd` / `sevenz` | The archive container family | off |
 | `cli` | CLI skeleton (required-features of `[[bin]] alch`) | **on** |
 | `mcp` | The `alch mcp` subcommand tool surface (implies `cli`) | off |
-| `full` | The set of all 28 conversion features (format family + backends/data/containers; excludes `cli`/`mcp`) | off |
+| `full` | The set of all 30 conversion features (format family + backends/data/containers; excludes `cli`/`mcp`) | off |
 
 Additional (non-feature) exports: `domain::feature_map` provides the `EXTENSION_FEATURES` mapping table and the data surface `features_for_extension` / `missing_features` / `enabled_features`, used to answer "which capability features does this extension need" and "which ones does this build enable"; the CLI's `unsupported format: … requires the 'pdf' feature` hint is assembled from it.
 

@@ -58,7 +58,7 @@ cargo build                        # minimal build: text/code fencing only (defa
 cargo build --features pdf,docx    # enable exactly the format features you need
 cargo build --features pdf,pdf-cloud # PDF local chain + MinerU cloud fallback (endpoint config also required)
 cargo build --features audio       # local transcription (implies media; model bundle + ORT library also required)
-cargo build --features full        # everything (28 conversion features)
+cargo build --features full        # everything (30 conversion features)
 ```
 
 ### ❓ Why can't the default build convert pdf/docx?
@@ -80,7 +80,7 @@ The default tier contains only the 9 core dependencies + `encoding_rs` (text) an
 
 ### ❓ What are the system requirements?
 
-Rust 1.91+ (the `rust-version` gate). Optional external tools: ffmpeg (video), pandoc (LaTeX high fidelity). ASR additionally needs a model bundle and the onnxruntime dynamic library (paths in the [User Guide](USER_GUIDE.md#-asr-model-bundle)).
+Rust 1.97.1+ (the `rust-version` gate). Optional external tools: ffmpeg (video), pandoc (LaTeX high fidelity). ASR additionally needs a model bundle and the onnxruntime dynamic library (paths in the [User Guide](USER_GUIDE.md#-asr-model-bundle)).
 
 ## 🛠️ Usage and Features
 
@@ -122,7 +122,7 @@ Do not open a public issue. Use a GitHub private security advisory (the repo's S
 
 ### ❓ How fast is Alchemize?
 
-This repo has no criterion benchmark data and provides no performance numbers (none are fabricated). Design-level trade-offs in [Architecture · Performance Design](ARCHITECTURE.md#-performance-design): single-threaded runtime, async remote paths, no global health cache, bounded response memory.
+Measured criterion benchmark data is in the [Benchmarks](benchmarks.md) doc (real files, median-based). Design-level trade-offs in [Architecture · Performance Design](ARCHITECTURE.md#-performance-design): multi-threaded runtime, async remote paths, no global health cache, bounded response memory.
 
 ### ❓ What about memory usage?
 

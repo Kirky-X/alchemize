@@ -58,7 +58,7 @@ cargo build                        # 最小构建：仅文本/代码围栏（def
 cargo build --features pdf,docx    # 需要哪些格式就开哪些格式 feature
 cargo build --features pdf,pdf-cloud # PDF 本地链 + MinerU 云端兜底（还需配置端点）
 cargo build --features audio       # 本地转录（自动带入 media；还需模型 bundle + ORT 库）
-cargo build --features full        # 全量（28 个转换类 feature）
+cargo build --features full        # 全量（30 个转换类 feature）
 ```
 
 ### ❓ 为什么默认不能转 pdf/docx？
@@ -80,7 +80,7 @@ default 档只含核心 9 依赖 + `encoding_rs`（文本），没有任何网�
 
 ### ❓ 系统要求是什么？
 
-Rust 1.91+（`rust-version` 门禁）。可选外部工具：ffmpeg（视频）、pandoc（LaTeX 高保真）。ASR 另需模型 bundle 与 onnxruntime 动态库（路径见[用户指南](USER_GUIDE.md#-asr-模型-bundle)）。
+Rust 1.97.1+（`rust-version` 门禁）。可选外部工具：ffmpeg（视频）、pandoc（LaTeX 高保真）。ASR 另需模型 bundle 与 onnxruntime 动态库（路径见[用户指南](USER_GUIDE.md#-asr-模型-bundle)）。
 
 ## 🛠️ 使用与特性
 
@@ -122,7 +122,7 @@ alch doctor && alch formats         # 先看引擎与格式
 
 ### ❓ Alchemize 有多快？
 
-本仓暂无 criterion 基准数据，不提供性能数字（不编造）。设计层面的取舍见[架构文档·性能设计](ARCHITECTURE.md#-性能设计)：单线程 runtime、异步远端路径、无全局健康缓存、响应内存有界。
+实测 criterion 基准数据见[基准测试](benchmarks.md)（真实文件、中位数口径）。设计层面的取舍见[架构文档·性能设计](ARCHITECTURE.md#-性能设计)：多线程 runtime、异步远端路径、无全局健康缓存、响应内存有界。
 
 ### ❓ 内存占用如何？
 

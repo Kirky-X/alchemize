@@ -56,7 +56,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 | `tar` / `gzip` / `xz` / `zstd` / `sevenz` | 归档容器族 | 关 |
 | `cli` | CLI 骨架（`[[bin]] alch` 的 required-features） | **开** |
 | `mcp` | `alch mcp` 子命令工具面（隐含 `cli`） | 关 |
-| `full` | 全部 28 个转换类 feature 集合（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | 关 |
+| `full` | 全部 30 个转换类 feature 集合（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | 关 |
 
 附加（非 feature）导出：`domain::feature_map` 提供 `EXTENSION_FEATURES` 映射表与 `features_for_extension` / `missing_features` / `enabled_features` 数据面，用于判断「某扩展名需要哪些能力 feature」「本构建开启了哪些」；CLI 的 `unsupported format: … requires the 'pdf' feature` 提示即由此拼装。
 

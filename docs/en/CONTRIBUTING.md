@@ -63,7 +63,7 @@ Note: `audio` (included in `full`) works through the crates.io vecboost transcri
 | `tar`/`gzip`/`xz`/`zstd`/`sevenz` | Archive container family | `.tgz` needs `tar`+`gzip` |
 | `mcp` | MCP tool surface (the `alch mcp` subcommand, rmcp stdio; implies `cli`) | Not in default |
 | `cli` (default) | CLI skeleton (sdforge + inklog) | The required-features of `[[bin]] alch` |
-| `full` | All 28 conversion features (excludes `cli`/`mcp`) | |
+| `full` | All 30 conversion features (excludes `cli`/`mcp`) | |
 
 ### Build and Test
 

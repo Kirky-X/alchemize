@@ -29,7 +29,7 @@ cargo audit              # run the security audit
 cargo update -d          # update the advisory database
 ```
 
-Key dependency policy: ZIP container parsing uses `zip` 9.x (the extract-family paths affected by RUSTSEC-2026-0367/0368/0369/0429 are outside the used surface; pinned to 9.4.1); TLS goes through rustls; `vecboost` comes in as a crates.io registry dependency (0.3).
+Key dependency policy: ZIP container parsing uses `zip` 9.x (the extract-family paths affected by RUSTSEC-2026-0367/0368/0369/0429 are outside the used surface; pinned to 9.5.1); TLS goes through rustls; `vecboost` comes in as a crates.io registry dependency (0.3).
 
 ### Dependency Approval Process
 
@@ -48,7 +48,7 @@ A new dependency must satisfy: default features off (`default-features = false` 
 - `Cargo.lock` is committed to lock the dependency graph; dependency upgrades must pass `cargo audit`.
 - Every source file carries the two-line `SPDX-License-Identifier: Apache-2.0` header (59/59), so license scanners can identify file-level ownership mechanically.
 - The specmark spec directory is not committed (gitignored); the main specs serve as the local source of truth.
-- The CLI/MCP wrapping frameworks sdforge (MIT, crates.io version pinned 0.5.0-rc.10) and rmcp (exclusive to the `mcp` feature) are covered by `cargo audit` as well.
+- The CLI/MCP wrapping frameworks sdforge (MIT, crates.io version pinned 0.5.1) and rmcp (exclusive to the `mcp` feature) are covered by `cargo audit` as well.
 - The html-deep engine (feature `html`) is this repo's own iterative state machine (Apache-2.0; differential verification alignment records in repo history), depending on scraper 0.29, dom_smoothie 0.19, icu_properties 2.4 (all in the dependency tree); `--base-url` rewrites links only when explicitly provided.
 - lopdf 0.47 (crates.io direct, MIT): decompression-bomb protection sets explicit limits at the call sites — document parsing and per-page text extraction are capped at 64 MiB per page/stream (`LoadOptions::with_max_decompressed_size` + `extract_text_chunks_with_limit`), image streams use `decompressed_content_with_limit` at 64 MiB, plus a 256 MiB whole-document cumulative text budget (rejection peaks at roughly the budget + one page's 64 MiB); over-limit is rejected explicitly as `AlchemizeError::Pdf`. Bomb-class errors (`MemoryLimitExceeded`) propagate natively from lopdf with no swallowed path; corrupted streams (non-bomb decoding errors) fall back to producing garbled text from the original compressed bytes — data integrity is backed by the output quality tier and poses no memory risk.
 

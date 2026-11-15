@@ -162,7 +162,7 @@ Four defense lines (the full model in the [Security doc](SECURITY.md)):
 
 ## ⚡ Performance Design
 
-Design-level trade-offs (this repo has no criterion benchmark data and provides no performance numbers):
+Design-level trade-offs (measured criterion data in the [Benchmarks](benchmarks.md) doc):
 
 - **Multi-threaded runtime**: `alch` (`main.rs` explicitly builds a multi-thread runtime; the `alch mcp` subcommand shares the same process) is multi-threaded (the MCP wrapper's internal `block_in_place` requires it); conversion is granular to a single file with no cross-task shared-state contention.
 - **async-trait ports**: remote and transcription paths are fully async; polling backoff goes through limiteron's `delay_for_attempt` — no busy waiting.

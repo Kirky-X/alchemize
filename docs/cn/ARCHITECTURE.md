@@ -162,7 +162,7 @@ tar/tgz/gz/xz/zst/7z 走注册表内的容器转换器：它们需要同一个�
 
 ## ⚡ 性能设计
 
-设计级取舍（本仓暂无 criterion 基准数据，不提供性能数字）：
+设计级取舍（实测 criterion 数据见[基准测试](benchmarks.md)）：
 
 - **多线程 runtime**：`alch`（`main.rs` 显式构建 multi-thread runtime，`alch mcp` 子命令同进程共享）为多线程（MCP 包装器内部 `block_in_place` 要求如此）；转换以单文件为粒度，无跨任务共享状态竞争。
 - **async-trait 端口**：远端与转录路径全异步，轮询退避经 limiteron `delay_for_attempt`，不忙等。

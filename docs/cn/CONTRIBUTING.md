@@ -63,7 +63,7 @@ cargo build --features full
 | `tar`/`gzip`/`xz`/`zstd`/`sevenz` | 归档容器族 | `.tgz` 需 `tar`+`gzip` |
 | `mcp` | MCP 工具面（`alch mcp` 子命令，rmcp stdio；隐含 `cli`） | 不随 default |
 | `cli`（default） | CLI 骨架（sdforge + inklog） | `[[bin]] alch` 的 required-features |
-| `full` | 全部 28 个转换类 feature（不含 `cli`/`mcp`） | |
+| `full` | 全部 30 个转换类 feature（不含 `cli`/`mcp`） | |
 
 ### 构建与测试
 

@@ -100,7 +100,7 @@ cargo build --release          # 二进制：target/release/alch
 # 按需开启格式（示例：PDF + Word + HTML；需要哪些格式就开哪些 feature）
 cargo build --release --features pdf,docx,html
 
-# 全功能（全部 28 个转换类 feature：MinerU 云端 + 自研 office 深解析 + 容器/数据/邮件 + LibreOffice + 本地 ASR）
+# 全功能（全部 30 个转换类 feature：MinerU 云端 + 自研 office 深解析 + 容器/数据/邮件 + LibreOffice + 本地 ASR）
 cargo build --release --features full
 
 # 安装到本地
