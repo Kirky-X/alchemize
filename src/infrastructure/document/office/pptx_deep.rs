@@ -753,7 +753,7 @@ mod tests {
     use super::*;
     use crate::domain::document::Cell;
 
-    const PNG_1X1: &[u8] = &[
+    pub(super) const PNG_1X1: &[u8] = &[
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
         0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
         0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
@@ -762,7 +762,7 @@ mod tests {
     ];
 
     /// Build a minimal PPTX zip from (part name, bytes) pairs.
-    fn pptx_zip(parts: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    pub(super) fn pptx_zip(parts: &[(&str, Vec<u8>)]) -> Vec<u8> {
         use std::io::Write;
         let buf = Cursor::new(Vec::new());
         let mut w = zip::ZipWriter::new(buf);
@@ -774,11 +774,11 @@ mod tests {
         w.finish().unwrap().into_inner()
     }
 
-    fn str(s: &str) -> Vec<u8> {
+    pub(super) fn str(s: &str) -> Vec<u8> {
         s.as_bytes().to_vec()
     }
 
-    fn slide(title_xml: &str) -> String {
+    pub(super) fn slide(title_xml: &str) -> String {
         format!(
             r#"<?xml version="1.0"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree>{title_xml}</p:spTree></p:cSld></p:sld>"#
         )
@@ -1074,5 +1074,141 @@ mod tests {
         let c = Cell::text("x");
         assert_eq!(c.col_span, 1);
         assert_eq!(c.row_span, 1);
+    }
+}
+
+#[cfg(test)]
+mod edge_tests2 {
+    use super::tests::{PNG_1X1, pptx_zip, slide, str};
+    use super::*;
+
+    /// 讲者备注：notesSlideN.xml 文本进 document.notes（Endnote id slideN-notes）。
+    #[tokio::test]
+    async fn speaker_notes_become_endnotes() {
+        let bytes = pptx_zip(&[
+            (
+                "ppt/slides/slide1.xml",
+                str(&slide(
+                    r#"<p:sp><p:txBody><a:p><a:r><a:t>Slide body</a:t></a:r></a:p></p:txBody></p:sp>"#,
+                )),
+            ),
+            (
+                "ppt/notesSlides/notesSlide1.xml",
+                str(
+                    r#"<?xml version="1.0"?><p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Remember the deadline</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>"#,
+                ),
+            ),
+        ]);
+        let doc = parse(&bytes).unwrap().document;
+        assert_eq!(doc.notes.len(), 1, "one endnote expected");
+        let note = &doc.notes[0];
+        assert!(note.id.contains("slide1-notes"), "note id: {}", note.id);
+        assert!(
+            note.blocks.iter().any(|b| matches!(
+                b,
+                Block::Paragraph(inlines) if matches!(&inlines[0], Inline::Text { text, .. } if text.contains("deadline"))
+            )),
+            "note text: {:?}",
+            note.blocks
+        );
+    }
+
+    /// 组内裸段落（grpSp 包裹、无 ph）：降级为普通段落。
+    #[tokio::test]
+    async fn bare_paragraph_inside_group_becomes_paragraph() {
+        let bytes = pptx_zip(&[(
+            "ppt/slides/slide1.xml",
+            str(&slide(
+                r#"<p:grpSp><p:sp><p:txBody><a:p><a:r><a:t>grouped text</a:t></a:r></a:p></p:txBody></p:sp></p:grpSp>"#,
+            )),
+        )]);
+        let doc = parse(&bytes).unwrap().document;
+        let has_grouped = doc.blocks.iter().any(|b| match b {
+            Block::Paragraph(inlines) => {
+                matches!(&inlines[0], Inline::Text { text, .. } if text == "grouped text")
+            }
+            _ => false,
+        });
+        assert!(has_grouped, "bare group paragraph: {:?}", doc.blocks);
+    }
+
+    /// r:embed 引用经 slide rels → PNG 资产抽取（图片独立段落）。
+    #[tokio::test]
+    async fn picture_with_rels_extracts_asset() {
+        let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/pic1.png"/></Relationships>"#;
+        let slide_xml =
+            slide(r#"<p:pic><p:blipFill><a:blip r:embed="rId2"/></p:blipFill></p:pic>"#);
+        let bytes = pptx_zip(&[
+            ("ppt/slides/slide1.xml", str(&slide_xml)),
+            ("ppt/slides/_rels/slide1.xml.rels", str(rels)),
+            ("ppt/media/pic1.png", PNG_1X1.to_vec()),
+        ]);
+        let parsed = parse(&bytes).unwrap();
+        assert_eq!(parsed.document.assets.len(), 1, "one asset");
+        let md_blocks = &parsed.document.blocks;
+        let has_image = md_blocks.iter().any(|b| match b {
+            Block::Paragraph(inlines) => {
+                matches!(&inlines[0], Inline::Image { .. })
+            }
+            _ => false,
+        });
+        assert!(has_image, "image block present: {md_blocks:?}");
+    }
+
+    /// 多张 slide 之间插 Rule；无标题 slide 合成 "Slide N" 标题。
+    #[tokio::test]
+    async fn multiple_slides_get_rules_and_synthesized_titles() {
+        let body = |t: &str| {
+            slide(&format!(
+                r#"<p:sp><p:txBody><a:p><a:r><a:t>{t}</a:t></a:r></a:p></p:txBody></p:sp>"#
+            ))
+        };
+        let bytes = pptx_zip(&[
+            ("ppt/slides/slide1.xml", str(&body("first"))),
+            ("ppt/slides/slide2.xml", str(&body("second"))),
+        ]);
+        let doc = parse(&bytes).unwrap().document;
+        let rules = doc
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Rule))
+            .count();
+        assert_eq!(rules, 1, "one rule between slides");
+        let headings: Vec<_> = doc
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Heading { level: 1, content } => Some(content.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(headings.len(), 2, "synthesized titles: {headings:?}");
+    }
+
+    /// 表格单元格（tc → Cell）进入 Table 块。
+    #[tokio::test]
+    async fn graphic_frame_table_becomes_table_block() {
+        let slide_xml = slide(
+            r#"<p:graphicFrame><a:tbl><a:tr><a:tc><a:t>h1</a:t></a:tc><a:tc><a:t>h2</a:t></a:tc></a:tr><a:tr><a:tc><a:t>v1</a:t></a:tc><a:tc><a:t>v2</a:t></a:tc></a:tr></a:tbl></p:graphicFrame>"#,
+        );
+        let bytes = pptx_zip(&[("ppt/slides/slide1.xml", str(&slide_xml))]);
+        let doc = parse(&bytes).unwrap().document;
+        let table = doc.blocks.iter().find_map(|b| match b {
+            Block::Table(t) => Some(t),
+            _ => None,
+        });
+        let t = table.expect("table block expected");
+        assert_eq!(t.grid.len(), 2, "grid: {:?}", t.grid);
+        let crate::domain::document::table::CellSlot::Origin(cell) = &t.grid[0][0] else {
+            panic!("first cell origin");
+        };
+        assert!(
+            cell.blocks.iter().any(|b| matches!(
+                b,
+                Block::Paragraph(inlines) if matches!(&inlines[0], Inline::Text { text, .. } if text == "h1")
+            )),
+            "cell content: {:?}",
+            cell.blocks
+        );
     }
 }
