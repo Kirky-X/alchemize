@@ -428,3 +428,143 @@ mod tests {
         assert!(!dbg.contains("secret-token"));
     }
 }
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+
+    /// Sequential HTTP/1.1 responder with full-body drain（multipart 上传
+    /// 场景需读完 Content-Length 再应答，防客户端写侧断裂）。
+    async fn spawn_server(responses: Vec<(u16, &'static str)>) -> u16 {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            for (status, body) in responses {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut total = Vec::new();
+                let mut buf = [0u8; 8192];
+                let mut content_len: Option<usize> = None;
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    loop {
+                        match sock.read(&mut buf).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => {
+                                total.extend_from_slice(&buf[..n]);
+                                if content_len.is_none()
+                                    && let Some(pos) =
+                                        total.windows(4).position(|w| w == b"\r\n\r\n")
+                                {
+                                    let headers = String::from_utf8_lossy(&total[..pos]);
+                                    for line in headers.lines() {
+                                        if let Some(v) = line
+                                            .to_ascii_lowercase()
+                                            .strip_prefix("content-length:")
+                                        {
+                                            content_len = v.trim().parse().ok();
+                                        }
+                                    }
+                                    let head_end = pos + 4;
+                                    if let Some(len) = content_len
+                                        && total.len() >= head_end + len
+                                    {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                })
+                .await;
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        port
+    }
+
+    fn pdf_bytes() -> Vec<u8> {
+        b"%PDF-1.4 minimal fixture".to_vec()
+    }
+
+    fn converter(base: String) -> MinerUConverter {
+        MinerUConverter::new(MinerUHttpConfig {
+            base_url: base,
+            api_token: Some("tok".to_string()),
+            ..MinerUHttpConfig::default()
+        })
+        .unwrap()
+    }
+
+    fn pdf_input() -> Input {
+        Input::Bytes {
+            data: pdf_bytes(),
+            filename: "doc.pdf".into(),
+            mimetype: None,
+            extension: Some("pdf".into()),
+        }
+    }
+
+    /// 全链：multipart submit → poll completed → markdown。
+    #[tokio::test]
+    async fn wrapper_parse_full_chain() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"w-1"}"##),
+            (
+                200,
+                r##"{"status":"completed","markdown":"# wrapped out","error":null}"##,
+            ),
+        ])
+        .await;
+        let c = converter(format!("http://127.0.0.1:{port}"));
+        let result = c.convert(pdf_input()).await.unwrap();
+        assert_eq!(result.markdown, "# wrapped out");
+    }
+
+    /// 任务失败：error 字段透传。
+    #[tokio::test]
+    async fn wrapper_failed_task() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"w-2"}"##),
+            (
+                200,
+                r##"{"status":"failed","error":"oom","markdown":null}"##,
+            ),
+        ])
+        .await;
+        let c = converter(format!("http://127.0.0.1:{port}"));
+        let err = c.convert(pdf_input()).await.unwrap_err();
+        assert!(err.to_string().contains("oom"), "{}", err);
+    }
+
+    /// submit 非 2xx（multipart 路径）。
+    #[tokio::test]
+    async fn wrapper_submit_http_error() {
+        let port = spawn_server(vec![(403, "forbidden")]).await;
+        let c = converter(format!("http://127.0.0.1:{port}"));
+        let err = c.convert(pdf_input()).await.unwrap_err();
+        assert!(err.to_string().contains("403"), "{}", err);
+    }
+
+    /// poll 非 2xx。
+    #[tokio::test]
+    async fn wrapper_poll_http_error() {
+        let port = spawn_server(vec![(200, r##"{"task_id":"w-3"}"##), (502, "bad gateway")]).await;
+        let c = converter(format!("http://127.0.0.1:{port}"));
+        let err = c.convert(pdf_input()).await.unwrap_err();
+        assert!(err.to_string().contains("502"), "{}", err);
+    }
+
+    /// read_error_body：非 JSON 错误体截断进消息（不限 content-type）。
+    #[tokio::test]
+    async fn wrapper_error_body_truncated_into_message() {
+        let port = spawn_server(vec![(500, "plain text boom")]).await;
+        let c = converter(format!("http://127.0.0.1:{port}"));
+        let err = c.convert(pdf_input()).await.unwrap_err();
+        assert!(err.to_string().contains("plain text boom"), "{}", err);
+    }
+}

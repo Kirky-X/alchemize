@@ -470,3 +470,182 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    /// Minimal sequential HTTP/1.1 responder: one canned response per
+    /// accepted connection (unit-test fixture for the HTTP client surface —
+    /// 上游真服务仅在集成腿使用真 MinerU；本 harness 只覆盖客户端代码路径).
+    async fn spawn_server(responses: Vec<(u16, &'static str)>) -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            for (status, body) in responses {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut total = Vec::new();
+                let mut buf = [0u8; 4096];
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    loop {
+                        match sock.read(&mut buf).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => {
+                                total.extend_from_slice(&buf[..n]);
+                                if total.windows(4).any(|w| w == b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                })
+                .await;
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.flush().await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        port
+    }
+
+    fn local_client(port: u16) -> MineruPrecisionClient {
+        let base = format!("http://127.0.0.1:{port}");
+        MineruPrecisionClient::with_base_url_and_token(&base, "tok").unwrap()
+    }
+
+    fn allowlisted_file_url() -> ValidatedFileUrl {
+        validate_file_url(
+            "https://cdn.mineru.net/fixture.pdf",
+            DEFAULT_MINERU_ALLOWLIST,
+        )
+        .unwrap()
+    }
+
+    fn parse_options() -> ParseOptions {
+        ParseOptions::default()
+    }
+
+    /// submit → 200 task_id；poll → completed+markdown：parse 全链返回载荷。
+    #[tokio::test]
+    async fn parse_full_chain_returns_markdown() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"t-42"}"##),
+            (
+                200,
+                r##"{"status":"completed","markdown":"# done","result_url":null,"error":null}"##,
+            ),
+        ])
+        .await;
+        let client = local_client(port).with_timeout(10);
+        let got = client
+            .parse(&allowlisted_file_url(), parse_options())
+            .await
+            .unwrap();
+        assert_eq!(got, "# done");
+    }
+
+    /// poll → failed：错误文案透传（截断后入错误）。
+    #[tokio::test]
+    async fn parse_failed_task_surfaces_error() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"t-7"}"##),
+            (
+                200,
+                r##"{"status":"failed","error":"boom reason","result_url":null,"markdown":null}"##,
+            ),
+        ])
+        .await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&allowlisted_file_url(), parse_options())
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("t-7") && msg.contains("boom reason"), "{msg}");
+    }
+
+    /// 未知状态串 → Failed 分支（远端受控输入经 sanitize 进日志）。
+    #[tokio::test]
+    async fn unknown_task_status_maps_to_failed() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"t-9"}"##),
+            (
+                200,
+                r##"{"status":"weird-state","result_url":null,"markdown":null,"error":null}"##,
+            ),
+        ])
+        .await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&allowlisted_file_url(), parse_options())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("t-9"), "{}", err);
+    }
+
+    /// submit 非 2xx：错误体截断进 MineruConversion 错误。
+    #[tokio::test]
+    async fn submit_http_error_is_surfaced() {
+        let port = spawn_server(vec![(503, r##"{"code":"overloaded"}"##)]).await;
+        let client = local_client(port);
+        let err = client
+            .parse(&allowlisted_file_url(), parse_options())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("503"), "{}", err);
+    }
+
+    /// fetch_result 的二阶 SSRF 防御：result_url 非 MinerU 白名单域 → 拒绝。
+    #[tokio::test]
+    async fn fetch_result_rejects_non_allowlisted_url() {
+        let port = spawn_server(vec![
+            (200, r#"{"task_id":"t-11"}"#),
+            (
+                200,
+                r##"{"status":"completed","markdown":null,"result_url":"http://127.0.0.1:9/secret.zip","error":null}"##,
+            ),
+        ])
+        .await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&allowlisted_file_url(), parse_options())
+            .await
+            .unwrap_err();
+        // validate_file_url 直接拒绝（非白名单/非 HTTPS），错误不被任务包装吞掉
+        let msg = err.to_string();
+        assert!(msg.contains("HTTPS") || msg.contains("scheme"), "{msg}");
+    }
+
+    /// poll 非 2xx：状态与截断体进 MineruConversion。
+    #[tokio::test]
+    async fn poll_http_error_is_surfaced() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"t-13"}"##),
+            (500, "server exploded"),
+        ])
+        .await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&allowlisted_file_url(), parse_options())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("500"), "{}", err);
+    }
+
+    /// from_config 走配置里的 precision_base_url + env token（env 缺失 → 错）。
+    #[test]
+    fn from_config_requires_env_token() {
+        unsafe { std::env::remove_var(MINERU_API_TOKEN_ENV) };
+        let config = MineruConfig::default();
+        let err = match MineruPrecisionClient::from_config(&config) {
+            Ok(_) => panic!("env token missing must fail"),
+            Err(e) => e,
+        };
+        assert!(err.to_string().contains("MINERU_API_TOKEN"), "{}", err);
+    }
+}

@@ -296,3 +296,153 @@ mod tests {
         assert!(resp.error.is_none());
     }
 }
+
+#[cfg(test)]
+mod edge_tests {
+    use super::super::validated_url::{DEFAULT_MINERU_ALLOWLIST, validate_file_url};
+    use super::*;
+
+    /// Sequential HTTP/1.1 responder（与 precision::edge_tests 同形；
+    /// 客户端路径单测，上游真服务仅在集成腿使用真 MinerU）。
+    async fn spawn_server(responses: Vec<(u16, &'static str)>) -> u16 {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            for (status, body) in responses {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut total = Vec::new();
+                let mut buf = [0u8; 4096];
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    loop {
+                        match sock.read(&mut buf).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => {
+                                total.extend_from_slice(&buf[..n]);
+                                if total.windows(4).any(|w| w == b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                })
+                .await;
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        port
+    }
+
+    fn local_client(port: u16) -> MineruAgentClient {
+        MineruAgentClient::with_base_url(format!("http://127.0.0.1:{port}")).unwrap()
+    }
+
+    fn file_url() -> ValidatedFileUrl {
+        validate_file_url(
+            "https://cdn.mineru.net/fixture.pdf",
+            DEFAULT_MINERU_ALLOWLIST,
+        )
+        .unwrap()
+    }
+
+    /// submit → poll completed + markdown：Agent API 全链。
+    #[tokio::test]
+    async fn agent_parse_full_chain_returns_markdown() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"a-1"}"##),
+            (
+                200,
+                r##"{"status":"completed","markdown":"# agent out","error":null}"##,
+            ),
+        ])
+        .await;
+        let client = local_client(port).with_timeout(10);
+        let got = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(got, "# agent out");
+    }
+
+    /// Agent API 无 result_url 概念：completed 但 markdown 缺失 → 空串返回。
+    #[tokio::test]
+    async fn agent_completed_without_markdown_returns_empty() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"a-2"}"##),
+            (
+                200,
+                r##"{"status":"completed","markdown":null,"error":null}"##,
+            ),
+        ])
+        .await;
+        let client = local_client(port).with_timeout(10);
+        let got = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(got, "");
+    }
+
+    /// submit 非 2xx：Agent API 前缀错误。
+    #[tokio::test]
+    async fn agent_submit_http_error_surfaced() {
+        let port = spawn_server(vec![(429, "rate limited")]).await;
+        let client = local_client(port);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("429"), "{}", err);
+    }
+
+    /// poll 非 2xx / 未知状态串 → Failed。
+    #[tokio::test]
+    async fn agent_poll_error_and_unknown_status() {
+        let port = spawn_server(vec![(200, r##"{"task_id":"a-3"}"##), (500, "kaboom")]).await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("500"), "{}", err);
+
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"a-4"}"##),
+            (
+                200,
+                r##"{"status":"mystery","markdown":null,"error":null}"##,
+            ),
+        ])
+        .await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("a-4"), "{}", err);
+    }
+
+    /// 任务失败：error 字段透传。
+    #[tokio::test]
+    async fn agent_failed_task_surfaces_error() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"a-5"}"##),
+            (
+                200,
+                r##"{"status":"failed","error":"bad file","markdown":null}"##,
+            ),
+        ])
+        .await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("bad file"), "{}", err);
+    }
+}
