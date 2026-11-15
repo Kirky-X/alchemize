@@ -656,3 +656,71 @@ mod tests {
         assert_eq!(converter.availability(), Availability::Available);
     }
 }
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+
+    // -- div/figure/figcaption tag stripping edge paths ----------------------
+
+    /// Unterminated `<` at end of input: the no-`>` early-return keeps the
+    /// tail verbatim instead of dropping it.
+    #[test]
+    fn unterminated_tag_tail_kept() {
+        assert_eq!(strip_div_tags("a <div b"), "a <div b");
+        assert_eq!(strip_figure_tags("a <figure x"), "a <figure x");
+        assert_eq!(convert_tag_to_image("a <img x", "<img"), "a <img x");
+    }
+
+    /// `<figcaption>` without a closing tag: tail kept verbatim.
+    #[test]
+    fn unterminated_figcaption_kept() {
+        assert_eq!(
+            convert_figcaption("a <figcaption>open"),
+            "a <figcaption>open"
+        );
+    }
+
+    /// `<img src=...>` with unquoted src has no quote after `src=`, so the
+    /// tag is not an image and passes through unchanged.
+    #[test]
+    fn img_unquoted_src_passes_through() {
+        assert_eq!(
+            convert_img_tags("x <img src=a.png> y"),
+            "x <img src=a.png> y"
+        );
+        // Quoted forms convert (leading text preserved).
+        assert_eq!(
+            convert_img_tags("x <img src=\"a.png\">"),
+            "x ![figure](a.png)"
+        );
+        assert_eq!(
+            convert_embed_tags("x <embed src='b.svg'>"),
+            "x ![figure](b.svg)"
+        );
+    }
+
+    /// `</div>` newline insertion and non-div tag passthrough.
+    #[test]
+    fn div_close_inserts_newline_and_other_tags_kept() {
+        let out = strip_div_tags("<div>inner</div>tail");
+        assert!(out.starts_with("inner\n"), "got {out:?}");
+        assert!(out.ends_with("tail"));
+        assert_eq!(strip_div_tags("<b>bold</b>"), "<b>bold</b>");
+    }
+
+    /// figcaption content is stripped of inner tags and wrapped in italics.
+    #[test]
+    fn figcaption_becomes_italic_caption() {
+        let out = convert_figcaption("A<figcaption>Fig <b>1</b> caption</figcaption>B");
+        assert!(out.contains("*Fig 1 caption*"), "got {out:?}");
+        assert!(out.starts_with("A") && out.ends_with("B"));
+    }
+
+    /// collapse_blank_lines: 3+ newlines collapse to at most 2.
+    #[test]
+    fn collapse_blank_lines_caps_runs() {
+        assert_eq!(collapse_blank_lines("a\n\n\n\nb"), "a\n\nb");
+        assert_eq!(collapse_blank_lines("a\nb"), "a\nb");
+    }
+}

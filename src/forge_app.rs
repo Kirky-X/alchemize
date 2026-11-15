@@ -336,3 +336,81 @@ async fn formats() -> Result<String, ApiError> {
     exts.dedup();
     Ok(exts.join(" "))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_ext_replaces_controls_and_bidi() {
+        // C0 controls -> '?'
+        assert_eq!(sanitize_ext("pd\u{0001}f"), "pd?f");
+        // DEL (C1 boundary) and C1 CSI
+        assert_eq!(sanitize_ext("t\u{007f}x\u{009b}t"), "t?x?t");
+        // Unicode bidi controls: RLM/LRM, embedding/overrides, isolates
+        assert_eq!(
+            sanitize_ext("\u{061c}\u{200e}a\u{202e}b\u{2066}c"),
+            "??a?b?c"
+        );
+        // Normal extensions pass through untouched
+        assert_eq!(sanitize_ext("pdf"), "pdf");
+        assert_eq!(sanitize_ext("tar.gz"), "tar.gz");
+        // Empty stays empty
+        assert_eq!(sanitize_ext(""), "");
+    }
+
+    #[test]
+    fn unsupported_format_message_names_clean_extension() {
+        // Unknown extension (no feature can help): message embeds the
+        // sanitized extension text.
+        let msg = unsupported_format_message("definitely_not_a_format");
+        assert!(msg.contains("definitely_not_a_format"), "{msg}");
+        // Control characters are sanitized before printing (CWE-150)
+        let msg = unsupported_format_message("x\u{001b}[31mred");
+        assert!(!msg.contains('\u{001b}'), "escape survived: {msg:?}");
+        assert!(msg.contains("?"), "{msg}");
+    }
+
+    #[test]
+    fn map_error_maps_unsupported_format_to_not_found() {
+        let err = map_error(AlchemizeError::UnsupportedFormat("zzz".into()));
+        match err {
+            ApiError::NotFound {
+                resource,
+                resource_id,
+            } => {
+                assert_eq!(resource, "format");
+                assert_eq!(resource_id.as_deref(), Some("zzz"));
+            }
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_error_maps_all_backends_failed_to_service_unavailable() {
+        let err = map_error(AlchemizeError::AllBackendsFailed {
+            ext: "docx".into(),
+            attempts: vec![
+                ("anydoc".to_string(), "parse error".to_string()),
+                ("legacy".to_string(), "soffice missing".to_string()),
+            ],
+        });
+        match err {
+            ApiError::ServiceUnavailable { service, .. } => {
+                assert_eq!(service, "convert:docx");
+            }
+            other => panic!("expected ServiceUnavailable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_error_maps_other_errors_to_invalid_input() {
+        let err = map_error(AlchemizeError::DepthLimitExceeded { limit: 8 });
+        match err {
+            ApiError::InvalidInput { message, .. } => {
+                assert!(!message.is_empty());
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+}

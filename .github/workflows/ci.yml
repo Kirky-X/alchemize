@@ -131,7 +131,12 @@ jobs:
           cargo check --bin alch --no-default-features --features "cli,text"
           # 显式 features（不依赖 default）：若 default 将来加入 pdf，本文件会
           # 被 cfg 成空、以 0 tests 静默通过——先 --list 断言用例存在再执行。
-          cargo test --test feature_hint --no-default-features --features "cli,text" -- --list | grep -q hint_names_the_missing_capability_feature
+          # 落盘再 grep：grep -q 早退关闭管道会让 cargo test 写侧 Broken pipe
+          # （exit 101，run 43719408953 实录）——禁止「--list | grep -q」直连。
+          LIST=$(mktemp)
+          cargo test --test feature_hint --no-default-features --features "cli,text" -- --list > "$LIST"
+          grep -q hint_names_the_missing_capability_feature "$LIST"
+          rm -f "$LIST"
           cargo test --test feature_hint --no-default-features --features "cli,text"
       - name: Check + lib tests + golden behavior per feature config
         shell: bash
@@ -152,7 +157,11 @@ jobs:
             echo "::group::feature=$f"
             cargo check --lib --no-default-features --features "$f"
             cargo test --lib --no-default-features --features "$f"
-            cargo test --test golden --no-default-features --features "$f" -- --list | grep -q golden_xlsx_disabled_by_default
+            # --list 落盘再 grep（grep -q 早退会 SIGPIPE 杀掉 cargo，见上）
+            LIST=$(mktemp)
+            cargo test --test golden --no-default-features --features "$f" -- --list > "$LIST"
+            grep -q golden_xlsx_disabled_by_default "$LIST"
+            rm -f "$LIST"
             cargo test --test golden --no-default-features --features "$f"
             echo "::endgroup::"
           done

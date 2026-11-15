@@ -602,3 +602,94 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+
+    fn omml(inner: &str) -> Vec<u8> {
+        format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="w" xmlns:m="m"><w:body><w:p><m:oMath>{inner}</m:oMath></w:p></w:body></w:document>"#
+        )
+        .into_bytes()
+    }
+
+    fn convert(inner: &str) -> String {
+        let (out, _) = convert_document_omml(&omml(inner));
+        assert_eq!(out.len(), 1, "one island expected");
+        out[0].clone()
+    }
+
+    /// Bare text directly inside oMath (no m:t wrapper, rare) is escaped
+    /// verbatim instead of vanishing.
+    #[test]
+    fn bare_text_event_is_escaped() {
+        let got = convert(r#"prefix <m:r><m:t>x</m:t></m:r>"#);
+        assert!(got.starts_with("prefix "), "{got}");
+        assert!(got.contains("x"), "{got}");
+    }
+
+    /// GeneralRef events (XML predefined entities) must decode, not vanish.
+    #[test]
+    fn general_ref_entities_decode_inside_math() {
+        let got =
+            convert(r#"<m:r><m:t>a &amp; b &lt; c &gt; d &quot;e&quot; &apos;f&apos;</m:t></m:r>"#);
+        assert_eq!(got, "a \\& b < c > d \"e\" 'f'");
+    }
+
+    /// Unknown OMML element: payload wrapped in \text{} and the fallback
+    /// flag set — the loss is counted, never silent.
+    #[test]
+    fn unknown_element_uses_text_fallback_and_flags() {
+        let (out, warnings) = convert_document_omml(&omml(
+            r#"<m:unknowntag><m:r><m:t>mystery</m:t></m:r></m:unknowntag>"#,
+        ));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].contains("\\text{mystery}"), "{}", out[0]);
+        assert_eq!(warnings.fallback, 1);
+        assert_eq!(warnings.converted, 1);
+    }
+
+    /// Empty islands are dropped entirely (no empty \$..\$ emissions).
+    #[test]
+    fn empty_island_is_dropped() {
+        let (out, warnings) = convert_document_omml(&omml("<m:r><m:t>   </m:t></m:r>"));
+        assert!(out.is_empty());
+        assert_eq!(warnings.converted, 0);
+    }
+
+    /// Multiple islands in one document each produce their own span.
+    #[test]
+    fn multiple_islands_convert_independently() {
+        let xml = format!(
+            r#"<?xml version="1.0"?><w:document xmlns:w="w" xmlns:m="m"><w:body><w:p><m:oMath>{a}</m:oMath>plain<m:oMath>{b}</m:oMath></w:p></w:body></w:document>"#,
+            a = r#"<m:r><m:t>x</m:t></m:r>"#,
+            b = r#"<m:r><m:t>y</m:t></m:r>"#,
+        );
+        let (out, warnings) = convert_document_omml(&xml.into_bytes());
+        assert_eq!(out, vec!["x".to_string(), "y".to_string()]);
+        assert_eq!(warnings.converted, 2);
+        assert_eq!(warnings.fallback, 0);
+    }
+
+    /// decode_entity: five predefined names decode; unknown keeps verbatim.
+    #[test]
+    fn decode_entity_table_and_unknown_passthrough() {
+        assert_eq!(decode_entity("amp"), "&");
+        assert_eq!(decode_entity("lt"), "<");
+        assert_eq!(decode_entity("gt"), ">");
+        assert_eq!(decode_entity("quot"), "\"");
+        assert_eq!(decode_entity("apos"), "'");
+        assert_eq!(decode_entity("nbsp"), "&nbsp;");
+    }
+
+    /// Empty children in sSub fall through the unknown-skip path (line
+    /// coverage for two_children's skip branch) without panicking.
+    #[test]
+    fn container_with_unexpected_child_is_skipped() {
+        let got = convert(
+            r#"<m:sSub><m:unknown><m:r><m:t>noise</m:t></m:r></m:unknown><m:e><m:r><m:t>x</m:t></m:r></m:e><m:sub><m:r><m:t>i</m:t></m:r></m:sub></m:sSub>"#,
+        );
+        assert!(got.contains("x_{i}"), "{got}");
+    }
+}

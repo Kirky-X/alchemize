@@ -827,3 +827,167 @@ mod tests {
         assert!(ConverterRegistry::default().is_empty());
     }
 }
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+
+    /// Stub whose metadata is not an object (string) and carries no
+    /// `converter` key: the dispatcher must replace the payload rather than
+    /// silently dropping provenance.
+    struct NonObjectMetadataConverter;
+    #[async_trait::async_trait]
+    impl Converter for NonObjectMetadataConverter {
+        async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+            let mut result = ConvertResult::from_markdown(
+                "payload",
+                crate::domain::result::ContentType::Document,
+            );
+            result.metadata = serde_json::Value::String("legacy blob".to_string());
+            Ok(result)
+        }
+        fn supported_extensions(&self) -> &[&str] {
+            &["txt"]
+        }
+        fn priority(&self) -> u8 {
+            30
+        }
+        fn name(&self) -> &'static str {
+            "non-object-meta"
+        }
+    }
+
+    /// Stub converter failing sync dispatch with a depth-limit error: the
+    /// sync twin must surface DepthLimitExceeded, not AllBackendsFailed.
+    struct SyncDepthFailConverter;
+    #[async_trait::async_trait]
+    impl Converter for SyncDepthFailConverter {
+        async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+            Err(AlchemizeError::Other("async path not used".into()))
+        }
+        fn convert_sync(&self, _input: &Input) -> Result<ConvertResult, AlchemizeError> {
+            Err(AlchemizeError::DepthLimitExceeded { limit: 5 })
+        }
+        fn supported_extensions(&self) -> &[&str] {
+            &["txt"]
+        }
+        fn priority(&self) -> u8 {
+            30
+        }
+        fn name(&self) -> &'static str {
+            "sync-depth-fail"
+        }
+        fn is_sync_capable(&self) -> bool {
+            true
+        }
+    }
+
+    /// Sync stub failing with a plain error (exercises the sync attempts
+    /// aggregation path).
+    struct SyncPlainFailConverter;
+    #[async_trait::async_trait]
+    impl Converter for SyncPlainFailConverter {
+        async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+            Err(AlchemizeError::Other("async path not used".into()))
+        }
+        fn convert_sync(&self, _input: &Input) -> Result<ConvertResult, AlchemizeError> {
+            Err(AlchemizeError::Xml("bad entity".into()))
+        }
+        fn supported_extensions(&self) -> &[&str] {
+            &["txt"]
+        }
+        fn priority(&self) -> u8 {
+            30
+        }
+        fn name(&self) -> &'static str {
+            "sync-plain-fail"
+        }
+        fn is_sync_capable(&self) -> bool {
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn non_object_metadata_is_replaced_with_provenance() {
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(NonObjectMetadataConverter));
+        let input = Input::bytes(vec![], "t.txt");
+        let result = registry.convert(&input).await.unwrap();
+        assert_eq!(result.metadata["converter"], "non-object-meta");
+    }
+
+    #[tokio::test]
+    async fn sync_depth_limit_surfaces_directly() {
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(SyncDepthFailConverter));
+        let input = Input::bytes(vec![], "t.txt");
+        let err = registry.convert_pref_sync(&input, None).unwrap_err();
+        assert!(
+            matches!(err, AlchemizeError::DepthLimitExceeded { limit: 5 }),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_plain_failure_aggregates_attempts() {
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(SyncPlainFailConverter));
+        let input = Input::bytes(vec![], "t.txt");
+        let err = registry.convert_pref_sync(&input, None).unwrap_err();
+        match err {
+            AlchemizeError::AllBackendsFailed { ext, attempts } => {
+                assert_eq!(ext, "txt");
+                assert_eq!(attempts.len(), 1);
+                assert_eq!(attempts[0].0, "sync-plain-fail");
+            }
+            other => panic!("expected AllBackendsFailed, got {other:?}"),
+        }
+    }
+
+    /// Sync preference matching (exact + prefix) exercises the prefer
+    /// reordering branch of the sync twin.
+    struct NamedSyncConverter {
+        tag: &'static str,
+        prio: u8,
+    }
+    #[async_trait::async_trait]
+    impl Converter for NamedSyncConverter {
+        async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+            Err(AlchemizeError::Other("async path not used".into()))
+        }
+        fn convert_sync(&self, _input: &Input) -> Result<ConvertResult, AlchemizeError> {
+            Ok(ConvertResult::from_markdown(
+                self.tag,
+                crate::domain::result::ContentType::Document,
+            ))
+        }
+        fn supported_extensions(&self) -> &[&str] {
+            &["pdf"]
+        }
+        fn priority(&self) -> u8 {
+            self.prio
+        }
+        fn name(&self) -> &'static str {
+            self.tag
+        }
+        fn is_sync_capable(&self) -> bool {
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn sync_pref_reorders_candidates() {
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(NamedSyncConverter {
+            tag: "pdfium",
+            prio: 20,
+        }));
+        registry.register(Box::new(NamedSyncConverter {
+            tag: "pdf",
+            prio: 10,
+        }));
+        let input = Input::bytes(vec![], "t.pdf");
+        let preferred = registry.convert_pref_sync(&input, Some("pdf")).unwrap();
+        assert_eq!(preferred.markdown, "pdf");
+    }
+}

@@ -749,4 +749,93 @@ mod tests {
         );
         assert!(out.markup.contains("a&#42;b&#38;c"), "{}", out.markup);
     }
+
+    fn render_html(html: &str, tag: &'static str) -> String {
+        let doc = parse(html);
+        let out = render(
+            find(&doc, tag),
+            0,
+            &Targets::scan(doc.tree.root()),
+            &mut HashSet::new(),
+            FormattingContext {
+                in_link: false,
+                wrapped_block: false,
+            },
+        );
+        out.markup
+    }
+
+    /// 表格系闭合标签独立起行（防 CommonMark HTML 块被空行截断）。
+    #[test]
+    fn table_close_tags_begin_new_lines() {
+        let out = render_html(
+            "<table><thead><tr><th>h</th></tr></thead><tbody><tr><td>d</td></tr></tbody></table>",
+            "table",
+        );
+        for close in ["</thead>", "</tr>", "</tbody>", "</table>"] {
+            assert!(out.contains(close), "missing {close} in {out}");
+        }
+        // 每个闭合标签前都有换行（独立行书写）
+        for close in ["\n</thead>", "\n</tr>", "\n</tbody>", "\n</table>"] {
+            assert!(out.contains(close), "close not on own line: {out}");
+        }
+    }
+
+    /// javascript: 链接永不保留（safe_link_url 校验）。
+    #[test]
+    fn unsafe_link_href_dropped() {
+        let out = render_html(r#"<p><a href="javascript:alert(1)">click</a></p>"#, "p");
+        assert!(!out.contains("javascript"), "{out}");
+        assert!(!out.contains("<a href="), "unsafe href retained: {out}");
+        assert!(out.contains("click"), "text kept: {out}");
+    }
+
+    /// img 无安全 src（data: 协议）降级为纯 label 文本。
+    #[test]
+    fn img_unsafe_src_degrades_to_label() {
+        let out = render_html(r#"<p><img src="data:text/plain,x" alt="glyph"></p>"#, "p");
+        assert!(!out.contains("<img"), "unsafe img retained: {out}");
+        assert!(out.contains("glyph"), "label kept: {out}");
+    }
+
+    /// video 元素产出 <a href> 包裹的链接形式（poster 有则前置 img）。
+    #[test]
+    fn video_renders_as_link_with_poster() {
+        let out = render_html(
+            r#"<div><video poster="safe.png"><source src="movie.mp4"></video></div>"#,
+            "div",
+        );
+        assert!(out.contains("<img src=\"safe.png\""), "poster: {out}");
+        assert!(out.contains("<a href=\"movie.mp4\">"), "link: {out}");
+    }
+
+    /// 第二个及以后的锚点目标变前置 span id（首个已用于标签 id 属性）。
+    #[test]
+    fn second_anchor_target_becomes_span_id() {
+        // 白名单外元素（font）的引用锚点展开为前置 span id（保 id 不丢）。
+        let out = render_html(
+            r##"<div><a href="#b">to-b</a><font id="b">styled</font></div>"##,
+            "div",
+        );
+        assert!(
+            out.contains("<span id=\"b\">"),
+            "span markup present: {out}"
+        );
+        assert!(out.contains("styled"), "content kept: {out}");
+    }
+
+    /// textarea 子树文本保留（Siblings 推进路径）。
+    #[test]
+    fn textarea_content_preserved() {
+        let out = render_html("<div><textarea>raw text &amp; more</textarea></div>", "div");
+        assert!(out.contains("raw text"), "{out}");
+        assert!(out.contains("more"), "{out}");
+    }
+
+    /// input 的 value 经 form::input_text 提取为文本（占位控件保真）。
+    #[test]
+    fn input_value_rendered_as_text() {
+        let out = render_html(r#"<div><input value="typed words"></div>"#, "div");
+        assert!(out.contains("typed words"), "{out}");
+    }
 }

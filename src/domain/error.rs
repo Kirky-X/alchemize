@@ -329,6 +329,135 @@ mod tests {
         assert_eq!(AlchemizeError::other(42).to_string(), "42");
     }
 
+    /// `kind()` covers every variant with a stable non-sensitive label —
+    /// logs/metrics route on these strings, so each must stay distinct.
+    #[test]
+    fn error_kind_labels_are_stable_and_disjoint() {
+        let cases: Vec<(AlchemizeError, &str)> = vec![
+            (
+                AlchemizeError::UnsupportedFormat("x".into()),
+                "unsupported_format",
+            ),
+            (
+                AlchemizeError::DepthLimitExceeded { limit: 8 },
+                "depth_limit_exceeded",
+            ),
+            (AlchemizeError::NoConverterAccepted, "no_converter_accepted"),
+            (
+                AlchemizeError::AllBackendsFailed {
+                    ext: "x".into(),
+                    attempts: vec![],
+                },
+                "all_backends_failed",
+            ),
+            (AlchemizeError::Pdf("x".into()), "pdf"),
+            (AlchemizeError::Zip("x".into()), "zip"),
+            (AlchemizeError::Xml("x".into()), "xml"),
+            (
+                AlchemizeError::VideoUnavailable("x".into()),
+                "video_unavailable",
+            ),
+            (
+                AlchemizeError::AudioUnavailable("x".into()),
+                "audio_unavailable",
+            ),
+            (
+                AlchemizeError::VisionUnavailable("x".into()),
+                "vision_unavailable",
+            ),
+            (
+                AlchemizeError::MineruUnavailable("x".into()),
+                "mineru_unavailable",
+            ),
+            (
+                AlchemizeError::MineruConversion("x".into()),
+                "mineru_conversion",
+            ),
+            (
+                AlchemizeError::SecurityViolation {
+                    kind: SecurityViolationType::LoopbackAddress,
+                    message: "x".into(),
+                },
+                "security_violation",
+            ),
+            (
+                AlchemizeError::ResponseTooLarge {
+                    actual: 1,
+                    limit: 2,
+                },
+                "response_too_large",
+            ),
+            (AlchemizeError::Other("x".into()), "other"),
+            (
+                AlchemizeError::NotSyncCapable("x".into()),
+                "not_sync_capable",
+            ),
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for (err, label) in cases {
+            assert_eq!(err.kind(), label, "kind mismatch for {label}");
+            assert!(seen.insert(err.kind()), "duplicate kind: {label}");
+        }
+    }
+
+    /// Remaining Display variants assert through the same catalog-expected
+    /// helper as the existing tests (key/arg wiring, not language).
+    #[test]
+    fn error_display_remaining_variants_match_catalog() {
+        let expected = alchemize_i18n_expected("no-converter-accepted-the-input", &[]);
+        assert_eq!(AlchemizeError::NoConverterAccepted.to_string(), expected);
+
+        let expected = alchemize_i18n_expected(
+            "container-nesting-exceeds-the-depth-limit-of",
+            &[("limit", "12")],
+        );
+        assert_eq!(
+            AlchemizeError::DepthLimitExceeded { limit: 12 }.to_string(),
+            expected
+        );
+
+        let err = AlchemizeError::SecurityViolation {
+            kind: SecurityViolationType::HostnameNotAllowed,
+            message: "internal.example".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("internal.example"), "{msg}");
+
+        let expected =
+            alchemize_i18n_expected("vision-provider-unavailable", &[("what", "no provider")]);
+        assert_eq!(
+            AlchemizeError::VisionUnavailable("no provider".into()).to_string(),
+            expected
+        );
+
+        let expected =
+            alchemize_i18n_expected("mineru-conversion-error", &[("what", "bad payload")]);
+        assert_eq!(
+            AlchemizeError::MineruConversion("bad payload".into()).to_string(),
+            expected
+        );
+    }
+
+    /// `SecurityViolationType` Display routes through the catalog; every
+    /// label must be non-empty and distinct.
+    #[test]
+    fn security_violation_type_display_covers_all_variants() {
+        let all = [
+            SecurityViolationType::InvalidScheme,
+            SecurityViolationType::LoopbackAddress,
+            SecurityViolationType::PrivateAddress,
+            SecurityViolationType::LinkLocalAddress,
+            SecurityViolationType::HostnameNotAllowed,
+            SecurityViolationType::MissingSignature,
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for v in all {
+            let s = v.to_string();
+            assert!(!s.is_empty(), "empty label for {v:?}");
+            assert!(seen.insert(s), "duplicate label for {v:?}");
+        }
+    }
+
     /// Build the expected Display text through the catalog directly —
     /// mirrors what `AlchemizeError::fmt` should produce for the given
     /// key/args under the host locale, without hardcoding a language.
