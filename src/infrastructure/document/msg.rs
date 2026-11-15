@@ -568,7 +568,7 @@ mod tests {
     use std::io::Write as _;
 
     /// Write one properties record: tag, flags(0), 8-byte value slot.
-    fn prop_record(tag: u32, value: [u8; 8]) -> Vec<u8> {
+    pub(super) fn prop_record(tag: u32, value: [u8; 8]) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&tag.to_le_bytes());
         out.extend_from_slice(&0u32.to_le_bytes());
@@ -577,20 +577,20 @@ mod tests {
     }
 
     /// Variable-size record value slot: (length, reserved).
-    fn var_value(len: u32) -> [u8; 8] {
+    pub(super) fn var_value(len: u32) -> [u8; 8] {
         let mut slot = [0u8; 8];
         slot[0..4].copy_from_slice(&len.to_le_bytes());
         slot
     }
 
     /// Inline u32 slot.
-    fn u32_value(value: u32) -> [u8; 8] {
+    pub(super) fn u32_value(value: u32) -> [u8; 8] {
         let mut slot = [0u8; 8];
         slot[0..4].copy_from_slice(&value.to_le_bytes());
         slot
     }
 
-    fn utf16(s: &str) -> Vec<u8> {
+    pub(super) fn utf16(s: &str) -> Vec<u8> {
         s.encode_utf16().flat_map(|u| u.to_le_bytes()).collect()
     }
 
@@ -1119,5 +1119,143 @@ mod tests {
         // HTML 体经转换进 markdown；单部件 wire 下无 text/plain 段
         assert!(md.contains("html body"), "{md}");
         assert!(!md.contains("plain body"), "no text part: {md}");
+    }
+}
+
+#[cfg(test)]
+mod edge_tests2 {
+    use super::tests::{prop_record, u32_value, utf16, var_value};
+    use super::*;
+    use std::io::Write as _;
+
+    /// 带发件人名/地址开关与附件名的 fixture（复用 prop_record 套路）。
+    fn sender_variant(with_name: bool, with_addr: bool, attach_name: Option<&str>) -> Vec<u8> {
+        let mut props = Vec::new();
+        props.extend(prop_record(
+            (MESSAGE_CODEPAGE << 16) | PT_I4,
+            u32_value(65001),
+        ));
+        let mut streams: Vec<(u32, Vec<u8>)> = Vec::new();
+        if with_name {
+            let name = utf16("Alice");
+            props.extend(prop_record(
+                (SENDER_NAME << 16) | PT_UNICODE,
+                var_value(name.len() as u32),
+            ));
+            streams.push((SENDER_NAME, name));
+        }
+        if with_addr {
+            let addr = utf16("alice@example.com");
+            props.extend(prop_record(
+                (SENDER_EMAIL << 16) | PT_UNICODE,
+                var_value(addr.len() as u32),
+            ));
+            streams.push((SENDER_EMAIL, addr));
+        }
+        {
+            let body = utf16("hi");
+            props.extend(prop_record(
+                (BODY_TEXT << 16) | PT_UNICODE,
+                var_value(body.len() as u32),
+            ));
+            streams.push((BODY_TEXT, body));
+        }
+        if let Some(raw_name) = attach_name {
+            let name = utf16(raw_name);
+            let data = b"x".to_vec();
+            let mut attach_props = Vec::new();
+            attach_props.extend(prop_record(
+                (ATTACH_FILENAME << 16) | PT_UNICODE,
+                var_value(name.len() as u32),
+            ));
+            attach_props.extend(prop_record(
+                (ATTACH_DATA << 16) | PT_BINARY,
+                var_value(data.len() as u32),
+            ));
+            let attach_root = "/__attach_version1.0_#00000001";
+            let cursor = Cursor::new(Vec::new());
+            let mut cf = cfb::CompoundFile::create(cursor).unwrap();
+            cf.create_stream(PROPS_STREAM)
+                .unwrap()
+                .write_all(&props)
+                .unwrap();
+            for (id, bytes) in &streams {
+                cf.create_stream(format!("/__substg1.0_{id:04X}001F"))
+                    .unwrap()
+                    .write_all(bytes)
+                    .unwrap();
+            }
+            cf.create_storage(attach_root).unwrap();
+            cf.create_stream(format!("{attach_root}/{PROPS_STREAM}"))
+                .unwrap()
+                .write_all(&attach_props)
+                .unwrap();
+            cf.create_stream(format!(
+                "{attach_root}/__substg1.0_{ATTACH_FILENAME:04X}001F"
+            ))
+            .unwrap()
+            .write_all(&name)
+            .unwrap();
+            cf.create_stream(format!("{attach_root}/__substg1.0_{ATTACH_DATA:04X}0102"))
+                .unwrap()
+                .write_all(&data)
+                .unwrap();
+            return cf.into_inner().into_inner();
+        }
+        let cursor = Cursor::new(Vec::new());
+        let mut cf = cfb::CompoundFile::create(cursor).unwrap();
+        cf.create_stream(PROPS_STREAM)
+            .unwrap()
+            .write_all(&props)
+            .unwrap();
+        for (id, bytes) in &streams {
+            cf.create_stream(format!("/__substg1.0_{id:04X}001F"))
+                .unwrap()
+                .write_all(bytes)
+                .unwrap();
+        }
+        cf.into_inner().into_inner()
+    }
+
+    /// 发件人仅有名（无地址）→ From 只显名字。
+    #[tokio::test]
+    async fn sender_name_without_addr_shows_name_only() {
+        let result = MsgConverter::new()
+            .convert(Input::bytes(sender_variant(true, false, None), "m.msg"))
+            .await
+            .unwrap();
+        let md = &result.markdown;
+        assert!(md.contains("Alice"), "{md}");
+        assert!(!md.contains("alice@example.com"), "{md}");
+    }
+
+    /// 发件人名+地址齐全 → "Name <addr>" 组合形态。
+    #[tokio::test]
+    async fn sender_name_and_addr_combine() {
+        let result = MsgConverter::new()
+            .convert(Input::bytes(sender_variant(true, true, None), "m.msg"))
+            .await
+            .unwrap();
+        let md = &result.markdown;
+        assert!(
+            md.contains("Alice") && md.contains("alice@example.com"),
+            "{md}"
+        );
+    }
+
+    /// 附件名中的引号/控制字符被净化（MAPI 注入防伪）。
+    #[tokio::test]
+    async fn attachment_name_quotes_and_controls_sanitized() {
+        let result = MsgConverter::new()
+            .convert(Input::bytes(
+                sender_variant(false, true, Some("evil\"name\u{0007}.txt")),
+                "m.msg",
+            ))
+            .await
+            .unwrap();
+        // 转换不 panic 即为防伪目标：MIME 头部 name 已净化（引号→'，控制符→空格）
+        assert_eq!(result.metadata["attachment_count"].as_u64(), Some(1));
+        let atts = result.metadata["attachments"].as_array().unwrap();
+        assert_eq!(atts.len(), 1);
     }
 }
