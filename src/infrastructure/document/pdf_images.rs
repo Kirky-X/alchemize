@@ -845,3 +845,227 @@ mod edge_tests {
         assert!(ex.skipped.is_empty(), "{:?}", ex.skipped);
     }
 }
+
+#[cfg(test)]
+mod decode_tests {
+    use super::*;
+    use lopdf::{Stream, dictionary};
+
+    fn doc_with_image(dict: Dictionary, payload: Vec<u8>) -> (Document, lopdf::ObjectId) {
+        let mut doc = Document::with_version("1.4");
+        let id = doc.add_object(Object::Stream(Stream::new(dict, payload)));
+        (doc, id)
+    }
+
+    /// decode_image 直测（绕 walker）：invalid dims / bpc / 滤镜链 / 魔数。
+    #[test]
+    fn decode_rejects_bad_dimensions_and_bpc() {
+        let (doc, id) = doc_with_image(
+            dictionary! {
+                "Subtype" => "Image",
+                "Width" => 0,
+                "Height" => 4,
+                "BitsPerComponent" => 8,
+                "ColorSpace" => "DeviceRGB",
+            },
+            vec![0u8; 12],
+        );
+        let obj = doc.get_object(id).unwrap();
+        let stream = obj.as_stream().unwrap();
+        match decode_image(&doc, stream) {
+            Err(e) => assert_eq!(e, "invalid dimensions"),
+            Ok(entry) => panic!("expected Err, got ext {}", entry.ext),
+        }
+
+        let (doc, id) = doc_with_image(
+            dictionary! {
+                "Subtype" => "Image",
+                "Width" => 4,
+                "Height" => 4,
+                "BitsPerComponent" => 16,
+                "ColorSpace" => "DeviceRGB",
+            },
+            vec![0u8; 48],
+        );
+        let obj = doc.get_object(id).unwrap();
+        let stream = obj.as_stream().unwrap();
+        let err = match decode_image(&doc, stream) {
+            Err(e) => e,
+            Ok(entry) => panic!("expected Err, got ext {}", entry.ext),
+        };
+        assert!(err.contains("bpc unsupported"), "{err}");
+    }
+
+    /// DCTDecode 载荷非 JPEG（魔数缺失）→ 显式拒绝，不落盘。
+    #[test]
+    fn dct_passthrough_rejects_non_jpeg_magic() {
+        let (doc, id) = doc_with_image(
+            dictionary! {
+                "Subtype" => "Image",
+                "Width" => 4,
+                "Height" => 4,
+                "BitsPerComponent" => 8,
+                "ColorSpace" => "DeviceRGB",
+                "Filter" => "DCTDecode",
+            },
+            b"not a jpeg at all!!".to_vec(),
+        );
+        let obj = doc.get_object(id).unwrap();
+        let stream = obj.as_stream().unwrap();
+        let err = match decode_image(&doc, stream) {
+            Err(e) => e,
+            Ok(entry) => panic!("expected Err, got ext {}", entry.ext),
+        };
+        assert!(err.contains("not a JPEG"), "{err}");
+    }
+
+    /// JPXDecode：合法 JP2 签名 → jp2 透传；缺签名 → 拒绝。
+    #[test]
+    fn jpx_signature_gate() {
+        let mut sig = vec![0x00, 0x00, 0x00, 0x0C, b'j', b'P', b' ', b' '];
+        sig.extend_from_slice(b"payload");
+        let (doc, id) = doc_with_image(
+            dictionary! {
+                "Subtype" => "Image",
+                "Width" => 4,
+                "Height" => 4,
+                "BitsPerComponent" => 8,
+                "ColorSpace" => "DeviceRGB",
+                "Filter" => "JPXDecode",
+            },
+            sig,
+        );
+        let obj = doc.get_object(id).unwrap();
+        let stream = obj.as_stream().unwrap();
+        let entry = decode_image(&doc, stream).unwrap();
+        assert_eq!(entry.ext, "jp2");
+
+        let (doc, id) = doc_with_image(
+            dictionary! {
+                "Subtype" => "Image",
+                "Width" => 4,
+                "Height" => 4,
+                "BitsPerComponent" => 8,
+                "ColorSpace" => "DeviceRGB",
+                "Filter" => "JPXDecode",
+            },
+            b"garbage".to_vec(),
+        );
+        let obj = doc.get_object(id).unwrap();
+        let stream = obj.as_stream().unwrap();
+        let err = match decode_image(&doc, stream) {
+            Err(e) => e,
+            Ok(entry) => panic!("expected Err, got ext {}", entry.ext),
+        };
+        assert!(err.contains("JPEG 2000"), "{err}");
+    }
+
+    /// 未知滤镜链 → 列出链名；样本数不符 → 计数断言错误。
+    #[test]
+    fn unknown_filter_chain_and_sample_count_mismatch() {
+        let (doc, id) = doc_with_image(
+            dictionary! {
+                "Subtype" => "Image",
+                "Width" => 4,
+                "Height" => 4,
+                "BitsPerComponent" => 8,
+                "ColorSpace" => "DeviceRGB",
+                "Filter" => Object::Array(vec![
+                    Object::Name(b"FlateDecode".to_vec()),
+                    Object::Name(b"DCTDecode".to_vec()),
+                ]),
+            },
+            vec![0u8; 12],
+        );
+        let obj = doc.get_object(id).unwrap();
+        let stream = obj.as_stream().unwrap();
+        let err = match decode_image(&doc, stream) {
+            Err(e) => e,
+            Ok(entry) => panic!("expected Err, got ext {}", entry.ext),
+        };
+        assert!(err.contains("filter chain"), "{err}");
+
+        let (doc, id) = doc_with_image(
+            dictionary! {
+                "Subtype" => "Image",
+                "Width" => 4,
+                "Height" => 4,
+                "BitsPerComponent" => 8,
+                "ColorSpace" => "DeviceRGB",
+            },
+            vec![0u8; 10],
+        );
+        let obj = doc.get_object(id).unwrap();
+        let stream = obj.as_stream().unwrap();
+        let err = match decode_image(&doc, stream) {
+            Err(e) => e,
+            Ok(entry) => panic!("expected Err, got ext {}", entry.ext),
+        };
+        assert!(err.contains("sample count 10 != expected 48"), "{err}");
+    }
+
+    /// DeviceGray（1 通道）重编码为 PNG；ICCBased N=3 → RGB。
+    #[test]
+    fn gray_and_icc_based_colorspaces() {
+        let samples: Vec<u8> = (0..16u8).collect();
+        let (doc, id) = doc_with_image(
+            dictionary! {
+                "Subtype" => "Image",
+                "Width" => 4,
+                "Height" => 4,
+                "BitsPerComponent" => 8,
+                "ColorSpace" => "DeviceGray",
+            },
+            samples,
+        );
+        let obj = doc.get_object(id).unwrap();
+        let stream = obj.as_stream().unwrap();
+        let entry = decode_image(&doc, stream).unwrap();
+        assert_eq!(entry.ext, "png");
+
+        // ICCBased /N 3 → 3 通道
+        let mut doc = Document::with_version("1.4");
+        let icc_stream = Stream::new(dictionary! { "N" => 3i64 }, b"icc-data".to_vec());
+        let icc_id = doc.add_object(Object::Stream(icc_stream));
+        let img_dict = dictionary! {
+            "Subtype" => "Image",
+            "Width" => 4,
+            "Height" => 4,
+            "BitsPerComponent" => 8,
+            "ColorSpace" => Object::Array(vec![
+                Object::Name(b"ICCBased".to_vec()),
+                Object::Reference(icc_id),
+            ]),
+        };
+        let img_id = doc.add_object(Object::Stream(Stream::new(img_dict, (0..48u8).collect())));
+        let obj = doc.get_object(img_id).unwrap();
+        let stream = obj.as_stream().unwrap();
+        let entry = decode_image(&doc, stream).unwrap();
+        assert_eq!(entry.ext, "png");
+    }
+
+    /// ICCBased /N 非法值与未知数组首元素 → colorspace unsupported。
+    #[test]
+    fn icc_bad_n_and_unknown_array_head() {
+        let mut doc = Document::with_version("1.4");
+        let icc_stream = Stream::new(dictionary! { "N" => 4i64 }, b"icc".to_vec());
+        let icc_id = doc.add_object(Object::Stream(icc_stream));
+        let img_dict = dictionary! {
+            "Subtype" => "Image",
+            "Width" => 4,
+            "Height" => 4,
+            "BitsPerComponent" => 8,
+            "ColorSpace" => Object::Array(vec![
+                Object::Name(b"ICCBased".to_vec()),
+                Object::Reference(icc_id),
+            ]),
+        };
+        let img_id = doc.add_object(Object::Stream(Stream::new(img_dict, vec![0u8; 64])));
+        let obj = doc.get_object(img_id).unwrap();
+        let stream = obj.as_stream().unwrap();
+        match decode_image(&doc, stream) {
+            Err(e) => assert_eq!(e, "colorspace unsupported"),
+            Ok(entry) => panic!("expected Err, got ext {}", entry.ext),
+        }
+    }
+}
