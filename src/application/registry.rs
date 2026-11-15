@@ -991,3 +991,111 @@ mod edge_tests {
         assert_eq!(preferred.markdown, "pdf");
     }
 }
+
+#[cfg(test)]
+mod edge_tests2 {
+    use super::*;
+
+    /// 不可用引擎 → attempts 记 unavailable；后续失败引擎续跑 →
+    /// AllBackendsFailed 聚合两条（async 链 Unavailable+fail 组合臂）。
+    #[tokio::test]
+    async fn unavailable_then_failing_aggregates_both_attempts() {
+        struct UnavailableConverter;
+        #[async_trait::async_trait]
+        impl Converter for UnavailableConverter {
+            async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+                Err(AlchemizeError::Other("must not be called".into()))
+            }
+            fn supported_extensions(&self) -> &[&str] {
+                &["pdf"]
+            }
+            fn priority(&self) -> u8 {
+                20
+            }
+            fn name(&self) -> &'static str {
+                "engine-unavailable"
+            }
+            fn availability(&self) -> Availability {
+                Availability::Unavailable {
+                    reason: "no dependency".into(),
+                }
+            }
+        }
+        struct FailConverter;
+        #[async_trait::async_trait]
+        impl Converter for FailConverter {
+            async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+                Err(AlchemizeError::Xml("broken xml".into()))
+            }
+            fn supported_extensions(&self) -> &[&str] {
+                &["pdf"]
+            }
+            fn priority(&self) -> u8 {
+                10
+            }
+            fn name(&self) -> &'static str {
+                "engine-fail"
+            }
+        }
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(UnavailableConverter));
+        registry.register(Box::new(FailConverter));
+        let input = Input::bytes(vec![], "t.pdf");
+        let err = registry.convert(&input).await.unwrap_err();
+        match err {
+            AlchemizeError::AllBackendsFailed { ext, attempts } => {
+                assert_eq!(ext, "pdf");
+                assert_eq!(attempts.len(), 2, "{attempts:?}");
+                assert_eq!(attempts[0].0, "engine-unavailable");
+                assert_eq!(attempts[1].0, "engine-fail");
+            }
+            other => panic!("expected AllBackendsFailed, got {other:?}"),
+        }
+    }
+
+    /// 失败链中夹带 DepthLimitExceeded：聚合时直传深度（不吞成普通失败）。
+    #[tokio::test]
+    async fn depth_limit_in_failure_chain_surfaces() {
+        struct DepthFailConverter;
+        #[async_trait::async_trait]
+        impl Converter for DepthFailConverter {
+            async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+                Err(AlchemizeError::DepthLimitExceeded { limit: 7 })
+            }
+            fn supported_extensions(&self) -> &[&str] {
+                &["zip"]
+            }
+            fn priority(&self) -> u8 {
+                20
+            }
+            fn name(&self) -> &'static str {
+                "depth-fail"
+            }
+        }
+        struct PlainFailConverter;
+        #[async_trait::async_trait]
+        impl Converter for PlainFailConverter {
+            async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+                Err(AlchemizeError::Other("plain".into()))
+            }
+            fn supported_extensions(&self) -> &[&str] {
+                &["zip"]
+            }
+            fn priority(&self) -> u8 {
+                10
+            }
+            fn name(&self) -> &'static str {
+                "plain-fail"
+            }
+        }
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(DepthFailConverter));
+        registry.register(Box::new(PlainFailConverter));
+        let input = Input::bytes(vec![], "t.zip");
+        let err = registry.convert(&input).await.unwrap_err();
+        assert!(
+            matches!(err, AlchemizeError::DepthLimitExceeded { limit: 7 }),
+            "got {err:?}"
+        );
+    }
+}
