@@ -218,8 +218,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 # ── 数据 / 容器 / 邮件
 bytes = { version = "1.0", default-features = false, features = ["std"], optional = true }
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "lz4", "zstd", "flate2-rust_backend", "brotli"], optional = true }
-# 锁 0.39：0.41 要 sys ^0.39，与 sqlx-sqlite 0.9 的 <0.38 冲突（经 sdforge→dbnexus embedded→sea-orm 链，2026-11-15 实测）
-rusqlite = { version = "0.39", default-features = false, features = ["bundled"], optional = true }
+# 系统 SQLite（pkg-config），不用 bundled 旧版
+rusqlite = { version = "0.39", default-features = false, optional = true }
 biblatex = { version = "0.12", default-features = false, optional = true }
 # mail-parser 活跃维护；勿用 mail crate 系（RUSTSEC-2023-0054 UAF 无修复）
 mail-parser = { version = "1.0", default-features = false, optional = true }
