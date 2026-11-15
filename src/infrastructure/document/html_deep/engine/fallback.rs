@@ -639,11 +639,11 @@ fn _is_space_used(value: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn parse(html: &str) -> scraper::Html {
+    pub(super) fn parse(html: &str) -> scraper::Html {
         scraper::Html::parse_document(html)
     }
 
-    fn find<'a>(doc: &'a scraper::Html, tag: &'static str) -> NodeRef<'a> {
+    pub(super) fn find<'a>(doc: &'a scraper::Html, tag: &'static str) -> NodeRef<'a> {
         doc.tree
             .nodes()
             .find(|n| matches!(n.value(), SNode::Element(e) if e.name() == tag))
@@ -837,5 +837,82 @@ mod tests {
     fn input_value_rendered_as_text() {
         let out = render_html(r#"<div><input value="typed words"></div>"#, "div");
         assert!(out.contains("typed words"), "{out}");
+    }
+}
+
+#[cfg(test)]
+mod edge_tests2 {
+    use super::tests::{find, parse};
+    use super::*;
+
+    fn render_html(html: &str, tag: &'static str) -> String {
+        let doc = parse(html);
+        let out = render(
+            find(&doc, tag),
+            0,
+            &Targets::scan(doc.tree.root()),
+            &mut HashSet::new(),
+            FormattingContext {
+                in_link: false,
+                wrapped_block: false,
+            },
+        );
+        out.markup
+    }
+
+    /// 交互元素空内容兜底：`<button aria-label>` 无正文 → 空位注入
+    /// ` label `（Task::Fallback arm），有正文则不注入。
+    #[test]
+    fn fallback_label_injected_only_when_empty() {
+        let empty = render_html(r#"<div><button aria-label="Do it"></button></div>"#, "div");
+        assert!(empty.contains(" Do it "), "fallback label: {empty}");
+        let full = render_html(
+            r#"<div><button aria-label="Do it">real text</button></div>"#,
+            "div",
+        );
+        assert!(full.contains("real text"), "{full}");
+    }
+
+    /// 嵌套表降级 div（presentational → expanded）：th/td 变 div、
+    /// rowspan/colspan 属性剔除、col/colgroup 整体丢弃。
+    #[test]
+    fn presentational_table_downgrades_to_div_and_drops_col() {
+        let out = render_html(
+            r#"<table role="presentation"><colgroup><col></colgroup><tr><td rowspan="2">a</td><td>b</td></tr></table>"#,
+            "table",
+        );
+        assert!(!out.contains("<table"), "{out}");
+        assert!(out.contains("<div"), "downgraded: {out}");
+        assert!(!out.contains("rowspan"), "span attr stripped: {out}");
+        assert!(!out.contains("<col"), "col dropped: {out}");
+        assert!(out.contains("a") && out.contains("b"));
+    }
+
+    /// pre 语言类名：class="language-xx" 从 class 白名单派生。
+    #[test]
+    fn pre_language_class_rendered() {
+        let out = render_html(
+            r#"<pre><code class="language-rust">fn x()</code></pre>"#,
+            "pre",
+        );
+        assert!(out.contains("language-rust"), "{out}");
+    }
+
+    /// iframe 无源 → 通用元素路径（media 分支不走），子文本保留。
+    #[test]
+    fn iframe_without_source_falls_through() {
+        let out = render_html("<div><iframe>fallback text</iframe></div>", "div");
+        assert!(out.contains("fallback text"), "{out}");
+    }
+
+    /// 结构表 + 锚点：表格保留原标签并起行书写（Close 分支 begin_html_line）。
+    #[test]
+    fn structural_table_close_on_own_lines() {
+        let out = render_html(
+            r##"<div><a href="#t">ref</a><table><thead><tr><th>h</th></tr></thead></table></div>"##,
+            "div",
+        );
+        assert!(out.contains("\n</thead>"), "close on own line: {out}");
+        assert!(out.contains("<table"), "kept structural: {out}");
     }
 }
