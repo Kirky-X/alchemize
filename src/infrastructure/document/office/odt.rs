@@ -1420,7 +1420,7 @@ mod tests {
         w.finish().unwrap().into_inner()
     }
 
-    fn odt_with(content: &str) -> Vec<u8> {
+    pub(super) fn odt_with(content: &str) -> Vec<u8> {
         zip_parts(&[("content.xml", content.as_bytes())])
     }
 
@@ -2164,5 +2164,31 @@ mod tests {
             .convert(Input::bytes(odt_with(&content), "covered.odt"))
             .await;
         assert!(result.is_err(), "800k covered cells must be rejected");
+    }
+}
+
+#[cfg(test)]
+mod weight_arm_tests {
+    use super::tests::odt_with;
+    use super::*;
+
+    /// 相对链接 + 换行 + 脚注混合文档：blocks_weight/inlines_weight 的
+    /// Relative/Anchor/NoteRef/LineBreak 臂经真实转换计重。
+    #[tokio::test]
+    async fn mixed_inline_document_weights_all_variants() {
+        let content = r#"<office:document-content><office:body><office:text>
+<text:p>see <text:a xlink:href="docs/guide.md">guide</text:a> and <text:a xlink:href="https://example.com">site</text:a></text:p>
+<text:p>line one<text:line-break/>line two<text:note text:note-class="footnote"><text:note-citation>1</text:note-citation><text:note-body><text:p>note body</text:p></text:note-body></text:note></text:p>
+</office:text></office:body></office:document-content>"#;
+        let result = OdtConverter::new()
+            .convert(Input::bytes(odt_with(content), "mixed.odt"))
+            .await
+            .unwrap();
+        let md = &result.markdown;
+        assert!(md.contains("guide"), "{md}");
+        assert!(md.contains("docs/guide.md"), "relative link: {md}");
+        assert!(md.contains("https://example.com"), "{md}");
+        assert!(md.contains("line two"), "{md}");
+        assert!(md.contains("note body"), "footnote: {md}");
     }
 }
