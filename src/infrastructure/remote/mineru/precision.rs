@@ -649,3 +649,94 @@ mod edge_tests {
         assert!(err.to_string().contains("MINERU_API_TOKEN"), "{}", err);
     }
 }
+
+#[cfg(test)]
+mod edge_tests2 {
+    use super::*;
+
+    async fn spawn_server(responses: Vec<(u16, &'static str)>) -> u16 {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            for (status, body) in responses {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut total = Vec::new();
+                let mut buf = [0u8; 4096];
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    loop {
+                        match sock.read(&mut buf).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => {
+                                total.extend_from_slice(&buf[..n]);
+                                if total.windows(4).any(|w| w == b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                })
+                .await;
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        port
+    }
+
+    fn local_client(port: u16) -> MineruPrecisionClient {
+        let base = format!("http://127.0.0.1:{port}");
+        MineruPrecisionClient::with_base_url_and_token(&base, "tok").unwrap()
+    }
+
+    fn file_url() -> ValidatedFileUrl {
+        validate_file_url("https://cdn.mineru.net/f.pdf", DEFAULT_MINERU_ALLOWLIST).unwrap()
+    }
+
+    /// submit 200 但响应体非 JSON → 解析错误路径。
+    #[tokio::test]
+    async fn submit_bad_json_surfaces_parse_error() {
+        let port = spawn_server(vec![(200, "not json at all")]).await;
+        let client = local_client(port);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("failed to parse MinerU response"),
+            "{err}"
+        );
+    }
+
+    /// poll 200 但响应体非 JSON → 解析错误路径。
+    #[tokio::test]
+    async fn poll_bad_json_surfaces_parse_error() {
+        let port = spawn_server(vec![(200, r##"{"task_id":"p-1"}"##), (200, "garbage body")]).await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("failed to parse MinerU poll response"),
+            "{err}"
+        );
+    }
+
+    /// submit 成功但服务器关闭（poll 连接被拒）→ MineruUnavailable。
+    #[tokio::test]
+    async fn poll_connection_refused_maps_to_unavailable() {
+        let port = spawn_server(vec![(200, r##"{"task_id":"p-2"}"##)]).await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("polling MinerU task"), "{err}");
+    }
+}
