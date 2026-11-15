@@ -4,6 +4,10 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # 补发/重跑入口：dispatch 跑在分支上，tag 名从 manifest 版本反推
+  #（REF_NAME 是分支名，直接当 tag 会被 GitHub pre_receive 拒——sdforge
+  # run 43579204764 实证先例）
+  workflow_dispatch:
 
 permissions:
   contents: write  # 创建 GitHub Release
@@ -18,12 +22,15 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      # 正则不含 build metadata（v1.2.3+build.5 拒绝）——9 语言模板同一约定，改需同步
+      # 断言只对 tag 推送路径生效：dispatch 跑在分支上（REF_NAME 是分支名），
+      # tag/版本一致性由发布步按 manifest 反推天然满足（家族先例 sdforge/CodeNexus）
       - name: Tag format (v<semver>)
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           echo "${GITHUB_REF_NAME}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
             || { echo "::error::tag 须形如 v1.2.3 或 v1.2.3-rc.1，实际: ${GITHUB_REF_NAME}"; exit 1; }
       - name: Version consistency
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           MANIFEST_VERSION="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
@@ -32,6 +39,12 @@ jobs:
             exit 1
           fi
           echo "OK: tag ${GITHUB_REF_NAME} ↔ Cargo.toml ${MANIFEST_VERSION}"
+      - name: Manifest version readable (dispatch path)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          MANIFEST_VERSION="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          echo "dispatch path: manifest version = ${MANIFEST_VERSION}（tag 将按 v${MANIFEST_VERSION} 反推）"
+          [ -n "$MANIFEST_VERSION" ] || { echo "::error::Cargo.toml version 不可读"; exit 1; }
 
   build:
     name: Build ${{ matrix.target }}
@@ -95,34 +108,107 @@ jobs:
           cd artifacts
           find . -type f ! -name 'checksums.txt' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > checksums.txt
           cat checksums.txt
-      - name: Create Release with artifacts
-        uses: softprops/action-gh-release@v3
-        with:
-          generate_release_notes: true
-          files: artifacts/**/*
-
-  # 仅当配置了 CARGO_REGISTRY_TOKEN 才发布到 crates.io；否则跳过，不报错。
-  # 条件放 step 级：job 级 if 的可用 context 不含 env（恒 false 静默 no-op），
-  # step 级 if 可以读 env context。
-  publish-crates:
-    name: Publish to crates.io (条件)
-    needs: github-release
-    runs-on: ubuntu-latest
-    if: ${{ !cancelled() }}
-    steps:
-      - uses: actions/checkout@v7
-        if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
-      - uses: dtolnay/rust-toolchain@stable
-        if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
-      - name: cargo publish
-        if: ${{ env.CARGO_REGISTRY_TOKEN != '' }}
+      # gh release 脚本步（替代 action-gh-release：zizmor 判 superfluous，
+      # CodeNexus run 43629773752 先例）＋家族三件套：
+      # ① dispatch 路径 tag 按 manifest 反推（REF_NAME 是分支名直接当 tag 会被
+      #    pre_receive 拒——sdforge run 43579204764 实证）；
+      # ② prerelease 旗标按 semver 是否含 '-' 自动判定；
+      # ③ 幂等：release 已存在则跳过创建（重跑安全）。
+      # TAG/VERSION 均不经 template 直插 run 块（template-injection 向量）。
+      - name: Create GitHub Release (idempotent)
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
-            echo "CARGO_REGISTRY_TOKEN not set — skipping crates.io publish (no error)"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          fi
+          VERSION="${TAG#v}"
+          ARGS=(--generate-notes)
+          if [[ "$VERSION" == *-* ]]; then
+            ARGS+=(--prerelease)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release ${TAG} already exists; skip creation, refresh artifacts only (idempotent)"
+            gh release upload "$TAG" artifacts/**/* --clobber
             exit 0
           fi
-          cargo publish --locked
-        # token 由 step env 注入、cargo 原生读取；不写进 --token 参数
-        # （避免 token 出现在 runner 进程 argv）。
+          gh release create "$TAG" artifacts/**/* "${ARGS[@]}"
+
+      # uniqueness 断言（最终一致性窗口轮询 5×3s——CodeNexus v0.4.0 attempt1
+      # 实录：create 成功后 2s 列表读到 0 致断言误杀、publish 被跳过）
+      - name: Verify release uniqueness
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          fi
+          COUNT=0
+          for i in 1 2 3 4 5; do
+            COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate --jq "[.[] | select(.tag_name == "${TAG}")] | length")
+            echo "try${i}: release objects for ${TAG}: ${COUNT}"
+            if [ "${COUNT}" = "1" ]; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::expected exactly 1 release for ${TAG}, found ${COUNT} after 5 retries; release state is not idempotent"
+          exit 1
+
+  # crates.io trusted publishing（OIDC，家族统一形态）：官方
+  # rust-lang/crates-io-auth-action 以 Actions OIDC 换取 30 分钟短时凭证——
+  # 无需任何长生命周期 secret。首次以 OIDC 发布既有 crate 需在 crates.io
+  # 发布者设置中登记本 workflow（owner 在 crates.io/settings 操作一次）。
+  publish-crates:
+    name: Publish to crates.io (OIDC)
+    needs: github-release
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # OIDC 凭证交换
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@59a558e8c538bf4a23bbffa19e5a278b703f2920 # 1.97.1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      # 版本是否已发布（幂等守卫：已存在则跳过 publish）
+      - name: Check published version
+        id: published
+        run: |
+          VERSION="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" -H 'User-Agent: kirky-x-release-verify' \
+            "https://crates.io/api/v1/crates/alchemize/${VERSION}")
+          echo "exists=$([[ "$CODE" == "200" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+        id: auth
+
+      - name: Publish to crates.io
+        if: steps.published.outputs.exists == 'false'
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+      # 版本硬校验：防静默漏发（403 未就绪/404 索引未刷新都继续轮询，200 才算成功）
+      - name: Verify on crates.io
+        if: always()
+        run: |
+          VERSION="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          ok=""
+          for i in 1 2 3 4 5 6; do
+            sleep 20
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -H 'User-Agent: kirky-x-release-verify' \
+              "https://crates.io/api/v1/crates/alchemize/${VERSION}")
+            echo "try$i: HTTP ${CODE}"
+            if [ "$CODE" = "200" ]; then ok=1; break; fi
+            if [ "$CODE" != "403" ] && [ "$CODE" != "404" ]; then break; fi
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::alchemize ${VERSION} 未出现在 crates.io(HTTP ${CODE})"
+            exit 1
+          fi
