@@ -320,11 +320,10 @@ mod tests {
             eprintln!("skipping: real.heic fixture missing");
             return;
         }
-        if matches!(
-            HeicConverter::new().availability(),
-            crate::application::ports::Availability::Unavailable { .. }
-        ) {
-            eprintln!("skipping: no OS HEIC decoder");
+        // availability() is always Available (metadata-only degradation is
+        // built in), so probe the actual OS decoder here.
+        if !decoder_available() {
+            eprintln!("skipping: no OS HEIC decoder (sips)");
             return;
         }
         let result = HeicConverter::new()

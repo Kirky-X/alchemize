@@ -264,10 +264,18 @@ fn real_wav_header_duration_sanity() {
 
 #[tokio::test]
 async fn real_mp4_degraded_or_extracted() {
+    // The source asset lives outside this repo (etyma video-output); runners
+    // and fresh clones do not have it. ffmpeg-less hosts degrade header-only
+    // fixtures to metadata markdown — that behavior is covered by
+    // golden_mp4_metadata_degradation, so here we only run when both the
+    // asset and a decoder exist.
     let path = std::path::Path::new(
         "/Volumes/ZHITAI-1T/projects/etyma/video-output/agnes_video_t2vid_1152x768_1784828436_067a6d97.mp4",
     );
-    assert!(path.is_file(), "real mp4 missing at {}", path.display());
+    if !path.is_file() {
+        eprintln!("skipping: real mp4 asset not present on this host");
+        return;
+    }
     let alch = AlchemizeBuilder::new().build();
     let result = alch.convert(&Input::Path(path.to_path_buf())).await;
     let result = result.expect("mp4 conversion must not error");
@@ -321,6 +329,12 @@ async fn real_odp_extracts_slides_and_assets() {
 
 #[tokio::test]
 async fn real_heic_decodes_to_png_via_os() {
+    // HEIC decode needs the macOS `sips` decoder; runners without it get the
+    // metadata-only degradation path, which the lib tests already cover.
+    if !alchemize::infrastructure::media::heic::decoder_available() {
+        eprintln!("skipping: no OS HEIC decoder (sips)");
+        return;
+    }
     let path = real("real.heic");
     let alch = AlchemizeBuilder::new().build();
     let result = alch

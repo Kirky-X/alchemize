@@ -171,7 +171,10 @@ async fn golden_tex_env_aware() {
     if which_pandoc() {
         assert!(md.contains("Hello"), "pandoc path md: {md}");
     } else {
-        assert!(md.starts_with("```latex"), "fallback path md: {md}");
+        // fence_for() emits longest_backtick_run.max(3) + 1 backticks, so a
+        // backtick-free fixture yields a 4-backtick fence (see
+        // latex_source::tests::fenced_fallback_when_pandoc_missing).
+        assert!(md.starts_with("````latex"), "fallback path md: {md}");
     }
 }
 

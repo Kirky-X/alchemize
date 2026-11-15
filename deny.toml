@@ -38,6 +38,11 @@ allow = [
     "BSD-3-Clause", "BSD-2-Clause", "ISC",
     "Unicode-3.0", "Unicode-DFS-2016",
     "Zlib", "CC0-1.0", "MPL-2.0", "0BSD",
+    # BSL-1.0（Boost）：xxhash-rust 的许可证，OSI 公认宽松许可。
+    # CDLA-Permissive-2.0：webpki-root-certs 的数据许可证，permissive 变体
+    #   （允许再分发与商用，仅要求附带许可文本），随 rustls-platform-verifier
+    #   → reqwest 树进入。两者均为传递依赖，无替代无锁定路径。
+    "BSL-1.0", "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 
