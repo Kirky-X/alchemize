@@ -156,7 +156,7 @@ jobs:
           fi
           COUNT=0
           for i in 1 2 3 4 5; do
-            COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate --jq "[.[] | select(.tag_name == "${TAG}")] | length")
+            COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate --jq "[.[] | select(.tag_name == \"${TAG}\")] | length")
             echo "try${i}: release objects for ${TAG}: ${COUNT}"
             if [ "${COUNT}" = "1" ]; then
               exit 0
@@ -190,7 +190,7 @@ jobs:
           VERSION="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
           CODE=$(curl -s -o /dev/null -w "%{http_code}" -H 'User-Agent: kirky-x-release-verify' \
             "https://crates.io/api/v1/crates/alchemize/${VERSION}")
-          echo "exists=$([[ "$CODE" == "200" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "exists=$([[ "$CODE" == "200" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
         id: auth
