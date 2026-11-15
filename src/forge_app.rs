@@ -413,4 +413,52 @@ mod tests {
             other => panic!("expected InvalidInput, got {other:?}"),
         }
     }
+
+    // -- 95 攻坚批四：build_alch 配置臂 + convert 入口契约 --------------------
+
+    #[tokio::test]
+    async fn convert_rejects_missing_input_file() {
+        let err = convert(
+            "definitely-missing-input.xyz".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+        match err {
+            ApiError::InvalidInput { field, .. } => assert_eq!(field.as_deref(), Some("input")),
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn convert_rejects_unknown_asset_mode() {
+        let dir = std::env::temp_dir().join("alch-conv-fixture-xyz.txt");
+        std::fs::write(&dir, b"hello").unwrap();
+        let err = convert(
+            dir.display().to_string(),
+            None,
+            None,
+            Some("bogus".to_string()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+        std::fs::remove_file(&dir).ok();
+        match err {
+            ApiError::InvalidInput { field, value, .. } => {
+                assert_eq!(field.as_deref(), Some("assets"));
+                let _ = value;
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
 }

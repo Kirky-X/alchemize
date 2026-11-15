@@ -350,3 +350,35 @@ fn end_code_flushes_pending_raw() {
     let out = conv("<p>a<code></code>b</p>");
     assert!(out.contains("a") && out.contains("b"), "{out}");
 }
+
+// -- 95 攻坚批四 --------------------------------------------------------------
+
+#[test]
+fn structural_table_with_rowspan_falls_back_to_html() {
+    // thead（结构表）+ rowspan（markdown 表模型装不下）→ 白名单 HTML 兜底。
+    let out = conv(
+        "<table><thead><tr><th>h</th></tr></thead><tbody><tr><td rowspan=\"2\">x</td><td>y</td></tr></tbody></table>",
+    );
+    assert!(out.contains("<table"), "html fallback: {out}");
+    assert!(out.contains("rowspan"), "attribute preserved: {out}");
+}
+
+#[test]
+fn audio_inside_link_keeps_destination_as_text() {
+    // Markdown 链接不可嵌套：媒体链接降级为 `label (url)` 文本。
+    let out = conv(
+        "<p><a href=\"https://safe.example/page\"><audio src=\"https://safe.example/a.mp3\"></audio></a></p>",
+    );
+    assert!(out.contains("a.mp3"), "{out}");
+    assert!(
+        out.contains("https://safe.example/a.mp3") || out.contains("("),
+        "dest kept: {out}"
+    );
+}
+
+#[test]
+fn layout_table_without_structure_degrades() {
+    // 纯布局表（无语义标记、可装下也按布局处理）：内容照常输出。
+    let out = conv("<table><tr><td>cell a</td><td>cell b</td></tr></table>");
+    assert!(out.contains("cell a") && out.contains("cell b"), "{out}");
+}
