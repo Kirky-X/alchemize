@@ -46,3 +46,6 @@ perf.data*
 # Cargo.lock
 *.swo
 *.log
+
+# 发布/验收报告文件（用户既定原则：报告不进仓，本地留存）
+/release-report-*.md
