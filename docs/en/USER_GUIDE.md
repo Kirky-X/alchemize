@@ -275,3 +275,97 @@ For the full API see the [API Reference](API_REFERENCE.md#-usage-examples).
 - [❓ FAQ](FAQ.md) — quick answers to frequent questions
 - [🔒 Security](SECURITY.md) — trust boundaries and hardening checklist
 - [🤝 Contributing](CONTRIBUTING.md) — want to change code? Start here
+
+## 📊 Supported-Format Matrix
+
+| Category | Extensions | Engine (priority) | Feature |
+| --- | --- | --- | --- |
+| Word (OOXML) | docx | docx-deep(18) → docx(10) | `docx` |
+| Word (legacy) | doc, rtf | legacy-office(15, LibreOffice) | `legacy-office` |
+| OpenDocument text | odt | odt-deep(18) | `odt` |
+| Presentations | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `pptx` / `odp` (`legacy-office` for legacy binaries) |
+| Spreadsheets | — (not supported) | The spreadsheet parser was removed: calamine materialization (shared strings, styles/theme, ODS repeats and text expansion) cannot be bounded by a pre-check on untrusted input; xlsx/xls/xlsb/ods are unsupported | — |
+| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdf` / `pdf-local` / `pdf-cloud` |
+| Web / e-book | html, htm / epub | html(htmd) → html-deep(15) / epub | `html` (base + deep chain) / `epub` |
+| Plain text / code | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 code extensions | text (fenced) | `text` (default member) |
+| Tabular text | csv, tsv, psv | csv (delimiter sensing) | `csv` |
+| Markup languages | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | `latex` / `pandoc` |
+| Notebooks | ipynb | ipynb | `ipynb` |
+| Images | png, jpg, jpeg, gif, webp, bmp, tif, tiff, svg / heic, heif | image (optional Vision) / heic (sips or metadata) | `media` / `heic` |
+| Audio | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio (optional ASR) | `media` (+ `audio` for transcription) |
+| Video | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video (ffmpeg + optional ASR/Vision) | `media` (+ `audio` for transcription) |
+| Subtitles | srt, vtt, ass, ssa, lrc | subtitle | `media` |
+| E-mail / web archive | eml / mht, mhtml | eml (headers/body/attachment list; the body goes through the html chain when `html` is on) | `email` |
+| Outlook mail | msg | msg→MIME rebuild→eml path (cfb + a minimal MAPI layer) | `msg` (implies `email`) |
+| Help documents | chm | chm (hhc TOC order → per-topic merge through the html chain) | `chm` (implies `html`) |
+| Structured data | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `parquet` / `sqlite` / `bibtex` |
+| Archives | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip recursion / tar-family recursion / 7z recursion | `zip` / `tar`/`gzip`/`xz`/`zstd`/`sevenz` |
+
+## 🎨 Feature Flags
+
+### 📦 Feature Presets
+
+| Preset | Command | Use case |
+| --- | --- | --- |
+| Minimal (default) | `cargo build` | CLI + plain text/code fencing only (`default = ["cli", "text"]`); PDF/Office need explicit format features |
+| Common documents | `cargo build --features pdf,docx,pptx,odt,odp,html,epub,csv,ipynb,zip` | The main document-conversion path + zip recursion; add more formats as needed |
+| Full | `cargo build --features full` | All 30 conversion features (MinerU cloud PDF, local ASR, containers/data/e-mail/help documents included) |
+
+### 📋 Feature Matrix
+
+**Format family (16, one feature per format)**
+
+| feature | Gates | Notes |
+| --- | --- | --- |
+| `text` | TextConverter | Plain text and ~45 code extensions with fenced code blocks; **default member** |
+| `csv` | CsvConverter | csv/tsv/psv with delimiter sensing |
+| `html` | HtmlConverter (htmd base chain) + HtmlDeepConverter (native deep chain) | Both HTML chains live in one feature; without `html`, html/htm conversion is unavailable |
+| `pdf` | PdfConverter (lopdf text extraction) | Local fallback tier; pdfium high fidelity needs `pdf-local` |
+| `docx` | DocxConverter + DocxDeepConverter | OOXML deep + basic parsing (quick-xml + zip) |
+| `pptx` | PptxConverter + PptxDeepConverter | Same as above |
+| `odt` | OdtConverter | Same as above |
+| `odp` | OdpConverter | Same as above |
+| `epub` | EpubConverter | rbook + zip + htmd |
+| `ipynb` | IpynbConverter | Core serde_json only |
+| `zip` | ZipConverter | One-level zip/cbz recursion container (nested zip explicitly unsupported) |
+| `latex` | LatexSourceConverter | pandoc probe + fenced fallback |
+| `pandoc` | PandocGenericConverter | org/rst/asciidoc/opml/mediawiki and other generic formats |
+| `media` | image / audio / video / subtitle converters | Images, audio/video track extraction, subtitle parsing; transcription backend needs `audio` |
+| `heic` | HeicConverter | sips or metadata fallback; standalone feature |
+| `chm` | ChmConverter (libchm, pure Rust with LZX) | CHM compiled help→md: `.hhc` TOC order first (path lexicographic order otherwise), per-topic through the html chain; caps of 512 topics/16MiB per entry/256MiB cumulative, over-limit marked `truncated`; implies `html` |
+
+**Backends / data / containers / tool surface**
+
+| feature | Pulls in | Notes |
+| --- | --- | --- |
+| `pdf-local` | local high-fidelity PDF engine (pdfium-render) | Implies `pdf`; probes the dynamic library at runtime, falls back to pdf-extract when missing. Embedded-image extraction goes through a lopdf structure walk (DCT/JPX passthrough, samples re-encoded to PNG, unsupported items counted explicitly) |
+| `pdf-cloud` | MinerU cloud PDF engine (reqwest/limiteron) | registered only after the endpoint is configured via `ALCHEMIZE_MINERU_URL` |
+| `audio` | vecboost transcription facade + Whisper-compatible API | Implies `media`; Qwen3-ASR ONNX + silero VAD, registry dependency on vecboost |
+| `legacy-office` | legacy binary Office engine (external soffice) | doc/rtf→docx and ppt/pps/pot→pptx, then the deep chain; degrades automatically when absent |
+| `email` | e-mail engine (mail-parser) | headers/body/attachment list; three extensions eml/mht/mhtml, the HTML body goes through the html chain when `html` is on |
+| `msg` | Outlook mail engine (cfb + minimal MAPI layer) | `.msg` OLE compound file→MIME rebuild→reuses eml rendering; 8 core property types + attachment list; implies `email` |
+| `parquet`/`sqlite`/`bibtex` | structured data engines, split into three per-format features | streaming parquet with a 100k-row cap, read-only sqlite, biblatex entries |
+| `tar`/`gzip`/`xz`/`zstd`/`sevenz` | archive family, split into five per-format features | recursive conversion, magic-byte detection of the inner format; `.tgz` needs both `tar` and `gzip` |
+| `cli` | CLI skeleton (sdforge + inklog) | **default member**; `[[bin]] alch` has `required-features = ["cli"]` |
+| `mcp` | MCP tool surface (the `alch mcp` subcommand, stdio server) | convert/doctor/formats exposed as MCP tools; implies `cli`, not part of default |
+| `full` | All 30 conversion features (format family + backends/data/containers; excludes `cli`/`mcp`) | |
+
+**Default behavior (breaking change)**: `default = ["cli", "text"]` — the default build compiles only the CLI skeleton and plain-text conversion. `alch convert x.pdf` / `x.docx` has no candidate engine in a default build and returns `unsupported format` (exit code 2). Enable the features you need explicitly (e.g. `--features pdf,docx`); `--features full` restores all capabilities.
+
+**Dependencies**: apart from the 9 core crates (`serde`/`serde_json`/`thiserror`/`tracing`/`tokio`/`async-trait`/`anyhow`/`base64`/`sha2`) and the i18n trio (`fluent-bundle`/`unic-langid`/`sys-locale`), every dependency is `optional = true` and activated only through a feature's `dep:` reference; disabling a feature keeps its dependencies out of the build graph. Version upgrades: `base64 0.23`, `sha2 0.11`, `image 0.25`, `pdfium-render 0.9` (`pdfium_6295` bindings; runtime e2e awaits a newer pdfium binary), `zstd 0.14`, `icu_properties 2.4`; `rusqlite` stays at `0.39` (`0.41` hard-conflicts with `libsqlite3-sys <0.38` from limiteron→dbnexus→sqlx).
+
+## 💻 CLI Examples
+
+```bash
+# Pipe-friendly: straight to stdout
+alch convert paper.pdf | head -50
+
+# Batch: shell loop
+for f in docs/*.docx; do alch convert "$f" -o "md/$(basename "${f%.docx}").md"; done
+
+# Offline/compliance environments: zero network egress
+alch convert --no-remote secret.docx -o secret.md
+
+# Force the format when the extension is untrustworthy
+alch convert payload.bin --format pdf
+```

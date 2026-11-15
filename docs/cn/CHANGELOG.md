@@ -91,3 +91,41 @@ alchemize 所有显著变更记录于此文件。
 [Unreleased]:
 [Unreleased]: https://github.com/Kirky-X/alchemize/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/Kirky-X/alchemize/releases/tag/v0.1.0
+
+## 开发路线图
+
+<table style="width:100%; border-collapse: collapse">
+<tr><th style="text-align:center">状态</th><th style="text-align:left">方向</th><th style="text-align:left">条目</th></tr>
+<tr><td align="center">✅</td><td>转换引擎</td><td>注册表 fallback 链、文档全格式、代码围栏化、zip 递归、多编码探测</td></tr>
+<tr><td align="center">✅</td><td>可选后端</td><td>自研 office 深解析（docx/odt/odp/pptx）、MinerU 云端 PDF（SSRF 防护 + 限量）、vecboost 本地 ASR</td></tr>
+<tr><td align="center">✅</td><td>媒体链路</td><td>图片视觉端口、ffmpeg 抽轨、字幕原生解析、帧去重、VAD 段级转录</td></tr>
+<tr><td align="center">✅</td><td>CLI 与诊断</td><td>sdforge 封装（CLI+MCP 双面）、convert/doctor/formats、退出码语义化、引擎偏好与资产模式</td></tr>
+<tr><td align="center">✅</td><td>文档与合规</td><td>七篇文档套件（结构对齐 confers）、双语 README、SPDX 版权头 59/59、覆盖率 90.49%</td></tr>
+<tr><td align="center">✅</td><td>供应链收口</td><td>anydoc 依赖已移除，zip 仅 9.4.1；cargo audit 漏洞归零（仅余 unmaintained 提示）</td></tr>
+<tr><td align="center">🔲</td><td>发布</td><td>首次 crates.io 发布 + crates.io/docs.rs 徽章</td></tr>
+<tr><td align="center">🔲</td><td>CI 与质量</td><td>GitHub Actions 三档矩阵 + codecov 覆盖率徽章</td></tr>
+<tr><td align="center">🔲</td><td>性能</td><td>criterion 基准 → 补 PERFORMANCE 篇真实数据</td></tr>
+<tr><td align="center">🔲</td><td>ASR 真链路</td><td>模型 bundle 就绪后跑真模型端到端（现以 #[ignore] 标注）</td></tr>
+</table>
+
+## 致谢
+
+### 🌟 核心依赖
+
+- [pdf-extract](https://github.com/jrmuizel/pdf-extract)（MIT）——PDF 文本层提取。
+- [quick-xml](https://github.com/tafia/quick-xml)（MIT/Apache-2.0）——OOXML/ODF/OMML 事件流。
+- [sevenz-rust2](https://github.com/hasenbanck/sevenz-rust2)（Apache-2.0）与 [tar](https://github.com/alexcrichton/tar-rs)/[flate2](https://github.com/rust-lang/flate2)/[xz2](https://github.com/alexcrichton/xz2-rs)/[zstd](https://github.com/gyscos/zstd-rs)（MIT/Apache-2.0）——归档容器。
+- [libchm](https://github.com/trypsynth/libchm)（MIT）——CHM 编译帮助文档解析（纯 Rust，含 LZX 解压）。
+- [cfb](https://github.com/mdsteele/rust-cfb)（MIT）——OLE Compound File 读取（Outlook .msg 容器层）。
+- [parquet](https://github.com/apache/arrow-rs)（Apache-2.0）、[rusqlite](https://github.com/rusqlite/rusqlite)（MIT）、[biblatex](https://github.com/typst/biblatex)（MIT）——结构化数据引擎。
+- [mail-parser](https://github.com/stalwartlabs/mail-parser)（Apache-2.0/MIT）——EML 解析。
+- [LibreOffice](https://www.libreoffice.org/)（MPL-2.0）——旧版二进制 Office 转换（可选外部工具）。
+- [pandoc](https://pandoc.org/)（GPL-2.0+）——LaTeX/org/rst/asciidoc 等标记语言转换（可选外部工具）。
+- [vecboost](https://github.com/Kirky-X/vecboost)（自有）——Qwen3-ASR ONNX + silero VAD 本地转录门面。
+- [pdf-extract](https://crates.io/crates/pdf-extract)、[quick-xml](https://crates.io/crates/quick-xml)、[aspasia](https://crates.io/crates/aspasia)、[rbook](https://crates.io/crates/rbook)、[htmd](https://crates.io/crates/htmd) 等优秀开源 crate。
+
+### 💝 特别感谢
+
+- [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate)（AGPL-3.0）——仅吸收设计思想（版面区域分类、图像页 OCR fallback、段落重组），零代码复制，alchemize 保持 Apache-2.0。
+- mnemis（自有，未公开）——转换器骨架迁移源。
+- [confers](https://github.com/Kirky-X/confers)——文档版式与工程惯例的参考基准。

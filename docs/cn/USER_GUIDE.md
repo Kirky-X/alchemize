@@ -49,7 +49,7 @@ cargo build --release --features full
 cargo install --path . --features full
 ```
 
-默认 `default = ["cli", "text"]`：`cargo build` 只编译 CLI 骨架与纯文本/代码围栏转换。要转 PDF、Word、HTML 等格式，必须显式开启对应 feature（见[引擎与扩展名](#-引擎与扩展名)的 feature 列）。
+默认 `default = ["cli", "text"]`：`cargo build` 只编译 CLI 骨架与纯文本/代码围栏转换。要转 PDF、Word、HTML 等格式，必须显式开启对应 feature（见[引擎与扩展名](#引擎与扩展名)的 feature 列）。
 
 ### 💡 第一步
 
@@ -275,3 +275,97 @@ println!("{} [{}]", result.title.as_deref().unwrap_or("-"), result.quality);
 - [❓ FAQ](FAQ.md) — 高频问题速查
 - [🔒 安全文档](SECURITY.md) — 信任边界与加固清单
 - [🤝 贡献指南](CONTRIBUTING.md) — 想改代码？从这里开始
+
+## 📊 支持格式矩阵
+
+| 类别 | 扩展名 | 引擎（priority） | 需要的 feature |
+| --- | --- | --- | --- |
+| Word（OOXML） | docx | docx-deep(18) → docx(10) | `docx` |
+| Word（旧版） | doc, rtf | legacy-office(15，LibreOffice) | `legacy-office` |
+| OpenDocument 文本 | odt | odt-deep(18) | `odt` |
+| 演示文稿 | pptx / ppt,pps,pot / odp | pptx-deep(18) → pptx(10) / legacy-ppt(15) / odp-deep(18) | `pptx` / `odp`（旧二进制 `legacy-office`） |
+| 电子表格 | —（不支持） | 表格解析器已移除：calamine 的物化面（共享字符串、styles/theme、ODS 重复与文本展开）无法在不可信输入上被前置校验约束；xlsx/xls/xlsb/ods 不再支持 | — |
+| PDF | pdf | pdfium(20) → pdf-extract(10) → MinerU(5) | `pdf` / `pdf-local` / `pdf-cloud` |
+| 网页 / 电子书 | html, htm / epub | html(htmd) → html-deep(15) / epub | `html`（基础链 + 深链） / `epub` |
+| 纯文本 / 代码 | txt, md, log, jsonl, ndjson, env, properties, rmd, qmd, mmd + ~45 代码扩展 | text（围栏化） | `text`（default 成员） |
+| 表格文本 | csv, tsv, psv | csv（分隔符自探测） | `csv` |
+| 标记语言 | tex, latex / org, rst, adoc, asciidoc, opml, mediawiki, wiki, textile | latex-source / pandoc-generic | `latex` / `pandoc` |
+| 笔记本 | ipynb | ipynb | `ipynb` |
+| 图片 | png, jpg, jpeg, gif, webp, bmp, tif, tiff, svg / heic, heif | image（Vision 可选） / heic（sips 或元数据） | `media` / `heic` |
+| 音频 | wav, mp3, ogg, opus, flac, aac, m4a, wma | audio（ASR 可选） | `media`（+`audio` 转录） |
+| 视频 | mp4, m4v, mov, avi, mkv, webm, flv, wmv | video（ffmpeg + ASR/Vision 可选） | `media`（+`audio` 转录） |
+| 字幕 | srt, vtt, ass, ssa, lrc | subtitle | `media` |
+| 邮件 / 网页存档 | eml / mht, mhtml | eml（头部/正文/附件清单；`html` 开启时正文走 html 链） | `email` |
+| Outlook 邮件 | msg | msg→MIME 重建→eml 路径（cfb + 最小 MAPI 层） | `msg`（蕴含 `email`） |
+| 帮助文档 | chm | chm（hhc 目录序 → html 链逐主题合并） | `chm`（蕴含 `html`） |
+| 结构化数据 | parquet / sqlite, db, sqlite3 / bib | parquet / sqlite / bib | `parquet` / `sqlite` / `bibtex` |
+| 归档 | zip, cbz / tar, tgz / gz, xz, zst / 7z | zip 递归 / tar 族递归 / 7z 递归 | `zip` / `tar`/`gzip`/`xz`/`zstd`/`sevenz` |
+
+## 🎨 特性标志
+
+### 📦 功能预设
+
+| 预设 | 命令 | 适用场景 |
+| --- | --- | --- |
+| 最小化（default） | `cargo build` | 仅 CLI + 纯文本/代码围栏（`default = ["cli", "text"]`）；PDF/Office 等需显式开启格式 feature |
+| 常用文档 | `cargo build --features pdf,docx,pptx,odt,odp,html,epub,csv,ipynb,zip` | 文档转换主路径 + zip 递归；按需追加其他格式 |
+| 全功能 | `cargo build --features full` | 全部 30 个转换类 feature（含 MinerU 云端 PDF、本地 ASR、容器/数据/邮件/帮助文档） |
+
+### 📋 功能矩阵
+
+**格式族（16 个，一格式一 feature）**
+
+| feature | 门控能力 | 说明 |
+| --- | --- | --- |
+| `text` | TextConverter | 纯文本与 ~45 扩展名代码围栏；**default 成员** |
+| `csv` | CsvConverter | csv/tsv/psv 分隔符自探测 |
+| `html` | HtmlConverter（htmd 基础链）+ HtmlDeepConverter（自研深链） | 两条 html 链同属一个 feature；不含 `html` 时 html/htm 转换完全不可用 |
+| `pdf` | PdfConverter（lopdf 文本抽取） | PDF 本地兜底档；pdfium 高保真需另开 `pdf-local` |
+| `docx` | DocxConverter + DocxDeepConverter | OOXML 深解析 + 基础解析（quick-xml + zip） |
+| `pptx` | PptxConverter + PptxDeepConverter | 同上 |
+| `odt` | OdtConverter | 同上 |
+| `odp` | OdpConverter | 同上 |
+| `epub` | EpubConverter | rbook + zip + htmd |
+| `ipynb` | IpynbConverter | 仅核心 serde_json |
+| `zip` | ZipConverter | zip/cbz 一层递归容器（嵌套 zip 显式不支持） |
+| `latex` | LatexSourceConverter | pandoc 探测 + 围栏兜底 |
+| `pandoc` | PandocGenericConverter | org/rst/asciidoc/opml/mediawiki 等通用格式 |
+| `media` | image / audio / video / subtitle 四转换器 | 图片、音视频抽轨、字幕解析；转录后端另开 `audio` |
+| `heic` | HeicConverter | sips 或元数据降级；独立 feature |
+| `chm` | ChmConverter（libchm，纯 Rust 含 LZX） | CHM 编译帮助文档→md：`.hhc` 目录序优先（否则路径字典序），逐主题走 html 链；上限 512 主题/16MiB 单条/256MiB 累计，超限 `truncated` 标注；蕴含 `html` |
+
+**后端 / 数据 / 容器 / 工具面**
+
+| feature | 引入 | 说明 |
+| --- | --- | --- |
+| `pdf-local` | 本地 PDF 高保真引擎（pdfium-render） | 自动带入 `pdf`；运行时探测动态库，缺失降级到 pdf-extract。嵌入图提取走 lopdf 结构遍历（DCT/JPX 直通，样本重编码 PNG，不支持项显性计数） |
+| `pdf-cloud` | MinerU 云端 PDF 引擎（reqwest/limiteron） | 端点经 `ALCHEMIZE_MINERU_URL` 配置后才注册 |
+| `audio` | vecboost 转录门面 + Whisper 兼容 API | 自动带入 `media`；Qwen3-ASR ONNX + silero VAD，registry 依赖 vecboost |
+| `legacy-office` | 旧版二进制 Office 引擎（外部 soffice） | doc/rtf→docx、ppt/pps/pot→pptx 后进深解析链；缺席自动降级 |
+| `email` | 邮件引擎（mail-parser） | 头部/正文/附件清单；eml/mht/mhtml 三扩展，正文 HTML 在 `html` 开启时走 html 链 |
+| `msg` | Outlook 邮件引擎（cfb + 最小 MAPI 层） | `.msg` OLE 复合文件→重建 MIME→复用 eml 渲染；8 类核心属性 + 附件清单；自动带入 `email` |
+| `parquet`/`sqlite`/`bibtex` | 结构化数据引擎，按格式拆分的三个 feature | parquet 流式 10 万行截断、sqlite 只读、biblatex 条目 |
+| `tar`/`gzip`/`xz`/`zstd`/`sevenz` | 归档容器族，按格式拆分的五个 feature | 递归转换，魔数检测内层格式；`.tgz` 需 `tar`+`gzip` 同时开启 |
+| `cli` | CLI 骨架（sdforge + inklog） | **default 成员**；`[[bin]] alch` 的 required-features 为 `cli` |
+| `mcp` | MCP 工具面（`alch mcp` 子命令，stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；隐含 `cli`，不随 default |
+| `full` | 全部 30 个转换类 feature（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | |
+
+**default 行为（破坏性变更）**：`default = ["cli", "text"]` —— 默认构建只编译 CLI 骨架与纯文本转换。`alch convert x.pdf` / `x.docx` 在默认构建下没有候选引擎，返回 `unsupported format`（退出码 2）。需要哪些格式就显式开启对应 feature（如 `--features pdf,docx`）；`--features full` 恢复全部能力。
+
+**依赖说明**：除核心 9 个（`serde`/`serde_json`/`thiserror`/`tracing`/`tokio`/`async-trait`/`anyhow`/`base64`/`sha2`）与 i18n 三件（`fluent-bundle`/`unic-langid`/`sys-locale`）外，全部依赖 `optional = true` 且只经 feature 的 `dep:` 引用激活；关闭 feature 时对应依赖不进入编译图。版本升级：`base64 0.23`、`sha2 0.11`、`image 0.25`、`pdfium-render 0.9`（绑定选 `pdfium_6295`，运行时 e2e 待更新 pdfium 二进制）、`zstd 0.14`、`icu_properties 2.4`；`rusqlite` 保持 `0.39`（`0.41` 与 limiteron→dbnexus→sqlx 的 `libsqlite3-sys <0.38` 硬冲突）。
+
+## 💻 CLI 示例
+
+```bash
+# 管道友好：stdout 直出
+alch convert paper.pdf | head -50
+
+# 批量：shell 循环
+for f in docs/*.docx; do alch convert "$f" -o "md/$(basename "${f%.docx}").md"; done
+
+# 离线/合规环境：进程零网络出口
+alch convert --no-remote secret.docx -o secret.md
+
+# 不可信扩展名时强制指定格式
+alch convert payload.bin --format pdf
+```
