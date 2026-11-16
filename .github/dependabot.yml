@@ -11,6 +11,11 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     labels: [dependencies, github-actions]
+    # patch 级版本更新关闭自动 PR（2026-11-16）
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-patch"
 
   # 2) 语言生态依赖 — 按项目实际使用取消注释（仅保留对应一行）:
   # Rust:       package-ecosystem: cargo        directory: /
