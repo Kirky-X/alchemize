@@ -82,7 +82,7 @@ jobs:
         # 判定用 job env 而非 secrets 上下文：step if 中的 secrets 会让
         # workflow 文件校验直接失败（见上方 job env 注释）。
         if: ${{ env.CODECOV_TOKEN != '' }}
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ./lcov.info
           fail_ci_if_error: false
