@@ -305,4 +305,115 @@ mod tests {
         assert_eq!(first_year_in("no year here"), None);
         assert_eq!(first_year_in("12"), None);
     }
+
+    // ── coverage supplements: error arms + rare format branches ───────────
+
+    #[test]
+    #[allow(clippy::default_constructed_unit_structs)] // 本测试的目的就是执行 Default impl 本体
+    fn default_constructs_converter() {
+        let c = BibConverter::default();
+        assert_eq!(c.name(), "bib");
+    }
+
+    #[test]
+    fn format_people_handles_empty_list_and_institutional_names() {
+        assert_eq!(format_people(&[]), "");
+        let institutional = Person {
+            name: "World Health Organization".to_string(),
+            given_name: String::new(),
+            prefix: String::new(),
+            suffix: String::new(),
+            id: None,
+            prefix_initials: None,
+            given_initials: None,
+            use_prefix: None,
+        };
+        assert_eq!(format_people(&[institutional]), "World Health Organization");
+    }
+
+    #[test]
+    fn first_year_in_resets_on_long_groups_and_keeps_trailing_group() {
+        // Five consecutive digits: no 4-digit boundary → reset and reject.
+        assert_eq!(first_year_in("id 12345 x"), None);
+        // Trailing group of exactly four digits at end of input.
+        assert_eq!(first_year_in("revised 2020"), Some(2020));
+    }
+
+    #[tokio::test]
+    async fn missing_input_file_errors_on_read() {
+        let err = BibConverter::new()
+            .convert(Input::Path(std::path::PathBuf::from(
+                "/nonexistent/alchemize-missing.bib",
+            )))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("failed to read bib input"),
+            "{err}"
+        );
+    }
+
+    /// No-author entries exercise the `(true, Some)`/`(true, None)` render
+    /// arms; an institutional author renders as a bare name.
+    #[tokio::test]
+    async fn render_entry_without_authors_covers_year_and_blank_arms() {
+        const BIB: &str = r#"
+@misc{yearonly,
+    title = {Anonymous Report},
+    year  = {2019}
+}
+
+@misc{bare,
+    title = {Nothing At All}
+}
+
+@techreport{institution,
+    author = {{World Health Organization}},
+    title  = {Global Health Metrics},
+    year   = {2021}
+}
+"#;
+        let out = BibConverter::new()
+            .convert(Input::bytes(BIB.as_bytes().to_vec(), "arms.bib"))
+            .await
+            .unwrap();
+        let md = &out.markdown;
+        assert!(
+            md.contains("**yearonly** — Anonymous Report (2019)."),
+            "{md}"
+        );
+        assert!(md.contains("**bare** — Nothing At All\n"), "{md}");
+        assert!(
+            md.contains(
+                "**institution** — Global Health Metrics (World Health Organization, 2021)."
+            ),
+            "institutional author must render as a bare name: {md}"
+        );
+    }
+
+    /// Date range (`Between`) and unparsable date text (`Chunks`) both yield
+    /// a year through year_of.
+    #[tokio::test]
+    async fn render_entry_date_range_and_chunks_years() {
+        const BIB: &str = r#"
+@article{ranged,
+    author = {Alpha, Betty},
+    title  = {Range Study},
+    date   = {2010-01-01/2012-06-30}
+}
+
+@article{chunked,
+    author = {Gamma, Carl},
+    title  = {Chunk Study},
+    date   = {circa 2003}
+}
+"#;
+        let out = BibConverter::new()
+            .convert(Input::bytes(BIB.as_bytes().to_vec(), "dates.bib"))
+            .await
+            .unwrap();
+        let md = &out.markdown;
+        assert!(md.contains("(Betty Alpha, 2010)."), "between arm: {md}");
+        assert!(md.contains("(Carl Gamma, 2003)."), "chunks arm: {md}");
+    }
 }

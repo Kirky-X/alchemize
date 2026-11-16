@@ -638,8 +638,10 @@ mod edge_tests {
     }
 
     /// from_config 走配置里的 precision_base_url + env token（env 缺失 → 错）。
-    #[test]
-    fn from_config_requires_env_token() {
+    /// env 串行锁：与本文件其他读写 MINERU_API_TOKEN 的测试互斥。
+    #[tokio::test]
+    async fn from_config_requires_env_token() {
+        let _guard = crate::test_support::env_lock().await;
         unsafe { std::env::remove_var(MINERU_API_TOKEN_ENV) };
         let config = MineruConfig::default();
         let err = match MineruPrecisionClient::from_config(&config) {
@@ -738,5 +740,37 @@ mod edge_tests2 {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("polling MinerU task"), "{err}");
+    }
+
+    /// env token 就位：from_env / from_config 双双成功（Ok 臂）。
+    /// 与 from_config_requires_env_token 共用 env 串行锁，防并行互踩。
+    #[tokio::test]
+    async fn from_env_and_from_config_succeed_with_token() {
+        let _guard = crate::test_support::env_lock().await;
+        let saved = std::env::var(MINERU_API_TOKEN_ENV).ok();
+        unsafe { std::env::set_var(MINERU_API_TOKEN_ENV, "tok-test-123") };
+        assert!(MineruPrecisionClient::from_env().is_ok());
+        assert!(
+            MineruPrecisionClient::from_config(&MineruConfig::default()).is_ok(),
+            "config base_url + env token must construct"
+        );
+        match saved {
+            Some(v) => unsafe { std::env::set_var(MINERU_API_TOKEN_ENV, v) },
+            None => unsafe { std::env::remove_var(MINERU_API_TOKEN_ENV) },
+        }
+    }
+
+    /// submit 连接拒收（无服务器）→ send 错误映射臂。
+    #[tokio::test]
+    async fn precision_submit_refused_connection_errors() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let client = local_client(port);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot reach MinerU"), "{err}");
     }
 }

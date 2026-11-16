@@ -445,4 +445,58 @@ mod edge_tests {
             .unwrap_err();
         assert!(err.to_string().contains("bad file"), "{}", err);
     }
+
+    /// from_config：base_url 取自配置的 agent_base_url。
+    #[test]
+    fn agent_from_config_uses_configured_base_url() {
+        let config = MineruConfig::default();
+        let client = MineruAgentClient::from_config(&config).unwrap();
+        assert_eq!(client.base_url, config.agent_base_url);
+    }
+
+    /// submit 连接拒收（无服务器）→ cannot reach MinerU 臂。
+    #[tokio::test]
+    async fn agent_submit_refused_connection_errors() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let client = local_client(port);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot reach MinerU"), "{err}");
+    }
+
+    /// submit 成功后服务器消失 → poll 拒收臂。
+    #[tokio::test]
+    async fn agent_poll_refused_after_submit_errors() {
+        let port = spawn_server(vec![(200, r##"{"task_id":"ag-r1"}"##)]).await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("polling MinerU task"), "{err}");
+    }
+
+    /// poll 200 但响应体非 JSON → poll 解析错误臂。
+    #[tokio::test]
+    async fn agent_poll_bad_json_errors() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"ag-r2"}"##),
+            (200, "not json at all"),
+        ])
+        .await;
+        let client = local_client(port).with_timeout(10);
+        let err = client
+            .parse(&file_url(), ParseOptions::default())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("failed to parse MinerU poll response"),
+            "{err}"
+        );
+    }
 }

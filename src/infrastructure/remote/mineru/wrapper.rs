@@ -567,4 +567,78 @@ mod edge_tests {
         let err = c.convert(pdf_input()).await.unwrap_err();
         assert!(err.to_string().contains("plain text boom"), "{}", err);
     }
+
+    /// MinerUHttpConfig Debug：api_token 缺失 → "None" 占位（红action 臂）。
+    #[test]
+    fn wrapper_config_debug_renders_none_token() {
+        let rendered = format!("{:?}", MinerUHttpConfig::default());
+        assert!(rendered.contains("None"), "{rendered}");
+    }
+
+    /// submit 200 但响应体非 JSON → 解析错误臂。
+    #[tokio::test]
+    async fn wrapper_submit_bad_json_errors() {
+        let port = spawn_server(vec![(200, "this is not json")]).await;
+        let c = converter(format!("http://127.0.0.1:{port}"));
+        let err = c.convert(pdf_input()).await.unwrap_err();
+        assert!(
+            err.to_string().contains("failed to parse MinerU response"),
+            "{err}"
+        );
+    }
+
+    /// submit 成功后服务器消失：poll 连接拒收 → MineruUnavailable 臂。
+    #[tokio::test]
+    async fn wrapper_poll_refused_after_submit() {
+        let port = spawn_server(vec![(200, r##"{"task_id":"w-r1"}"##)]).await;
+        let c = converter(format!("http://127.0.0.1:{port}"));
+        let err = c.convert(pdf_input()).await.unwrap_err();
+        assert!(err.to_string().contains("polling MinerU task"), "{err}");
+    }
+
+    /// poll 200 但响应体非 JSON → poll 解析错误臂。
+    #[tokio::test]
+    async fn wrapper_poll_bad_json_errors() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"w-r2"}"##),
+            (200, "definitely not json"),
+        ])
+        .await;
+        let c = converter(format!("http://127.0.0.1:{port}"));
+        let err = c.convert(pdf_input()).await.unwrap_err();
+        assert!(err.to_string().contains("failed to parse"), "{err}");
+    }
+
+    /// pending → 退避重试 → completed：轮询循环走 Pending/Processing 臂。
+    #[tokio::test]
+    async fn wrapper_pending_then_completed_retries() {
+        let port = spawn_server(vec![
+            (200, r##"{"task_id":"w-r3"}"##),
+            (
+                200,
+                r##"{"status":"pending","markdown":null,"error":null}"##,
+            ),
+            (
+                200,
+                r##"{"status":"completed","markdown":"# after retry","error":null}"##,
+            ),
+        ])
+        .await;
+        let c = converter(format!("http://127.0.0.1:{port}"));
+        let result = c.convert(pdf_input()).await.unwrap();
+        assert_eq!(result.markdown, "# after retry");
+    }
+
+    /// Path 输入文件缺失 → 读取错误臂（to_bytes 失败）。
+    #[tokio::test]
+    async fn wrapper_missing_path_errors_on_read() {
+        let c = converter("http://127.0.0.1:1".into());
+        let err = c
+            .convert(Input::Path(std::path::PathBuf::from(
+                "/nonexistent/alchemize-missing.pdf",
+            )))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("failed to read input"), "{err}");
+    }
 }

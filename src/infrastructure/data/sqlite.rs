@@ -410,4 +410,60 @@ mod tests {
         assert_eq!(escape_cell("a|b"), "a\\|b");
         assert_eq!(escape_cell("x\ny"), "x y");
     }
+
+    // ── coverage supplements: error arms + schema marker branches ──────────
+
+    #[test]
+    #[allow(clippy::default_constructed_unit_structs)] // 本测试的目的就是执行 Default impl 本体
+    fn default_constructs_converter() {
+        let c = SqliteConverter::default();
+        assert_eq!(c.name(), "sqlite");
+    }
+
+    #[tokio::test]
+    async fn missing_path_errors_on_read() {
+        let err = SqliteConverter::new()
+            .convert(Input::Path(PathBuf::from(
+                "/nonexistent/alchemize-missing.db",
+            )))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("failed to read sqlite input"),
+            "{err}"
+        );
+    }
+
+    /// NOT NULL column marker, INTEGER/REAL sample values, and an empty
+    /// table rendering the *(none)* placeholder.
+    #[tokio::test]
+    async fn not_null_marker_numeric_samples_and_empty_table() {
+        struct Guard(PathBuf);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let path =
+            std::env::temp_dir().join(format!("alchemize-sqlite-nn-{}.db", std::process::id()));
+        let _guard = Guard(path.clone());
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE strict (id INTEGER NOT NULL, ratio REAL, payload BLOB);
+             INSERT INTO strict VALUES (42, 2.5, x'00ff');
+             CREATE TABLE hollow (k TEXT);",
+        )
+        .unwrap();
+        drop(conn);
+        let bytes = std::fs::read(&path).unwrap();
+        let out = SqliteConverter::new()
+            .convert(Input::bytes(bytes, "strict.db"))
+            .await
+            .unwrap();
+        let md = &out.markdown;
+        assert!(md.contains("(not null)"), "marker: {md}");
+        assert!(md.contains("42"), "integer sample: {md}");
+        assert!(md.contains("2.5"), "real sample: {md}");
+        assert!(md.contains("Sample rows: *(none)*"), "empty table: {md}");
+    }
 }

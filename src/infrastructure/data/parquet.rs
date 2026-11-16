@@ -412,4 +412,103 @@ mod tests {
         assert_eq!(escape_cell("l1\nl2"), "l1 l2");
         assert_eq!(escape_cell("back\\slash"), "back\\\\slash");
     }
+
+    // ── coverage supplements: logical-type arms + error paths ──────────────
+
+    #[test]
+    #[allow(clippy::default_constructed_unit_structs)] // 本测试的目的就是执行 Default impl 本体
+    fn default_constructs_converter() {
+        let c = ParquetConverter::default();
+        assert_eq!(c.name(), "parquet");
+    }
+
+    #[tokio::test]
+    async fn missing_input_file_errors_on_read() {
+        let converter = ParquetConverter::new();
+        let err = converter
+            .convert(Input::Path(std::path::PathBuf::from(
+                "/nonexistent/alchemize-missing.parquet",
+            )))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("failed to read parquet input"),
+            "{err}"
+        );
+    }
+
+    /// Build a parquet with logical INT8/UINT8/FLOAT columns; the record
+    /// reader surfaces them as Field::Byte/UByte/Float render arms.
+    fn build_parquet_narrow_types() -> Vec<u8> {
+        use parquet::basic::{LogicalType, Repetition, Type as PhysicalType};
+        use parquet::data_type::{FloatType, Int32Type};
+        use parquet::file::writer::SerializedFileWriter;
+        use parquet::schema::types;
+        use std::sync::Arc;
+
+        let int8_col = Arc::new(
+            types::Type::primitive_type_builder("small", PhysicalType::INT32)
+                .with_repetition(Repetition::REQUIRED)
+                .with_logical_type(Some(LogicalType::Integer(parquet::basic::IntType {
+                    bit_width: 8,
+                    is_signed: true,
+                })))
+                .build()
+                .unwrap(),
+        );
+        let uint8_col = Arc::new(
+            types::Type::primitive_type_builder("tiny", PhysicalType::INT32)
+                .with_repetition(Repetition::REQUIRED)
+                .with_logical_type(Some(LogicalType::Integer(parquet::basic::IntType {
+                    bit_width: 8,
+                    is_signed: false,
+                })))
+                .build()
+                .unwrap(),
+        );
+        let float_col = Arc::new(
+            types::Type::primitive_type_builder("ratio", PhysicalType::FLOAT)
+                .with_repetition(Repetition::REQUIRED)
+                .build()
+                .unwrap(),
+        );
+        let schema = Arc::new(
+            types::Type::group_type_builder("schema")
+                .with_fields(vec![int8_col, uint8_col, float_col])
+                .build()
+                .unwrap(),
+        );
+        let mut writer = SerializedFileWriter::new(Vec::new(), schema, Default::default()).unwrap();
+        let mut row_group = writer.next_row_group().unwrap();
+        let mut col = row_group.next_column().unwrap().unwrap();
+        col.typed::<Int32Type>()
+            .write_batch(&[-5i32, 100], None, None)
+            .unwrap();
+        col.close().unwrap();
+        let mut col = row_group.next_column().unwrap().unwrap();
+        col.typed::<Int32Type>()
+            .write_batch(&[0i32, 255], None, None)
+            .unwrap();
+        col.close().unwrap();
+        let mut col = row_group.next_column().unwrap().unwrap();
+        col.typed::<FloatType>()
+            .write_batch(&[1.5f32, -0.25], None, None)
+            .unwrap();
+        col.close().unwrap();
+        row_group.close().unwrap();
+        writer.into_inner().unwrap()
+    }
+
+    #[tokio::test]
+    async fn convert_parquet_narrow_logical_types_render() {
+        let bytes = build_parquet_narrow_types();
+        let out = ParquetConverter::new()
+            .convert(Input::bytes(bytes, "narrow.parquet"))
+            .await
+            .unwrap();
+        let md = &out.markdown;
+        assert!(md.contains("-5"), "signed int8 cell: {md}");
+        assert!(md.contains("255"), "unsigned int8 cell: {md}");
+        assert!(md.contains("1.5"), "float cell: {md}");
+    }
 }
