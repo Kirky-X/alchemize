@@ -203,12 +203,12 @@ fn empty_button_fallback_label() {
     );
 }
 
-// -- 表格（T013 桩：原生 Markdown 表路径待 Table::from_dom 落地） --------------
+// -- 表格（桩：原生 Markdown 表路径待 Table::from_dom 落地） --------------
 
 #[test]
 fn table_stub_degrades_to_layout_path() {
-    // Table::from_dom 未实现（恒 None）→ 结构表走 fallback（T016 桩=空产物）
-    // → 空块退化为边界。输入不 panic 即可；真值对齐在 T013 落地后补。
+    // Table::from_dom 未实现（恒 None）→ 结构表走 fallback（桩=空产物）
+    // → 空块退化为边界。输入不 panic 即可；真值对齐在落地后补。
     let out = conv("<table><tr><th>H1</th></tr></table>");
     let _ = out;
 }

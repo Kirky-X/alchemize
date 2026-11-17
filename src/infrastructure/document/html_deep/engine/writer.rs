@@ -60,7 +60,7 @@ pub(crate) struct Writer {
     code: Option<String>,
     /// 最近一个 Markdown code span 结束于 output 的字节偏移（相邻检测）。
     code_markdown_end: Option<usize>,
-    /// 最近一个数学跨度结束于 output 的字节偏移（防 `$…$1` 误配，T015 接入）。
+    /// 最近一个数学跨度结束于 output 的字节偏移（防 `$…$1` 误配）。
     math_end: Option<usize>,
     /// 折叠中的 ASCII 空白。
     space: bool,
@@ -463,7 +463,7 @@ impl Writer {
                 continue;
             }
             self.prepare_inline(ch);
-            // 数学跨度后紧跟数字：插注释防 `$…$1` 误配（T015 接入 math_end）。
+            // 数学跨度后紧跟数字：插注释防 `$…$1` 误配。
             if ch.is_ascii_digit() && self.math_end == Some(self.output.len()) {
                 self.output.push_str("<!-- -->");
             }

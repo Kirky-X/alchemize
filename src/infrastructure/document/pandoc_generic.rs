@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Generic pandoc-backed converter: org / rst / asciidoc / opml / mediawiki
-//! (T022). Without pandoc on PATH the source degrades to a fenced code block
+//! Without pandoc on PATH the source degrades to a fenced code block
 //! so content is never lost.
 
 use async_trait::async_trait;

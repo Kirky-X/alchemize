@@ -1,7 +1,6 @@
 #![cfg(feature = "bibtex")]
 
-//! BibTeX / BibLaTeX bibliography converter (T026).
-
+//! BibTeX / BibLaTeX bibliography converter.
 use async_trait::async_trait;
 use biblatex::{Bibliography, ChunksExt, Date, DateValue, Entry, PermissiveType, Person};
 

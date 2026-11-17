@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! HEIC/HEIF converter (T028).
+//! HEIC/HEIF converter.
 //!
 //! Decoding needs a HEIF codec. Rather than binding libheif (no maintained
 //! Rust crate with a vendored build), the converter probes for the OS

@@ -589,7 +589,7 @@ mod tests {
     }
 
     /// zip facade 的在场性：feature 开 → availability 有 zip 行；关 → zip 输入
-    /// 报 UnsupportedFormat（安全审查 LOW：补上 zip 的双向断言）。
+    /// 报 UnsupportedFormat（补上 zip 的双向断言）。
     #[cfg(feature = "zip")]
     #[test]
     fn zip_facade_registers_when_feature_on() {

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! Accuracy suite (T031): quantitative fidelity metrics over the real
+//! Accuracy suite: quantitative fidelity metrics over the real
 //! fixtures. Unlike `real_files.rs` (which asserts recognizable content),
 //! this suite measures and prints *ratios*:
 //!

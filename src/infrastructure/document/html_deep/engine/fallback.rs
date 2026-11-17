@@ -916,3 +916,75 @@ mod edge_tests2 {
         assert!(out.contains("<table"), "kept structural: {out}");
     }
 }
+
+#[cfg(test)]
+mod edge_tests3 {
+    use super::tests::{find, parse};
+    use super::*;
+
+    fn render_html(html: &str, tag: &'static str) -> String {
+        let doc = parse(html);
+        let out = render(
+            find(&doc, tag),
+            0,
+            &Targets::scan(doc.tree.root()),
+            &mut HashSet::new(),
+            FormattingContext {
+                in_link: false,
+                wrapped_block: false,
+            },
+        );
+        out.markup
+    }
+
+    /// img 安全 src + 引用锚点：`<img src id>` 形态（首个目标进 id 属性，
+    /// 其余前置 span），title 保留。
+    #[test]
+    fn img_with_anchor_targets_and_title() {
+        let out = render_html(
+            r##"<div><a href="#img-anchor">to img</a><img src="safe.png" title="pic" id="img-anchor"></div>"##,
+            "div",
+        );
+        assert!(out.contains("<img src=\"safe.png\""), "{out}");
+        assert!(out.contains("id=\"img-anchor\""), "anchor id: {out}");
+        assert!(out.contains("title=\"pic\""), "title: {out}");
+    }
+
+    /// img 无安全 src → 纯 label 文本 + 前置锚点（else 分支）。
+    #[test]
+    fn img_without_source_emits_label_and_anchors() {
+        let out = render_html(
+            r##"<div><a href="#x">ref</a><img alt="plain glyph"></div>"##,
+            "div",
+        );
+        assert!(!out.contains("<img"), "{out}");
+        assert!(out.contains("plain glyph"), "{out}");
+        assert!(out.contains("span id"), "anchor expanded: {out}");
+    }
+
+    /// iframe 无 poster 无 source：media 分支不 continue → 通用元素路径。
+    #[test]
+    fn iframe_no_sources_no_poster_falls_through() {
+        let out = render_html("<div><iframe></iframe>after</div>", "div");
+        assert!(out.contains("after"), "{out}");
+    }
+
+    /// audio（非块）在普通上下文：前导空格 + <a href> 链接形式。
+    #[test]
+    fn audio_inline_renders_space_prefixed_link() {
+        let out = render_html(r#"<p>before<audio src="safe.mp3"></audio>after</p>"#, "p");
+        assert!(out.contains(" safe.mp3"), "link: {out}");
+        assert!(out.contains("before"), "{out}");
+    }
+
+    /// 嵌套结构表（复杂）→ 整表 fallback；td 内 ul（needed 判定路径）。
+    #[test]
+    fn complex_table_with_list_falls_back() {
+        let out = render_html(
+            "<table><tr><td><ul><li>x</li></ul></td></tr></table>",
+            "table",
+        );
+        assert!(out.contains("<table"), "html fallback: {out}");
+        assert!(out.contains("<li>"), "{out}");
+    }
+}

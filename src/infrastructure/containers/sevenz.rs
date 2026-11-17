@@ -1,6 +1,6 @@
 #![cfg(feature = "sevenz")]
 
-//! 7z archive converter with recursive extraction (T027).
+//! 7z archive converter with recursive extraction.
 //!
 //! Payloads are decoded fully in memory via `sevenz_rust2::SevenZReader`
 //! (`for_each_entries`), bounded by the shared per-entry safety limit.

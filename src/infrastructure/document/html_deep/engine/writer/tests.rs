@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! 行内管线行为单测。期望值 = vendor 引擎真值探针实测（TEMP-DIFF-PROBE），
-//! 构造-事件序列与 machine（T007+）将产出的序列一致。
-
+//! 构造-事件序列与 machine 将产出的序列一致。
 use super::*;
 
 fn rendered(f: impl FnOnce(&mut Writer)) -> String {
@@ -12,7 +11,7 @@ fn rendered(f: impl FnOnce(&mut Writer)) -> String {
     w.finish().into_string()
 }
 
-// -- 文本管线（T003） ----------------------------------------------------------
+// -- 文本管线 ----------------------------------------------------------
 
 #[test]
 fn plain_text_passthrough() {
@@ -155,7 +154,7 @@ fn finish_trims_all_trailing_whitespace() {
     assert_eq!(rendered(|w| w.text("text  \n\t ")), "text");
 }
 
-// -- 样式栈（T004）——期望值来自真值探针 ----------------------------------------
+// -- 样式栈——期望值来自真值探针 ----------------------------------------
 
 #[test]
 fn nested_strong_em_plain_close() {
@@ -397,7 +396,7 @@ fn strike_marker() {
     );
 }
 
-// -- 行内代码与图片（T005）——期望值来自真值探针 --------------------------------
+// -- 行内代码与图片——期望值来自真值探针 --------------------------------
 
 #[test]
 fn inline_code_fence() {

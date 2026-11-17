@@ -1,6 +1,6 @@
 #![cfg(any(feature = "gzip", feature = "xz", feature = "zstd"))]
 
-//! Single-file compressed stream converters: gz / xz / zst (T021).
+//! Single-file compressed stream converters: gz / xz / zst.
 //!
 //! Each converter decompresses one file, then re-routes the payload through
 //! the registry: the inner filename (compression suffix stripped) decides the

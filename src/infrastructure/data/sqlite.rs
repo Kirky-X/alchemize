@@ -1,6 +1,6 @@
 #![cfg(feature = "sqlite")]
 
-//! SQLite database converter — schema and sample rows as markdown (T025).
+//! SQLite database converter — schema and sample rows as markdown.
 //!
 //! Databases are opened strictly read-only (`SQLITE_OPEN_READ_ONLY`, which
 //! also implies "must already exist, never created"): the converter can never

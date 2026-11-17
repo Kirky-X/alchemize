@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! OMML (Office Math Markup Language) → LaTeX, table-driven.
 //!
-//! Covers the common OMML constructs (R-self-004): runs, fractions, sub/sup
+//! Covers the common OMML constructs: runs, fractions, sub/sup
 //! scripts, radicals, delimiters, n-ary operators, and accent/bar groups.
 //! Elements outside the table fall back to `\text{…}` wrapping and are
 //! counted in `warnings` — nothing silently disappears.

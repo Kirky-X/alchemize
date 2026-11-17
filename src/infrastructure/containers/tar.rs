@@ -1,7 +1,6 @@
 #![cfg(feature = "tar")]
 
-//! TAR archive converter with recursive extraction (T020).
-
+//! TAR archive converter with recursive extraction.
 use std::io::{Cursor, Read};
 #[cfg(test)]
 use std::sync::Arc;
@@ -284,7 +283,7 @@ mod tests {
     }
 
     /// `.tgz`/`.tar.gz` 的组合格式能力需要 tar+gzip 同时在场，测试同样
-    /// 按 feature 门控（安全审查 MEDIUM 修复：tar-only 构建不得引用该类型）。
+    /// 按 feature 门控（tar-only 构建不得引用该类型）。
     #[cfg(all(feature = "tar", feature = "gzip"))]
     #[test]
     fn supported_extensions_tar_gz() {

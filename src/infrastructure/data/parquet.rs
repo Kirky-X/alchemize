@@ -1,7 +1,6 @@
 #![cfg(feature = "parquet")]
 
-//! Apache Parquet converter — schema + rows rendered as a markdown table (T024).
-
+//! Apache Parquet converter — schema + rows rendered as a markdown table.
 use async_trait::async_trait;
 use bytes::Bytes;
 use parquet::file::reader::{FileReader, SerializedFileReader};

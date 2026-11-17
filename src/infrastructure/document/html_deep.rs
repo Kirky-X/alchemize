@@ -106,7 +106,7 @@ fn absoluteize_links(html: &str, base_url: &str) -> String {
 
 /// 纯文本分支的最小转义——先做 HTML 实体化（`& < >`：dom_smoothie 的
 /// text_content 是已解码纯文本，字面 `<script>` 直出会在启用原生 HTML 的
-/// Markdown 渲染器中执行——安全审查 MEDIUM 修复），再转义行首会误渲染为
+/// Markdown 渲染器中执行，再转义行首会误渲染为
 /// 结构的字符（ATX 标题 #、引用 >、无序列表 - + *、有序列表 "1."）。
 fn escape_leading_markdown_chars(text: &str) -> String {
     fn escape_html(ch: char, out: &mut String) {
@@ -318,10 +318,6 @@ impl HtmlDeepConverter {
         // 审查 HIGH 修复）。
         //
         // Cow 避免无 base_url 默认路径的全输入拷贝：旧实现该分支是 String
-        // move（零拷贝），共享核吃 &str 后若物化 owned String 会给两个端口
-        // 各加一次 O(n) memcpy（性能审查 HIGH 修复）——Cow::Borrowed 保住
-        // 零拷贝，Deref 到 &str 的下游用法（parse/len/finish_full_page）
-        // 不变。
         let fallback_source = html;
         let html: std::borrow::Cow<'_, str> = match &self.base_url {
             Some(base) if !base.is_empty() => {
@@ -469,7 +465,7 @@ mod tests {
         assert_eq!(result.quality, ConversionQuality::LocalFallback);
     }
 
-    /// 兜底输入源回归锚点（架构审查 HIGH 修复）：base_url 存在时 htmd 兜底
+    /// 兜底输入源回归锚点：base_url 存在时 htmd 兜底
     /// 转换的是 absoluteize **之前**的原始解码串——旧 async 行为。兜底输出
     /// 必须保持相对链接（未被改写），`original_size` 计原始长度。
     #[test]

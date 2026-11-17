@@ -1,14 +1,14 @@
 // Copyright (c) 2026 Kirky.X🌠
 // SPDX-License-Identifier: Apache-2.0
 
-//! Real-file benchmark harness (T030).
+//! Real-file benchmark harness.
 //!
 //! Run with `cargo bench --bench bench_real` (no criterion dependency: a
 //! plain harness measuring wall time over 5 repetitions, reporting the
 //! median). The markdown table is printed to stdout and can be pasted into
 //! `docs/benchmarks.md`.
 //!
-//! Red lines (spec R-self-003 constraints): docx < 1s, pdf < 2s,
+//! Red lines (constraints): docx < 1s, pdf < 2s,
 //! plain text < 50ms.
 
 use std::path::PathBuf;

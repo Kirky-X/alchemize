@@ -1,6 +1,6 @@
 #![cfg(any(feature = "parquet", feature = "sqlite", feature = "bibtex"))]
 
-//! Structured data converters (parquet/sqlite/bib) — T024/T025/T026.
+//! Structured data converters (parquet/sqlite/bib).
 //!
 //! Per-format features (capability-named): each converter compiles only when
 //! its own feature is enabled.

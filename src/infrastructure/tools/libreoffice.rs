@@ -18,9 +18,9 @@ use tokio::time::timeout;
 
 use crate::application::ports::{Availability, ExternalTool, which_program};
 
-/// Conversion timeout (Task T015: 300 s).
+/// Conversion timeout (300 s).
 pub const CONVERSION_TIMEOUT: Duration = Duration::from_secs(300);
-/// Probe timeout (Task T015: 5 s).
+/// Probe timeout (5 s).
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// LibreOffice binary port.
