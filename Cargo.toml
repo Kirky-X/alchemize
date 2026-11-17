@@ -48,7 +48,6 @@ cli = ["dep:inklog"]
 # ── 格式族（每个格式一个 feature；deps 全部 optional，经 dep: 引用）──────────
 # 纯文本 / 代码围栏（default 成员）
 text = ["dep:encoding_rs"]
-# 分隔符分隔表格
 csv = ["dep:csv", "dep:encoding_rs"]
 # 网页：htmd 基础链 + 自研深链（迭代状态机 + dom_smoothie 主内容提取 + 兜底）
 html = [
@@ -93,13 +92,11 @@ media = ["dep:aspasia", "dep:encoding_rs"]
 # HEIC/HEIF（OS 解码器 sips + 临时文件）
 heic = ["dep:tempfile"]
 
-# ── 后端档位 ─────────────────────────────────────────────────────────────────
 # 音频转写：自研 vecboost transcribe 门面（Qwen3-ASR ONNX + silero VAD）
 audio = ["media", "dep:vecboost", "dep:reqwest", "dep:tempfile", "reqwest/multipart"]
 # 旧格式引擎（doc/ppt/rtf，外部 soffice + 临时 profile）；产物交 OOXML 深解析器
 legacy-office = ["dep:tempfile", "dep:quick-xml", "dep:zip", "dep:flate2"]
 
-# ── 数据 / 容器 / 邮件 ───────────────────────────────────────────────────────
 parquet = ["dep:parquet", "dep:bytes"]
 sqlite = ["dep:rusqlite", "dep:tempfile"]
 bibtex = ["dep:biblatex"]
@@ -115,7 +112,6 @@ xz = ["dep:xz2"]
 zstd = ["dep:zstd"]
 sevenz = ["dep:sevenz-rust2"]
 
-# ── 工具面 ───────────────────────────────────────────────────────────────────
 # MCP 工具面：alch mcp 子命令（隐含 cli，寄居 alch 命令树）
 mcp = ["cli", "sdforge/mcp"]
 # kit：trait-kit AsyncKit 依赖注入适配层（核心 trait 不重写）
@@ -153,7 +149,8 @@ full = [
     "zstd",
     "sevenz",
 ]
-# 新格式 feature 同步点（漏改任一处=引擎静默丢失）：①本文件 feature+full ②engines.rs #[cfg] 注册 ③容器族 any(...) 三处字面量 ④containers/mod.rs 门 ⑤实现文件门控 ⑥engines.rs 断言对 ⑦feature_assertions full 表+CI 循环列表 ⑧feature_map 映射+enabled_features；full 守卫与 CI 无 cli 行兜底把漏改变构建失败
+# 新格式 feature 同步点（漏改任一处=引擎静默丢失）：①本文件 feature+full ②engines.rs #[cfg] 注册 ③容器族 any(...) ④containers/mod.rs 门
+# ⑤实现文件门控 ⑥engines.rs 断言对 ⑦feature_assertions full 表+CI 循环 ⑧feature_map 映射+enabled_features；full 守卫与 CI 兜底把漏改变构建失败
 
 [dependencies]
 # ── 核心（无条件）：公开 API 面（ConvertResult/AlchemizeError/Input 等），门控需重构公开 API，不做
@@ -178,7 +175,6 @@ lopdf = { version = "0.47", default-features = false, optional = true }
 # OOXML 深解析与 epub 共用
 quick-xml = { version = "0.42", default-features = false, features = ["serialize"], optional = true }
 zip = { version = "9.3", default-features = false, features = ["deflate-flate2"], optional = true }
-# EPUB 解析
 rbook = { version = "0.7", default-features = false, features = ["threadsafe"], optional = true }
 # 外部工具调用（pandoc/soffice/sips/ffmpeg）与 pdfium 样本落盘用的临时目录
 tempfile = { version = "3", default-features = false, features = ["getrandom"], optional = true }
@@ -186,7 +182,6 @@ tempfile = { version = "3", default-features = false, features = ["getrandom"], 
 # ── 媒体（字幕解析）
 aspasia = { version = "0.2", default-features = false, optional = true }
 
-# ── html 深链
 scraper = { version = "0.29", default-features = false, features = ["errors", "main"], optional = true }
 # ego-tree 版本须与 scraper 0.29 内部依赖一致（NodeId 类型同一性，crawlrs 同款约束）
 ego_tree = { package = "ego-tree", version = "0.11", default-features = false, optional = true }
@@ -197,7 +192,6 @@ url = { version = "2", default-features = false, features = ["std"], optional = 
 # Unicode 属性数据库：行内样式"词后标点"决策需精确 P/S 分类（CommonMark 口径）
 icu_properties = { version = "2.4", default-features = false, features = ["compiled_data"], optional = true }
 
-# ── 网络后端
 futures = { version = "0.3", default-features = false, features = ["std"], optional = true }
 # 轮询退避原语：MinerU 三客户端共享 poll_delay 走 limiteron delay_for_attempt
 limiteron = { version = "0.3", default-features = false, features = ["retry"], optional = true }
@@ -205,7 +199,6 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 # 自研转录门面（Qwen3-ASR ONNX + silero VAD）；registry 依赖（path 会被 publish 拒收）
 vecboost = { version = "0.3", default-features = false, features = ["transcribe"], optional = true }
 
-# ── 沙箱 / 子进程工具依赖
 # pdfium 绑定（运行时动态库，缺失降级）；须选一个 pdfium_xxxx，6295 对齐本机 e2e 库
 pdfium-render = { version = "0.9", default-features = false, features = [
     "pdfium_6295",
@@ -215,7 +208,6 @@ pdfium-render = { version = "0.9", default-features = false, features = [
 # PDF 图片样本→PNG 重编码
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 
-# ── 数据 / 容器 / 邮件
 bytes = { version = "1.0", default-features = false, features = ["std"], optional = true }
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "lz4", "zstd", "flate2-rust_backend", "brotli"], optional = true }
 # 系统 SQLite（pkg-config），不用 bundled 旧版
@@ -227,7 +219,6 @@ mail-parser = { version = "1.0", default-features = false, optional = true }
 cfb = { version = "0.16", default-features = false, optional = true }
 # libchm 纯 Rust 读 CHM 条目（含 LZX 解压），MIT，零 C 绑定。
 libchm = { version = "0.3", default-features = false, optional = true }
-# 归档容器族
 tar = { version = "0.4", default-features = false, optional = true }
 # rust_backend 必须显式：default-features=false 下无 zlib 后端
 flate2 = { version = "1", default-features = false, features = ["rust_backend"], optional = true }
@@ -238,7 +229,6 @@ sevenz-rust2 = { version = "0.25", default-features = false, features = [
     "compress",
 ], optional = true }
 
-# ── CLI / MCP
 # trait-kit：AsyncKit 依赖注入（async 必需，i18n 供格式化面）
 trait-kit = { version = "0.5", default-features = false, features = [
     "async",
@@ -247,8 +237,7 @@ trait-kit = { version = "0.5", default-features = false, features = [
 # CLI 日志前端：默认零开销（ALCHEMIZE_LOG 未设时）；关 default 裁 i18n/cache 树
 inklog = { version = "0.3", default-features = false, optional = true }
 
-# ── i18n（无条件：用户可见消息国际化，用户决策不做 feature 隔离）
-# i18n 宿主注册基座（无条件：i18n 是库 API 面，用户决策不隔离）；features=["cli"] 为 #[forge] 端点要求
+# i18n（无条件：用户可见消息国际化，用户决策不做 feature 隔离）；i18n 宿主注册基座（库 API 面）；features=["cli"] 为 #[forge] 端点要求。
 sdforge = { version = "0.5", features = ["cli"] }
 # 检测链尾段（POSIX 环境变量之后的平台 locale）
 sys-locale = { version = "0.3", default-features = false }
