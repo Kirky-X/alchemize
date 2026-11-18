@@ -9,10 +9,12 @@ pub mod error;
 pub mod feature_map;
 pub mod input;
 pub mod latex_validate;
+pub mod provenance;
 pub mod result;
 
 pub use asset::{Asset, AssetRole, AssetSink, DirSink, InlineSink};
 pub use error::AlchemizeError;
 pub use input::{Input, InputFormat, detect_format, ext_to_format};
 pub use latex_validate::validate_markdown_math;
+pub use provenance::{ProvenanceEnvelope, TrustLevel};
 pub use result::{ContentType, ConversionQuality, ConvertResult, DetailLevel, VideoProcessingMode};
