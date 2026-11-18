@@ -557,8 +557,15 @@ mod tests {
     fn entry_size_limit_rejects_oversize() {
         assert!(check_entry_size("big.bin", MAX_ENTRY_BYTES).is_ok());
         let err = check_entry_size("big.bin", MAX_ENTRY_BYTES + 1).unwrap_err();
-        assert!(err.to_string().contains("big.bin"));
-        assert!(err.to_string().contains("per-entry limit"));
+        let expected = crate::tr_args(
+            "entry-size-exceeded",
+            &[
+                ("name", "big.bin".to_string()),
+                ("size", (MAX_ENTRY_BYTES + 1).to_string()),
+                ("limit", MAX_ENTRY_BYTES.to_string()),
+            ],
+        );
+        assert_eq!(err.to_string(), expected);
     }
 
     #[test]

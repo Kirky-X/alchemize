@@ -504,7 +504,13 @@ mod edge_tests {
             .parse(&file_url(), ParseOptions::default())
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("polling MinerU task"), "{err}");
+        let anchor = crate::tr("polling-mineru-task")
+            .split('{')
+            .next()
+            .unwrap()
+            .trim()
+            .to_string();
+        assert!(err.to_string().contains(&anchor), "{err}");
     }
 
     /// poll 200 但响应体非 JSON → poll 解析错误臂。

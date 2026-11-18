@@ -749,7 +749,13 @@ mod edge_tests2 {
             .parse(&file_url(), ParseOptions::default())
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("polling MinerU task"), "{err}");
+        let anchor = crate::tr("polling-mineru-task")
+            .split('{')
+            .next()
+            .unwrap()
+            .trim()
+            .to_string();
+        assert!(err.to_string().contains(&anchor), "{err}");
     }
 
     /// env token 就位：from_env / from_config 双双成功（Ok 臂）。

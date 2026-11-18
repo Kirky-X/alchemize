@@ -321,7 +321,21 @@ mod fixture_tests {
         let big = vec![0u8; crate::infrastructure::containers::MAX_ENTRY_BYTES as usize + 1];
         let bytes = sevenz_bytes(&[("big.bin", big.as_slice())]);
         let err = extract_sevenz(&bytes).unwrap_err();
-        assert!(err.to_string().contains("per-entry limit"), "{err}");
+        let expected = crate::tr_args(
+            "sevenz-per-entry-limit",
+            &[
+                ("name", "big.bin".to_string()),
+                (
+                    "size",
+                    (crate::infrastructure::containers::MAX_ENTRY_BYTES + 1).to_string(),
+                ),
+                (
+                    "limit",
+                    crate::infrastructure::containers::MAX_ENTRY_BYTES.to_string(),
+                ),
+            ],
+        );
+        assert!(err.to_string().contains(&expected), "{err}");
     }
 
     #[test]

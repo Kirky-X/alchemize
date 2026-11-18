@@ -261,5 +261,10 @@ failed-to-parse-json-response = failed to parse JSON response: { $source }
 failed-to-fetch-result = failed to fetch result: { $source }
 failed-to-read-result = failed to read result: { $source }
 
+# ── domain/provenance.rs — EngineStep Display outcome labels ───────────
+engine-step-skipped = skipped
+engine-step-failed = failed
+engine-step-used = used
+
 # ── catalog.rs self-test (key-set parity guard) ─────────────────────────
 test-args = value { $n }

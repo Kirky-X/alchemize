@@ -115,9 +115,13 @@ impl std::fmt::Display for EngineStep {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: ", self.engine)?;
         match &self.outcome {
-            StepOutcome::Skipped { reason } => write!(f, "skipped ({reason})"),
-            StepOutcome::Failed { error_kind } => write!(f, "failed ({error_kind})"),
-            StepOutcome::Used => write!(f, "used"),
+            StepOutcome::Skipped { reason } => {
+                write!(f, "{} ({reason})", crate::tr("engine-step-skipped"))
+            }
+            StepOutcome::Failed { error_kind } => {
+                write!(f, "{} ({error_kind})", crate::tr("engine-step-failed"))
+            }
+            StepOutcome::Used => write!(f, "{}", crate::tr("engine-step-used")),
         }
     }
 }
@@ -163,7 +167,10 @@ mod tests {
             },
             duration_ms: None,
         };
-        assert_eq!(skipped.to_string(), "mineru: skipped (no token)");
+        assert_eq!(
+            skipped.to_string(),
+            format!("mineru: {} (no token)", crate::tr("engine-step-skipped"))
+        );
 
         let failed = EngineStep {
             engine: "pdf".to_string(),
@@ -172,14 +179,20 @@ mod tests {
             },
             duration_ms: Some(12),
         };
-        assert_eq!(failed.to_string(), "pdf: failed (zip)");
+        assert_eq!(
+            failed.to_string(),
+            format!("pdf: {} (zip)", crate::tr("engine-step-failed"))
+        );
 
         let used = EngineStep {
             engine: "lopdf".to_string(),
             outcome: StepOutcome::Used,
             duration_ms: Some(388),
         };
-        assert_eq!(used.to_string(), "lopdf: used");
+        assert_eq!(
+            used.to_string(),
+            format!("lopdf: {}", crate::tr("engine-step-used"))
+        );
     }
 
     /// duration_ms is a backward-compatible extension: old JSON without

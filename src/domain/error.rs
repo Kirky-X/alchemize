@@ -279,8 +279,17 @@ mod tests {
         assert!(msg.contains("pdf"));
         // One attempt per line, rendered via EngineStep Display; Failed
         // carries the error kind label only.
-        assert!(msg.contains("mineru: skipped (no token)"), "{msg}");
-        assert!(msg.contains("pdf: failed (zip)"), "{msg}");
+        assert!(
+            msg.contains(&format!(
+                "mineru: {} (no token)",
+                crate::tr("engine-step-skipped")
+            )),
+            "{msg}"
+        );
+        assert!(
+            msg.contains(&format!("pdf: {} (zip)", crate::tr("engine-step-failed"))),
+            "{msg}"
+        );
     }
 
     #[test]

@@ -75,7 +75,7 @@ mineru-task-completed = MinerU 任务已完成
 unknown-task-status = 未知任务状态
 
 # ── i18n 完备性修复：生产代码硬编码文案 ────────────────────────────────
-input-size-exceeds-hard-limit = 输入大小 size { $len } bytes 超过硬输入上限 limit of { $limit } bytes（hard input limit，1 GiB）
+input-size-exceeds-hard-limit = 输入大小 { $len } 字节超过硬输入上限 { $limit } 字节（1 GiB）
 input-size-exceeds-max-file-size = 输入大小 size { $len } bytes exceeds max_file_size { $limit } 字节（上限）
 path-input-requires-async-port = 路径输入需要异步端口；同步端口仅处理内存中的 Input::Bytes
 zip-cbz-requires-async-port = zip/cbz 需要嵌套异步分发；请使用异步端口
@@ -169,12 +169,12 @@ zst-decoder-start-failed = zst：启动解码器失败：{ $source }
 failed-to-read-format-input = 读取 { $format } 输入失败：{ $source }
 failed-to-read-7z-input = 读取 7z 输入失败：{ $source }
 failed-to-open-7z-archive = 打开 7z 归档失败：{ $source }
-sevenz-per-entry-limit = 条目 '{ $name }' 为 { $size } 字节，超过 { $limit } 字节单条目上限（per-entry limit）
+sevenz-per-entry-limit = 条目 '{ $name }' 为 { $size } 字节，超过 { $limit } 字节单条目上限
 failed-to-extract-7z-entries = 解压 7z 条目失败：{ $source }
 chain-decompressed-size-exceeded = 容器链解压大小超过 { $limit } 字节安全上限（chain decompressed size / safety limit）
 depth-scope-not-entered = 未进入容器深度作用域：容器转换器必须在 with_depth_scope 内运行
 container-size-exceeded = 解压容器大小 { $total } 字节超过 { $limit } 字节安全上限（safety limit）
-entry-size-exceeded = 条目 '{ $name }' 为 { $size } 字节，超过 { $limit } 字节单条目上限（per-entry limit）
+entry-size-exceeded = 条目 '{ $name }' 为 { $size } 字节，超过 { $limit } 字节单条目上限
 container-read-failed = { $context }：{ $source }
 container-decompressed-size-exceeded = { $context }：解压大小超过 { $limit } 字节安全上限（safety limit）
 container-registry-slot-not-wired = 容器注册表槽位未接线
@@ -217,7 +217,7 @@ mineru-poll-returned = MinerU 轮询返回 { $status }：{ $body }
 mineru-task-timed-out = MinerU 任务 { $task } 在 { $secs } 秒后超时
 mineru-task-failed = MinerU 任务 { $task } 失败：{ $error }
 mineru-unknown-error = 未知错误
-polling-mineru-task = 轮询 MinerU 任务（polling MinerU task { $task }）：{ $source }
+polling-mineru-task = 轮询 MinerU 任务 { $task }：{ $source }
 failed-to-read-mineru-input = 读取输入失败（failed to read input）：{ $source }
 mineru-api-returned = MinerU API 返回 { $status }：{ $body }
 mineru-agent-api-returned = MinerU Agent API 返回 { $status }：{ $body }
@@ -260,6 +260,11 @@ response-body-not-utf8 = response body is not valid UTF-8（响应体非 UTF-8�
 failed-to-parse-json-response = failed to parse JSON response（解析 JSON 响应失败）：{ $source }
 failed-to-fetch-result = failed to fetch result（获取结果失败）：{ $source }
 failed-to-read-result = failed to read result（读取结果失败）：{ $source }
+
+# ── domain/provenance.rs — EngineStep Display outcome labels ────────────
+engine-step-skipped = 已跳过
+engine-step-failed = 失败
+engine-step-used = 已使用
 
 # ── catalog.rs self-test (key-set parity guard) ─────────────────────────
 test-args = 值 { $n }

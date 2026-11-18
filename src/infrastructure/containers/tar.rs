@@ -416,7 +416,14 @@ mod tests {
             .unwrap();
         let tar_bytes = builder.into_inner().unwrap();
         let err = extract_tar(&tar_bytes).unwrap_err();
-        assert!(err.to_string().contains("per-entry limit"));
+        let anchor = crate::tr("entry-size-exceeded")
+            .split(['{', '}'])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .max_by_key(|s| s.len())
+            .unwrap()
+            .to_string();
+        assert!(err.to_string().contains(&anchor), "{err}");
     }
 
     #[tokio::test]

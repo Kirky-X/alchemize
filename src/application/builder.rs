@@ -653,14 +653,8 @@ mod tests {
     fn check_input_size_rejects_oversized_input() {
         let err = check_input_size(Some(MAX_INPUT_BYTES + 1)).unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains(&format!("size {} bytes", MAX_INPUT_BYTES + 1)),
-            "{msg}"
-        );
-        assert!(
-            msg.contains(&format!("limit of {MAX_INPUT_BYTES} bytes")),
-            "{msg}"
-        );
+        assert!(msg.contains(&(MAX_INPUT_BYTES + 1).to_string()), "{msg}");
+        assert!(msg.contains(&MAX_INPUT_BYTES.to_string()), "{msg}");
     }
 
     /// 纯判定：边界值（恰等于上限）与小输入 → Ok。
@@ -687,7 +681,14 @@ mod tests {
         let oversized = Input::bytes(vec![0u8; MAX_INPUT_BYTES as usize + 1], "huge.bin");
         let err = alch.convert(&oversized).await.unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("hard input limit"), "{msg}");
+        let expected = crate::tr_args(
+            "input-size-exceeds-hard-limit",
+            &[
+                ("len", (MAX_INPUT_BYTES + 1).to_string()),
+                ("limit", MAX_INPUT_BYTES.to_string()),
+            ],
+        );
+        assert!(msg.contains(&expected), "{msg}");
         // 命中硬顶而非实例级上限（文案不含 max_file_size）。
         assert!(!msg.contains("max_file_size"), "{msg}");
     }
@@ -701,7 +702,14 @@ mod tests {
             .build();
         let input = Input::bytes(vec![0u8; MAX_INPUT_BYTES as usize + 1], "huge.pdf");
         let err = alch.convert_sync(&input).unwrap_err();
-        assert!(err.to_string().contains("hard input limit"));
+        let expected = crate::tr_args(
+            "input-size-exceeds-hard-limit",
+            &[
+                ("len", (MAX_INPUT_BYTES + 1).to_string()),
+                ("limit", MAX_INPUT_BYTES.to_string()),
+            ],
+        );
+        assert!(err.to_string().contains(&expected), "{err}");
     }
 
     // -- facade 级 async/sync 零行为变化差分 ----------------------------------
