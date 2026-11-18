@@ -5,11 +5,43 @@
 
 use tracing::{debug, warn};
 
-use crate::application::ports::{Availability, Converter};
+use crate::application::ports::{Availability, Converter, EngineProvenanceDescriptor};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
-use crate::domain::provenance::{EngineStep, StepOutcome};
+use crate::domain::provenance::{
+    EngineStep, ProvenanceEnvelope, SanitizationSummary, StepOutcome, TrustLevel,
+};
 use crate::domain::result::ConvertResult;
+
+/// Aggregate the attempt chain and the used engine's descriptor into a
+/// [`ProvenanceEnvelope`]. Shared by both dispatch paths (pure assembly, no
+/// control flow — the twin-implementation contract only covers candidate
+/// assembly).
+fn assemble_envelope(used: &dyn Converter, steps: &[EngineStep]) -> ProvenanceEnvelope {
+    let EngineProvenanceDescriptor {
+        network_egress,
+        external_tools,
+        model_bundles,
+    } = used.provenance_descriptor();
+    // Trust aggregation: any used engine with network egress dominates;
+    // otherwise external subprocesses / model bundles mean Mixed.
+    let trust_level = if network_egress.is_some() {
+        TrustLevel::ExternalService
+    } else if !external_tools.is_empty() || !model_bundles.is_empty() {
+        TrustLevel::Mixed
+    } else {
+        TrustLevel::SelfContained
+    };
+    ProvenanceEnvelope {
+        engine_path: steps.to_vec(),
+        final_engine: Some(used.name().to_string()),
+        network_egress,
+        external_tools,
+        model_bundles,
+        sanitization: SanitizationSummary::default(),
+        trust_level,
+    }
+}
 
 /// Registry of converters, sorted by priority (highest value first).
 ///
@@ -159,6 +191,14 @@ impl ConverterRegistry {
                             );
                         }
                     }
+                    // Assemble the provenance envelope: the full step chain
+                    // (skips and failures included) plus the used engine's
+                    // trust-origin declaration.
+                    attempts.push(EngineStep {
+                        engine: converter.name().to_string(),
+                        outcome: StepOutcome::Used,
+                    });
+                    result.provenance = Some(assemble_envelope(*converter, &attempts));
                     return Ok(result);
                 }
                 Err(e) => {
@@ -318,6 +358,13 @@ impl ConverterRegistry {
                             );
                         }
                     }
+                    // Envelope assembly mirrors the async twin: full chain
+                    // plus the used engine's descriptor.
+                    attempts.push(EngineStep {
+                        engine: converter.name().to_string(),
+                        outcome: StepOutcome::Used,
+                    });
+                    result.provenance = Some(assemble_envelope(*converter, &attempts));
                     return Ok(result);
                 }
                 Err(e) => {
@@ -849,6 +896,151 @@ mod tests {
         assert!(!registry.is_empty());
         assert_eq!(registry.len(), 1);
         assert!(ConverterRegistry::default().is_empty());
+    }
+
+    /// Engine stubs with configurable provenance descriptors, for envelope
+    /// aggregation tests.
+    struct ProvenanceStub {
+        name: &'static str,
+        unavailable: bool,
+        descriptor: EngineProvenanceDescriptor,
+    }
+    #[async_trait::async_trait]
+    impl Converter for ProvenanceStub {
+        async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+            Ok(ConvertResult::from_markdown("out", ContentType::Document))
+        }
+        fn supported_extensions(&self) -> &[&str] {
+            &["pdf"]
+        }
+        fn priority(&self) -> u8 {
+            10
+        }
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn availability(&self) -> Availability {
+            if self.unavailable {
+                Availability::Unavailable {
+                    reason: "no dependency".into(),
+                }
+            } else {
+                Availability::Available
+            }
+        }
+        fn provenance_descriptor(&self) -> EngineProvenanceDescriptor {
+            self.descriptor.clone()
+        }
+    }
+
+    /// Skipped (unavailable) engine + used local engine → chain length 2,
+    /// trust SelfContained. Mirrors the pdfium → lopdf downgrade shape.
+    #[tokio::test]
+    async fn provenance_envelope_records_skip_plus_used_chain() {
+        use crate::domain::provenance::TrustLevel;
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(ProvenanceStub {
+            name: "pdfium",
+            unavailable: true,
+            descriptor: EngineProvenanceDescriptor::default(),
+        }));
+        registry.register(Box::new(ProvenanceStub {
+            name: "lopdf",
+            unavailable: false,
+            descriptor: EngineProvenanceDescriptor::default(),
+        }));
+        let input = Input::bytes(vec![], "t.pdf");
+        let result = registry.convert(&input).await.unwrap();
+        let prov = result.provenance.expect("envelope must be attached");
+        assert_eq!(prov.trust_level, TrustLevel::SelfContained);
+        assert_eq!(prov.engine_path.len(), 2);
+        assert!(matches!(
+            prov.engine_path[0].outcome,
+            StepOutcome::Skipped { .. }
+        ));
+        assert!(matches!(prov.engine_path[1].outcome, StepOutcome::Used));
+        assert_eq!(prov.final_engine.as_deref(), Some("lopdf"));
+        assert!(prov.network_egress.is_none());
+        assert!(prov.external_tools.is_empty());
+    }
+
+    /// Used engine driving an external subprocess → Mixed trust level.
+    #[tokio::test]
+    async fn provenance_mixed_when_used_engine_declares_external_tool() {
+        use crate::domain::provenance::{ExternalToolKind, TrustLevel};
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(ProvenanceStub {
+            name: "pandoc",
+            unavailable: false,
+            descriptor: EngineProvenanceDescriptor {
+                external_tools: vec![ExternalToolKind::Pandoc],
+                ..EngineProvenanceDescriptor::default()
+            },
+        }));
+        let input = Input::bytes(vec![], "t.pdf");
+        let result = registry.convert(&input).await.unwrap();
+        let prov = result.provenance.unwrap();
+        assert_eq!(prov.trust_level, TrustLevel::Mixed);
+        assert_eq!(prov.external_tools, vec![ExternalToolKind::Pandoc]);
+    }
+
+    /// Used engine with network egress → ExternalService trust level.
+    #[tokio::test]
+    async fn provenance_external_service_when_used_engine_has_egress() {
+        use crate::domain::provenance::{NetworkEgress, TrustLevel};
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(ProvenanceStub {
+            name: "mineru",
+            unavailable: false,
+            descriptor: EngineProvenanceDescriptor {
+                network_egress: Some(NetworkEgress {
+                    endpoint_host: "mineru.example".to_string(),
+                    presigned: true,
+                }),
+                ..EngineProvenanceDescriptor::default()
+            },
+        }));
+        let input = Input::bytes(vec![], "t.pdf");
+        let result = registry.convert(&input).await.unwrap();
+        let prov = result.provenance.unwrap();
+        assert_eq!(prov.trust_level, TrustLevel::ExternalService);
+        assert_eq!(
+            prov.network_egress.as_ref().unwrap().endpoint_host,
+            "mineru.example"
+        );
+    }
+
+    /// The sync twin assembles the same envelope on its success path.
+    #[tokio::test]
+    async fn provenance_envelope_attached_on_sync_path() {
+        use crate::domain::provenance::TrustLevel;
+        struct SyncProvStub;
+        #[async_trait::async_trait]
+        impl Converter for SyncProvStub {
+            async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+                unreachable!("async path not exercised")
+            }
+            fn supported_extensions(&self) -> &[&str] {
+                &["html"]
+            }
+            fn name(&self) -> &'static str {
+                "sync-local"
+            }
+            fn is_sync_capable(&self) -> bool {
+                true
+            }
+            fn convert_sync(&self, _input: &Input) -> Result<ConvertResult, AlchemizeError> {
+                Ok(ConvertResult::from_markdown("s", ContentType::Document))
+            }
+        }
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(SyncProvStub));
+        let input = Input::bytes(vec![], "t.html");
+        let result = registry.convert_pref_sync(&input, None).unwrap();
+        let prov = result.provenance.expect("sync path must attach envelope");
+        assert_eq!(prov.trust_level, TrustLevel::SelfContained);
+        assert_eq!(prov.final_engine.as_deref(), Some("sync-local"));
+        assert_eq!(prov.engine_path.len(), 1);
     }
 }
 
