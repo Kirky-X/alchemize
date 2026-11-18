@@ -154,6 +154,21 @@ pub struct ConvertResult {
     pub quality: ConversionQuality,
     pub title: Option<String>,         // ≤20 token，取自内容前缀或 "Untitled"
     pub assets: Vec<Asset>,            // 按文档序抽取的二进制资产
+    pub provenance: Option<ProvenanceEnvelope>, // 安全出身（None = 旧版本结果/未记录；JSON 中省略该键）
+}
+```
+
+`provenance`（语义详见 [SECURITY.md — 产物信任边界](SECURITY.md)）携带转换的信任出身：完整引擎链（`engine_path`，含跳过/失败步骤）、汇聚信任等级 `trust_level`（`self_contained` | `mixed` | `external_service`）、网络出口（仅主机名）、外部工具、模型 bundle 与引擎声明的输出变换。最小 JSON 形态：
+
+```json
+{
+  "provenance": {
+    "engine_path": [
+      { "engine": "pdfium", "outcome": { "skipped": { "reason": "unavailable: feature off" } } },
+      { "engine": "lopdf", "outcome": "used" }
+    ],
+    "trust_level": "self_contained"
+  }
 }
 ```
 

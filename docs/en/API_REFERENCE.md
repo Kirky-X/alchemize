@@ -154,6 +154,21 @@ pub struct ConvertResult {
     pub quality: ConversionQuality,
     pub title: Option<String>,         // ≤20 tokens, from the content prefix or "Untitled"
     pub assets: Vec<Asset>,            // binary assets extracted in document order
+    pub provenance: Option<ProvenanceEnvelope>, // security provenance (None = old result / not recorded; key omitted in JSON)
+}
+```
+
+`provenance` (see [SECURITY.md — Output Trust Boundary](SECURITY.md)) carries the trust origin of the conversion: the full engine chain (`engine_path`, skipped/failed steps included), the aggregated `trust_level` (`self_contained` | `mixed` | `external_service`), network egress (host only), external tools, model bundles, and engine-declared output transforms. Minimal JSON shape:
+
+```json
+{
+  "provenance": {
+    "engine_path": [
+      { "engine": "pdfium", "outcome": { "skipped": { "reason": "unavailable: feature off" } } },
+      { "engine": "lopdf", "outcome": "used" }
+    ],
+    "trust_level": "self_contained"
+  }
 }
 ```
 
