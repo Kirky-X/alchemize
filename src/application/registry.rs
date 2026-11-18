@@ -3,6 +3,8 @@
 
 //! Converter registry — priority-sorted routing with fallback chain.
 
+use std::time::Instant;
+
 use tracing::{debug, warn};
 
 use crate::application::ports::{Availability, Converter, EngineProvenanceDescriptor};
@@ -12,6 +14,11 @@ use crate::domain::provenance::{
     EngineStep, ProvenanceEnvelope, SanitizationSummary, StepOutcome, TrustLevel,
 };
 use crate::domain::result::ConvertResult;
+
+/// Elapsed milliseconds since `started`, saturating at u64::MAX.
+fn elapsed_ms(started: &Instant) -> u64 {
+    started.elapsed().as_millis().min(u64::MAX as u128) as u64
+}
 
 /// Aggregate the attempt chain and the used engine's descriptor into a
 /// [`ProvenanceEnvelope`]. Shared by both dispatch paths (pure assembly, no
@@ -160,6 +167,7 @@ impl ConverterRegistry {
                     outcome: StepOutcome::Skipped {
                         reason: crate::tr_args("unavailable", &[("reason", reason.to_string())]),
                     },
+                    duration_ms: None,
                 });
                 continue;
             }
@@ -169,6 +177,7 @@ impl ConverterRegistry {
                 engine = converter.name(),
                 "trying converter"
             );
+            let started = Instant::now();
             match converter.convert(input.clone()).await {
                 Ok(mut result) => {
                     // Record which engine actually produced this result so
@@ -199,6 +208,7 @@ impl ConverterRegistry {
                     attempts.push(EngineStep {
                         engine: converter.name().to_string(),
                         outcome: StepOutcome::Used,
+                        duration_ms: Some(elapsed_ms(&started)),
                     });
                     let mut envelope = assemble_envelope(*converter, &attempts);
                     envelope.sanitization = result
@@ -229,6 +239,7 @@ impl ConverterRegistry {
                         outcome: StepOutcome::Failed {
                             error_kind: e.kind().to_string(),
                         },
+                        duration_ms: Some(elapsed_ms(&started)),
                     });
                 }
             }
@@ -336,6 +347,7 @@ impl ConverterRegistry {
                     outcome: StepOutcome::Skipped {
                         reason: crate::tr_args("unavailable", &[("reason", reason.to_string())]),
                     },
+                    duration_ms: None,
                 });
                 continue;
             }
@@ -345,6 +357,7 @@ impl ConverterRegistry {
                 engine = converter.name(),
                 "trying converter (sync)"
             );
+            let started = Instant::now();
             match converter.convert_sync(input) {
                 Ok(mut result) => {
                     // Same provenance contract as the async dispatch: the
@@ -372,6 +385,7 @@ impl ConverterRegistry {
                     attempts.push(EngineStep {
                         engine: converter.name().to_string(),
                         outcome: StepOutcome::Used,
+                        duration_ms: Some(elapsed_ms(&started)),
                     });
                     let mut envelope = assemble_envelope(*converter, &attempts);
                     envelope.sanitization = result
@@ -403,6 +417,7 @@ impl ConverterRegistry {
                         outcome: StepOutcome::Failed {
                             error_kind: e.kind().to_string(),
                         },
+                        duration_ms: Some(elapsed_ms(&started)),
                     });
                 }
             }
@@ -741,7 +756,8 @@ mod tests {
                     &attempts[1],
                     EngineStep {
                         engine,
-                        outcome: StepOutcome::Failed { error_kind }
+                        outcome: StepOutcome::Failed { error_kind },
+                        ..
                     } if engine == "engine-b" && error_kind == "other"
                 ));
             }
@@ -1023,6 +1039,30 @@ mod tests {
             prov.network_egress.as_ref().unwrap().endpoint_host,
             "mineru.example"
         );
+    }
+
+    /// Duration semantics: a skipped step records None (nothing ran), a
+    /// used step records Some(ms) >= 0.
+    #[tokio::test]
+    async fn engine_step_durations_skipped_none_used_some() {
+        let mut registry = ConverterRegistry::new();
+        registry.register(Box::new(ProvenanceStub {
+            name: "pdfium",
+            unavailable: true,
+            descriptor: EngineProvenanceDescriptor::default(),
+        }));
+        registry.register(Box::new(ProvenanceStub {
+            name: "lopdf",
+            unavailable: false,
+            descriptor: EngineProvenanceDescriptor::default(),
+        }));
+        let input = Input::bytes(vec![], "t.pdf");
+        let result = registry.convert(&input).await.unwrap();
+        let prov = result.provenance.unwrap();
+        assert_eq!(prov.engine_path[0].duration_ms, None);
+        let used = &prov.engine_path[1];
+        assert!(used.duration_ms.is_some());
+        assert!(used.duration_ms.unwrap() < 60_000, "sanity bound");
     }
 
     /// The sync twin assembles the same envelope on its success path.

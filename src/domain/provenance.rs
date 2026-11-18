@@ -49,6 +49,10 @@ pub struct EngineStep {
     pub engine: String,
     /// Outcome of this step.
     pub outcome: StepOutcome,
+    /// Wall time this step took, when it executed (`None` for skipped
+    /// steps and steps recorded before this field existed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 /// Outcome of one engine chain step.
@@ -157,6 +161,7 @@ mod tests {
             outcome: StepOutcome::Skipped {
                 reason: "no token".to_string(),
             },
+            duration_ms: None,
         };
         assert_eq!(skipped.to_string(), "mineru: skipped (no token)");
 
@@ -165,14 +170,44 @@ mod tests {
             outcome: StepOutcome::Failed {
                 error_kind: "zip".to_string(),
             },
+            duration_ms: Some(12),
         };
         assert_eq!(failed.to_string(), "pdf: failed (zip)");
 
         let used = EngineStep {
             engine: "lopdf".to_string(),
             outcome: StepOutcome::Used,
+            duration_ms: Some(388),
         };
         assert_eq!(used.to_string(), "lopdf: used");
+    }
+
+    /// duration_ms is a backward-compatible extension: old JSON without
+    /// the key decodes to None; with the key it round-trips.
+    #[test]
+    fn engine_step_duration_ms_serde_compat() {
+        let old_json = r#"{"engine":"lopdf","outcome":"used"}"#;
+        let step: EngineStep = serde_json::from_str(old_json).unwrap();
+        assert_eq!(step.duration_ms, None);
+
+        let with_duration = EngineStep {
+            engine: "lopdf".to_string(),
+            outcome: StepOutcome::Used,
+            duration_ms: Some(388),
+        };
+        let json = serde_json::to_string(&with_duration).unwrap();
+        assert!(json.contains("\"duration_ms\":388"), "{json}");
+        let back: EngineStep = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, with_duration);
+
+        // None omits the key entirely.
+        let none_step = EngineStep {
+            engine: "lopdf".to_string(),
+            outcome: StepOutcome::Used,
+            duration_ms: None,
+        };
+        let json = serde_json::to_string(&none_step).unwrap();
+        assert!(!json.contains("duration_ms"), "{json}");
     }
 
     #[test]
@@ -181,6 +216,7 @@ mod tests {
             engine_path: vec![EngineStep {
                 engine: "lopdf".to_string(),
                 outcome: StepOutcome::Used,
+                duration_ms: None,
             }],
             final_engine: Some("lopdf".to_string()),
             network_egress: None,

@@ -242,6 +242,7 @@ mod tests {
             engine_path: vec![EngineStep {
                 engine: "lopdf".to_string(),
                 outcome: StepOutcome::Used,
+                duration_ms: None,
             }],
             final_engine: Some("lopdf".to_string()),
             ..ProvenanceEnvelope::default()

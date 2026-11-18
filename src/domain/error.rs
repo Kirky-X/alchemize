@@ -264,12 +264,14 @@ mod tests {
                     outcome: StepOutcome::Skipped {
                         reason: "no token".to_string(),
                     },
+                    duration_ms: None,
                 },
                 EngineStep {
                     engine: "pdf".to_string(),
                     outcome: StepOutcome::Failed {
                         error_kind: "zip".to_string(),
                     },
+                    duration_ms: Some(3),
                 },
             ],
         };

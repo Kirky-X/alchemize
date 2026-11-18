@@ -528,12 +528,14 @@ mod tests {
                     outcome: StepOutcome::Failed {
                         error_kind: "zip".to_string(),
                     },
+                    duration_ms: Some(5),
                 },
                 EngineStep {
                     engine: "legacy".to_string(),
                     outcome: StepOutcome::Skipped {
                         reason: "soffice missing".to_string(),
                     },
+                    duration_ms: None,
                 },
             ],
         });
