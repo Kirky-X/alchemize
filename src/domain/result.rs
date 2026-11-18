@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::asset::Asset;
+use super::provenance::ProvenanceEnvelope;
 
 /// Converter result — markdown text with metadata and extracted assets.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +25,11 @@ pub struct ConvertResult {
     /// Binary assets (images, media) extracted in document order.
     #[serde(default)]
     pub assets: Vec<Asset>,
+    /// Security provenance of the conversion (engine chain, network egress,
+    /// trust level). `None` = result from an older version, or recording not
+    /// enabled; serialized output omits the key entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ProvenanceEnvelope>,
 }
 
 impl ConvertResult {
@@ -36,6 +42,7 @@ impl ConvertResult {
             quality: ConversionQuality::LocalFull,
             title: None,
             assets: Vec::new(),
+            provenance: None,
         }
     }
 
@@ -52,6 +59,7 @@ impl ConvertResult {
             quality: ConversionQuality::LocalFull,
             title: None,
             assets: Vec::new(),
+            provenance: None,
         }
     }
 
@@ -70,6 +78,12 @@ impl ConvertResult {
     /// Append an extracted asset.
     pub fn with_asset(mut self, asset: Asset) -> Self {
         self.assets.push(asset);
+        self
+    }
+
+    /// Attach the security provenance envelope (engine chain, trust level).
+    pub fn with_provenance(mut self, p: ProvenanceEnvelope) -> Self {
+        self.provenance = Some(p);
         self
     }
 }
@@ -211,6 +225,44 @@ mod tests {
         let decoded: ConvertResult = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.assets.len(), 1);
         assert_eq!(decoded.assets[0].filename, "img.png");
+    }
+
+    #[test]
+    fn convert_result_without_provenance_field_decodes_to_none() {
+        // Old JSON (pre-provenance) must deserialize with provenance = None.
+        let json = r#"{"markdown":"content","metadata":null,"content_type":"document","quality":"local_full"}"#;
+        let decoded: ConvertResult = serde_json::from_str(json).unwrap();
+        assert!(decoded.provenance.is_none());
+    }
+
+    #[test]
+    fn convert_result_with_provenance_roundtrips() {
+        use crate::domain::provenance::{EngineStep, StepOutcome};
+        let envelope = ProvenanceEnvelope {
+            engine_path: vec![EngineStep {
+                engine: "lopdf".to_string(),
+                outcome: StepOutcome::Used,
+            }],
+            final_engine: Some("lopdf".to_string()),
+            ..ProvenanceEnvelope::default()
+        };
+        let result =
+            ConvertResult::from_markdown("x", ContentType::Document).with_provenance(envelope);
+        let json = serde_json::to_string(&result).unwrap();
+        let decoded: ConvertResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.provenance, result.provenance);
+        assert_eq!(
+            decoded.provenance.as_ref().unwrap().final_engine.as_deref(),
+            Some("lopdf")
+        );
+    }
+
+    #[test]
+    fn convert_result_none_provenance_omits_key() {
+        let result = ConvertResult::from_markdown("x", ContentType::Document);
+        assert!(result.provenance.is_none());
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(!json.contains("\"provenance\""), "{json}");
     }
 
     #[test]
