@@ -126,8 +126,21 @@ async fn docx_broken_package_reports_error() {
         .convert(&Input::bytes(docx, "broken.docx"))
         .await
         .unwrap_err();
-    let msg = format!("{err}");
-    assert!(msg.contains("document.xml"), "err: {msg}");
+    // Since the provenance rework, failed attempts carry the error kind
+    // label only (never the converter message, which could leak internals):
+    // a broken docx surfaces as AllBackendsFailed with zip-kind steps.
+    match err {
+        alchemize::AlchemizeError::AllBackendsFailed { ext, attempts } => {
+            assert_eq!(ext, "docx");
+            assert!(!attempts.is_empty());
+            assert!(attempts.iter().all(|step| matches!(
+                &step.outcome,
+                alchemize::domain::provenance::StepOutcome::Failed { error_kind }
+                    if error_kind == "zip"
+            )));
+        }
+        other => panic!("expected AllBackendsFailed, got {other:?}"),
+    }
 }
 
 #[test]
