@@ -274,3 +274,51 @@ pub(crate) fn validate_base_url(url: &str) -> Result<(), AlchemizeError> {
 
     Ok(())
 }
+
+/// Revalidate an already-resolved IP address at connect time (the second
+/// half of the DNS-rebinding defense: `validate_file_url` checks at parse
+/// time, this checks what the resolver actually returned).
+///
+/// Delegates to the same address policy as parse-time validation
+/// ([`check_ipv4_ssrf`] / [`check_ipv6_ssrf`]) so the two checks can never
+/// drift apart.
+pub(crate) fn validate_resolved_addr(ip: std::net::IpAddr) -> Result<(), AlchemizeError> {
+    match ip {
+        std::net::IpAddr::V4(v4) => check_ipv4_ssrf(v4.octets(), &ip.to_string(), ""),
+        std::net::IpAddr::V6(v6) => check_ipv6_ssrf(v6, &ip.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::IpAddr;
+
+    /// The connect-time revalidation must reject every address family the
+    /// parse-time policy rejects, and pass public addresses through.
+    #[test]
+    fn validate_resolved_addr_rejects_ssrf_targets_and_passes_public() {
+        let rejected = [
+            "127.0.0.1",       // loopback
+            "10.0.0.1",        // RFC1918
+            "169.254.169.254", // cloud metadata
+            "100.100.100.200", // CGNAT / Alibaba metadata
+            "::1",             // IPv6 loopback
+            "::ffff:10.0.0.1", // IPv4-mapped private
+            "fe80::1",         // IPv6 link-local
+        ];
+        for raw in rejected {
+            let ip: IpAddr = raw.parse().unwrap();
+            assert!(validate_resolved_addr(ip).is_err(), "must reject {raw}");
+        }
+
+        let allowed = [
+            "93.184.216.34",      // public IPv4
+            "2606:2800:220:1::1", // public IPv6
+        ];
+        for raw in allowed {
+            let ip: IpAddr = raw.parse().unwrap();
+            assert!(validate_resolved_addr(ip).is_ok(), "must allow {raw}");
+        }
+    }
+}

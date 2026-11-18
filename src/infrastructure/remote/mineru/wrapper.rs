@@ -163,6 +163,10 @@ impl MinerUConverter {
             // SSRF defense: never follow redirects. A compromised MinerU could
             // return 3xx to an internal address (e.g. cloud metadata).
             .redirect(reqwest::redirect::Policy::none())
+            // SSRF defense (connect-time): every resolved address is
+            // revalidated against the same policy as parse-time validation,
+            // closing the DNS-rebinding window (deny-by-default).
+            .dns_resolver(std::sync::Arc::new(super::SsrfSafeResolver::default()))
             .build()
             .map_err(|e| AlchemizeError::Other(format!("failed to build HTTP client: {e}")))?;
 

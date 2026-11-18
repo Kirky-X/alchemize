@@ -15,6 +15,7 @@ mod client;
 mod factory;
 mod http_limit;
 mod precision;
+mod resolver;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -25,6 +26,7 @@ pub use agent::MineruAgentClient;
 pub use client::MineruClient;
 pub use factory::create_mineru_client;
 pub use precision::MineruPrecisionClient;
+pub(crate) use resolver::SsrfSafeResolver;
 pub use types::{ParseOptions, TaskId, TaskStatus};
 pub use validated_url::{DEFAULT_MINERU_ALLOWLIST, ValidatedFileUrl, validate_file_url};
 pub use wrapper::{MinerUConverter, MinerUHttpConfig, TaskStatusResponse, TaskSubmitResponse};
