@@ -166,9 +166,11 @@ async fn real_rtf_via_legacy_office() {
             Err(alchemize::AlchemizeError::AllBackendsFailed { ext, attempts }) => {
                 assert_eq!(ext, "rtf");
                 assert!(
-                    attempts
-                        .iter()
-                        .any(|(name, why)| name == "legacy-office" && why.contains("soffice")),
+                    attempts.iter().any(|step| match &step.outcome {
+                        alchemize::domain::provenance::StepOutcome::Skipped { reason } =>
+                            step.engine == "legacy-office" && reason.contains("soffice"),
+                        _ => false,
+                    }),
                     "attempts: {attempts:?}"
                 );
             }

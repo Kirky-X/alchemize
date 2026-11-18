@@ -11,6 +11,8 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use super::provenance::EngineStep;
+
 /// Errors produced by the alchemize crate.
 #[derive(Debug, thiserror::Error)]
 pub enum AlchemizeError {
@@ -30,8 +32,8 @@ pub enum AlchemizeError {
     AllBackendsFailed {
         /// File extension of the failing input.
         ext: String,
-        /// Ordered (engine name, failure reason) pairs, one per attempted backend.
-        attempts: Vec<(String, String)>,
+        /// Ordered engine steps, one per attempted backend.
+        attempts: Vec<EngineStep>,
     },
 
     /// Failed to read the input file.
@@ -153,9 +155,14 @@ impl fmt::Display for AlchemizeError {
             ),
             Self::NoConverterAccepted => crate::tr("no-converter-accepted-the-input"),
             Self::AllBackendsFailed { ext, attempts } => {
-                // Debug-format the attempts vec, matching the old
-                // `{attempts:?}` interpolation exactly.
-                let rendered = format!("{attempts:?}");
+                // One attempt per line via EngineStep's Display (engine name +
+                // outcome label + detail); Failed steps carry the error kind
+                // label only, never the full converter message.
+                let rendered = attempts
+                    .iter()
+                    .map(|step| step.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 crate::tr_args(
                     "all-backends-failed-for",
                     &[("ext", ext.clone()), ("attempts", rendered)],
@@ -248,17 +255,30 @@ mod tests {
 
     #[test]
     fn error_display_all_backends_failed_with_attempts() {
+        use crate::domain::provenance::{EngineStep, StepOutcome};
         let err = AlchemizeError::AllBackendsFailed {
             ext: "pdf".to_string(),
             attempts: vec![
-                ("mineru".to_string(), "timeout".to_string()),
-                ("pdf".to_string(), "corrupted xref".to_string()),
+                EngineStep {
+                    engine: "mineru".to_string(),
+                    outcome: StepOutcome::Skipped {
+                        reason: "no token".to_string(),
+                    },
+                },
+                EngineStep {
+                    engine: "pdf".to_string(),
+                    outcome: StepOutcome::Failed {
+                        error_kind: "zip".to_string(),
+                    },
+                },
             ],
         };
         let msg = err.to_string();
         assert!(msg.contains("pdf"));
-        assert!(msg.contains("mineru"));
-        assert!(msg.contains("corrupted xref"));
+        // One attempt per line, rendered via EngineStep Display; Failed
+        // carries the error kind label only.
+        assert!(msg.contains("mineru: skipped (no token)"), "{msg}");
+        assert!(msg.contains("pdf: failed (zip)"), "{msg}");
     }
 
     #[test]

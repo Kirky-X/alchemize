@@ -129,8 +129,8 @@ fn map_error(err: AlchemizeError) -> ApiError {
                 "{}",
                 alchemize::tr_args("all-backends-failed-header", &[("ext", ext.clone())])
             );
-            for (engine, reason) in &attempts {
-                eprintln!("  - {engine}: {reason}");
+            for step in &attempts {
+                eprintln!("  - {step}");
             }
             ApiError::ServiceUnavailable {
                 service: format!("convert:{ext}"),
@@ -388,11 +388,22 @@ mod tests {
 
     #[test]
     fn map_error_maps_all_backends_failed_to_service_unavailable() {
+        use alchemize::domain::provenance::{EngineStep, StepOutcome};
         let err = map_error(AlchemizeError::AllBackendsFailed {
             ext: "docx".into(),
             attempts: vec![
-                ("anydoc".to_string(), "parse error".to_string()),
-                ("legacy".to_string(), "soffice missing".to_string()),
+                EngineStep {
+                    engine: "anydoc".to_string(),
+                    outcome: StepOutcome::Failed {
+                        error_kind: "zip".to_string(),
+                    },
+                },
+                EngineStep {
+                    engine: "legacy".to_string(),
+                    outcome: StepOutcome::Skipped {
+                        reason: "soffice missing".to_string(),
+                    },
+                },
             ],
         });
         match err {

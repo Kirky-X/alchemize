@@ -8,6 +8,7 @@ use tracing::{debug, warn};
 use crate::application::ports::{Availability, Converter};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
+use crate::domain::provenance::{EngineStep, StepOutcome};
 use crate::domain::result::ConvertResult;
 
 /// Registry of converters, sorted by priority (highest value first).
@@ -109,7 +110,7 @@ impl ConverterRegistry {
             return Err(AlchemizeError::UnsupportedFormat(ext));
         }
 
-        let mut attempts: Vec<(String, String)> = Vec::new();
+        let mut attempts: Vec<EngineStep> = Vec::new();
         // Depth rejection is control-flow, not a "backend failed" detail:
         // callers (container nesting) must be able to distinguish it from a
         // missing converter. Keep the first one seen and return it instead of
@@ -122,10 +123,12 @@ impl ConverterRegistry {
                     reason = %reason,
                     "skipping unavailable converter"
                 );
-                attempts.push((
-                    converter.name().to_string(),
-                    crate::tr_args("unavailable", &[("reason", reason.to_string())]),
-                ));
+                attempts.push(EngineStep {
+                    engine: converter.name().to_string(),
+                    outcome: StepOutcome::Skipped {
+                        reason: crate::tr_args("unavailable", &[("reason", reason.to_string())]),
+                    },
+                });
                 continue;
             }
             debug!(
@@ -171,7 +174,14 @@ impl ConverterRegistry {
                         "{}",
                         crate::tr("converter-failed-trying-next")
                     );
-                    attempts.push((converter.name().to_string(), e.to_string()));
+                    // The step records the error kind label only: converter
+                    // messages may embed remote response bodies.
+                    attempts.push(EngineStep {
+                        engine: converter.name().to_string(),
+                        outcome: StepOutcome::Failed {
+                            error_kind: e.kind().to_string(),
+                        },
+                    });
                 }
             }
         }
@@ -260,7 +270,7 @@ impl ConverterRegistry {
             }
         }
 
-        let mut attempts: Vec<(String, String)> = Vec::new();
+        let mut attempts: Vec<EngineStep> = Vec::new();
         // Depth rejection is control-flow, not a "backend failed" detail —
         // same contract as the async twin (see its comment). Unreachable
         // today: no sync-capable engine wraps container dispatch, but the
@@ -273,10 +283,12 @@ impl ConverterRegistry {
                     reason = %reason,
                     "skipping unavailable converter (sync)"
                 );
-                attempts.push((
-                    converter.name().to_string(),
-                    crate::tr_args("unavailable", &[("reason", reason.to_string())]),
-                ));
+                attempts.push(EngineStep {
+                    engine: converter.name().to_string(),
+                    outcome: StepOutcome::Skipped {
+                        reason: crate::tr_args("unavailable", &[("reason", reason.to_string())]),
+                    },
+                });
                 continue;
             }
             debug!(
@@ -322,7 +334,14 @@ impl ConverterRegistry {
                         "{}",
                         crate::tr("converter-failed-trying-next-sync")
                     );
-                    attempts.push((converter.name().to_string(), e.to_string()));
+                    // Error kind label only (mirrors the async twin's
+                    // no-message policy).
+                    attempts.push(EngineStep {
+                        engine: converter.name().to_string(),
+                        outcome: StepOutcome::Failed {
+                            error_kind: e.kind().to_string(),
+                        },
+                    });
                 }
             }
         }
@@ -653,8 +672,16 @@ mod tests {
             AlchemizeError::AllBackendsFailed { ext, attempts } => {
                 assert_eq!(ext, "pdf");
                 assert_eq!(attempts.len(), 2);
-                assert_eq!(attempts[0].0, "engine-a");
-                assert!(attempts[1].1.contains("fail-engine-b"));
+                assert_eq!(attempts[0].engine, "engine-a");
+                // Failed steps carry the error kind label only (never the
+                // converter message, which may embed remote response bodies).
+                assert!(matches!(
+                    &attempts[1],
+                    EngineStep {
+                        engine,
+                        outcome: StepOutcome::Failed { error_kind }
+                    } if engine == "engine-b" && error_kind == "other"
+                ));
             }
             other => panic!("expected AllBackendsFailed, got {other:?}"),
         }
@@ -778,16 +805,13 @@ mod tests {
             AlchemizeError::AllBackendsFailed { ext, attempts } => {
                 assert_eq!(ext, "html");
                 assert_eq!(attempts.len(), 1);
-                assert_eq!(attempts[0].0, "down-engine");
-                // The attempt reason is the catalogized `unavailable` message;
-                // assert the localized prefix without pinning a language.
-                let expected = crate::tr_args("unavailable", &[("reason", String::new())]);
-                let prefix = expected
-                    .split(['：', ':'])
-                    .next()
-                    .unwrap_or("unavailable")
-                    .to_string();
-                assert!(attempts[0].1.contains(&prefix));
+                assert_eq!(attempts[0].engine, "down-engine");
+                // The skip reason reuses the catalogized `unavailable` message
+                // (localized), so assert the shape, not a language.
+                match &attempts[0].outcome {
+                    StepOutcome::Skipped { reason } => assert!(!reason.is_empty()),
+                    other => panic!("expected Skipped, got {other:?}"),
+                }
             }
             other => panic!("expected AllBackendsFailed, got {other:?}"),
         }
@@ -938,7 +962,11 @@ mod edge_tests {
             AlchemizeError::AllBackendsFailed { ext, attempts } => {
                 assert_eq!(ext, "txt");
                 assert_eq!(attempts.len(), 1);
-                assert_eq!(attempts[0].0, "sync-plain-fail");
+                assert_eq!(attempts[0].engine, "sync-plain-fail");
+                assert!(matches!(
+                    &attempts[0].outcome,
+                    StepOutcome::Failed { error_kind } if error_kind == "xml"
+                ));
             }
             other => panic!("expected AllBackendsFailed, got {other:?}"),
         }
@@ -1046,8 +1074,10 @@ mod edge_tests2 {
             AlchemizeError::AllBackendsFailed { ext, attempts } => {
                 assert_eq!(ext, "pdf");
                 assert_eq!(attempts.len(), 2, "{attempts:?}");
-                assert_eq!(attempts[0].0, "engine-unavailable");
-                assert_eq!(attempts[1].0, "engine-fail");
+                assert_eq!(attempts[0].engine, "engine-unavailable");
+                assert!(matches!(attempts[0].outcome, StepOutcome::Skipped { .. }));
+                assert_eq!(attempts[1].engine, "engine-fail");
+                assert!(matches!(attempts[1].outcome, StepOutcome::Failed { .. }));
             }
             other => panic!("expected AllBackendsFailed, got {other:?}"),
         }
