@@ -168,7 +168,12 @@ impl MinerUConverter {
             // closing the DNS-rebinding window (deny-by-default).
             .dns_resolver(std::sync::Arc::new(super::SsrfSafeResolver::default()))
             .build()
-            .map_err(|e| AlchemizeError::Other(format!("failed to build HTTP client: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::Other(crate::tr_args(
+                    "failed-to-build-http-client",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
         Ok(Self { http, config })
     }
@@ -184,7 +189,12 @@ impl MinerUConverter {
         let part = reqwest::multipart::Part::bytes(data.to_vec())
             .file_name(filename.to_string())
             .mime_str("application/pdf")
-            .map_err(|e| AlchemizeError::MineruConversion(format!("mime error: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::MineruConversion(crate::tr_args(
+                    "mime-error",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
         let form = reqwest::multipart::Form::new().part("file", part);
 
@@ -196,24 +206,31 @@ impl MinerUConverter {
         debug!(url = %url, filename = %filename, "submitting PDF to MinerU lightweight API");
 
         let resp = builder.send().await.map_err(|e| {
-            AlchemizeError::MineruUnavailable(format!(
-                "cannot reach MinerU at {}: {e}",
-                self.config.base_url
+            AlchemizeError::MineruUnavailable(crate::tr_args(
+                "cannot-reach-mineru",
+                &[
+                    ("base", self.config.base_url.to_string()),
+                    ("source", e.to_string()),
+                ],
             ))
         })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let body = read_error_body(resp).await;
-            return Err(AlchemizeError::MineruConversion(format!(
-                "MinerU API returned {status}: {body}"
+            return Err(AlchemizeError::MineruConversion(crate::tr_args(
+                "mineru-api-returned",
+                &[("status", status.to_string()), ("body", body.to_string())],
             )));
         }
 
         let result: TaskSubmitResponse = read_limited_json(resp, MAX_SUBMIT_RESPONSE_BYTES)
             .await
             .map_err(|e| {
-            AlchemizeError::MineruConversion(format!("failed to parse MinerU response: {e}"))
+            AlchemizeError::MineruConversion(crate::tr_args(
+                "failed-to-parse-mineru-response",
+                &[("source", e.to_string())],
+            ))
         })?;
 
         info!(task_id = %result.task_id, "{}", crate::tr("mineru-task-submitted"));
@@ -232,22 +249,27 @@ impl MinerUConverter {
         }
 
         let resp = builder.send().await.map_err(|e| {
-            AlchemizeError::MineruUnavailable(format!("polling MinerU task {task_id}: {e}"))
+            AlchemizeError::MineruUnavailable(crate::tr_args(
+                "polling-mineru-task",
+                &[("task", task_id.to_string()), ("source", e.to_string())],
+            ))
         })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let body = read_error_body(resp).await;
-            return Err(AlchemizeError::MineruConversion(format!(
-                "MinerU poll returned {status}: {body}"
+            return Err(AlchemizeError::MineruConversion(crate::tr_args(
+                "mineru-poll-returned",
+                &[("status", status.to_string()), ("body", body.to_string())],
             )));
         }
 
         read_limited_json(resp, MAX_POLL_RESPONSE_BYTES)
             .await
             .map_err(|e| {
-                AlchemizeError::MineruConversion(format!(
-                    "failed to parse MinerU poll response: {e}"
+                AlchemizeError::MineruConversion(crate::tr_args(
+                    "failed-to-parse-mineru-poll-response",
+                    &[("source", e.to_string())],
                 ))
             })
     }
@@ -261,9 +283,12 @@ impl MinerUConverter {
 
         loop {
             if std::time::Instant::now() > deadline {
-                return Err(AlchemizeError::MineruConversion(format!(
-                    "MinerU task {task_id} timed out after {}s",
-                    self.config.timeout_secs
+                return Err(AlchemizeError::MineruConversion(crate::tr_args(
+                    "mineru-task-timed-out",
+                    &[
+                        ("task", task_id.to_string()),
+                        ("secs", self.config.timeout_secs.to_string()),
+                    ],
                 )));
             }
 
@@ -279,10 +304,11 @@ impl MinerUConverter {
                     let error = truncate_body(
                         status_resp
                             .error
-                            .unwrap_or_else(|| "unknown error".to_string()),
+                            .unwrap_or_else(|| crate::tr("mineru-unknown-error")),
                     );
-                    return Err(AlchemizeError::MineruConversion(format!(
-                        "MinerU task {task_id} failed: {error}"
+                    return Err(AlchemizeError::MineruConversion(crate::tr_args(
+                        "mineru-task-failed",
+                        &[("task", task_id.to_string()), ("error", error.to_string())],
                     )));
                 }
                 TaskStatus::Pending | TaskStatus::Processing => {
@@ -308,10 +334,12 @@ impl Converter for MinerUConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::Other(format!("failed to read input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::Other(crate::tr_args(
+                "failed-to-read-mineru-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let filename = input.filename().unwrap_or("document.pdf");
 

@@ -62,17 +62,22 @@ impl Converter for AudioConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::Other(format!("failed to read audio input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::Other(crate::tr_args(
+                "failed-to-read-audio-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let filename = input.filename().unwrap_or("unknown").to_string();
         let byte_count = bytes.len();
 
         if let Some(ref provider) = self.transcribe {
             let transcript = provider.transcribe(&bytes).await.map_err(|e| {
-                AlchemizeError::AudioUnavailable(format!("transcription failed: {e}"))
+                AlchemizeError::AudioUnavailable(crate::tr_args(
+                    "transcription-failed",
+                    &[("source", e.to_string())],
+                ))
             })?;
             let transcript = transcript.full_text();
 

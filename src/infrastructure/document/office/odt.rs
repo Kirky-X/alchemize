@@ -862,7 +862,12 @@ pub(crate) fn walk_content(xml: &[u8], w: &mut OdfWalker) -> Result<(), Alchemiz
             }
             Ok(Event::End(e)) => w.on_end(local_tag_name(e.name().as_ref()).as_str()),
             Ok(Event::Eof) => break,
-            Err(e) => return Err(AlchemizeError::Xml(format!("content.xml parse error: {e}"))),
+            Err(e) => {
+                return Err(AlchemizeError::Xml(crate::tr_args(
+                    "content-xml-parse-error",
+                    &[("source", e.to_string())],
+                )));
+            }
             _ => {}
         }
         buf.clear();
@@ -901,8 +906,12 @@ fn odf_body_root(bytes: &[u8]) -> Option<String> {
 /// Parse an ODF package (`content.xml` + optional `styles.xml`) into the
 /// unified model. Shared by the ODT and ODP converters.
 pub fn parse(bytes: &[u8]) -> Result<ParsedOdf, AlchemizeError> {
-    let mut zip = zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(|e| AlchemizeError::Zip(format!("failed to open ODF package: {e}")))?;
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| {
+        AlchemizeError::Zip(crate::tr_args(
+            "failed-to-open-odf-package",
+            &[("source", e.to_string())],
+        ))
+    })?;
     let content = read_part(&mut zip, "content.xml")?;
     let styles_xml = read_part(&mut zip, "styles.xml").ok();
 
@@ -1088,9 +1097,15 @@ pub(crate) fn build_result(
     // Repeat expansion hit the model budget while parsing: fail explicitly
     // instead of rendering a model that already consumed the memory.
     if parsed.budget_exceeded {
-        return Err(AlchemizeError::other(format!(
-            "{source_format} table repeat expansion exceeds the {}-byte output budget",
-            crate::infrastructure::document::shared::MAX_OUTPUT_BYTES
+        return Err(AlchemizeError::other(crate::tr_args(
+            "odt-table-repeat-budget",
+            &[
+                ("kind", source_format.to_string()),
+                (
+                    "limit",
+                    crate::infrastructure::document::shared::MAX_OUTPUT_BYTES.to_string(),
+                ),
+            ],
         )));
     }
     let mut doc = parsed.document;
@@ -1134,10 +1149,12 @@ impl Converter for OdtConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read ODT input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-odt-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
         // Zip open + content.xml decompression are blocking work; the body
         // guard runs inside the same blocking task as `parse` so neither
         // occupies a runtime worker.
@@ -1155,7 +1172,12 @@ impl Converter for OdtConverter {
             parse(&bytes)
         })
         .await
-        .map_err(|e| AlchemizeError::other(format!("odt-deep task panicked: {e}")))??;
+        .map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "odt-deep-task-panicked",
+                &[("source", e.to_string())],
+            ))
+        })??;
         build_result(parsed, "odt")
     }
 

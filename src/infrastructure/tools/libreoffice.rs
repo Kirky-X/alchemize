@@ -35,7 +35,7 @@ impl ExternalTool for LibreOfficeTool {
     fn probe(&self) -> Availability {
         if !which_program(self.program()) {
             return Availability::Unavailable {
-                reason: "'soffice' not found on PATH (install LibreOffice)".to_string(),
+                reason: crate::tr("soffice-not-found-install"),
             };
         }
         // A PATH hit is not enough: run `--version` with a hard timeout.
@@ -48,14 +48,19 @@ impl ExternalTool for LibreOfficeTool {
         match status {
             Ok(out) if out.status.success() => Availability::Available,
             Ok(out) => Availability::Unavailable {
-                reason: format!(
-                    "soffice --version exited {}: {}",
-                    out.status,
-                    String::from_utf8_lossy(&out.stderr).trim()
+                reason: crate::tr_args(
+                    "soffice-version-exited",
+                    &[
+                        ("status", out.status.to_string()),
+                        (
+                            "stderr",
+                            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                        ),
+                    ],
                 ),
             },
             Err(e) => Availability::Unavailable {
-                reason: format!("soffice probe failed: {e}"),
+                reason: crate::tr_args("soffice-probe-failed", &[("source", e.to_string())]),
             },
         }
     }

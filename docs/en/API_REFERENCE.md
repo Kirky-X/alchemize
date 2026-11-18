@@ -230,7 +230,7 @@ pub trait TranscribeProvider: Send + Sync {
 }
 ```
 
-The input is 16kHz mono WAV bytes. `Transcript { language, duration, segments: Vec<TranscriptSegment{start_sec, end_sec, text}> }`; `full_text()` concatenates segment texts; the `DISCLAIMER` constant states "segments come from VAD, not speaker identification".
+The input is 16kHz mono WAV bytes. `Transcript { language, duration, segments: Vec<TranscriptSegment{start_sec, end_sec, text}> }`; `full_text()` concatenates segment texts; the `disclaimer()` method returns the Fluent-localized disclaimer (both en/zh keep "VAD", stating segments come from VAD, not speaker identification).
 
 ### ExternalTool Trait
 

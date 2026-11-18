@@ -89,10 +89,12 @@ impl Converter for VideoConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::Other(format!("failed to read video input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::Other(crate::tr_args(
+                "failed-to-read-video-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let filename = input.filename().unwrap_or("unknown").to_string();
         let byte_count = bytes.len();
@@ -116,7 +118,10 @@ impl Converter for VideoConverter {
                 // Transcribe the extracted audio.
                 if let Some(ref provider) = self.transcribe {
                     let transcript = provider.transcribe(&audio_bytes).await.map_err(|e| {
-                        AlchemizeError::AudioUnavailable(format!("transcription failed: {e}"))
+                        AlchemizeError::AudioUnavailable(crate::tr_args(
+                            "transcription-failed",
+                            &[("source", e.to_string())],
+                        ))
                     })?;
                     let transcript = transcript.full_text();
 

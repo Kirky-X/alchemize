@@ -64,7 +64,10 @@ pub(super) async fn read_limited_bytes(
     let mut buf: Vec<u8> = Vec::with_capacity(initial_cap);
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| {
-            AlchemizeError::MineruConversion(format!("failed reading response stream: {e}"))
+            AlchemizeError::MineruConversion(crate::tr_args(
+                "failed-reading-response-stream",
+                &[("source", e.to_string())],
+            ))
         })?;
         let new_len = buf.len().saturating_add(chunk.len());
         if new_len as u64 > max_bytes {
@@ -101,7 +104,10 @@ pub(super) async fn read_limited_text(
 ) -> Result<String, AlchemizeError> {
     let bytes = read_limited_bytes(resp, max_bytes).await?;
     String::from_utf8(bytes).map_err(|e| {
-        AlchemizeError::MineruConversion(format!("response body is not valid UTF-8: {e}"))
+        AlchemizeError::MineruConversion(crate::tr_args(
+            "response-body-not-utf8",
+            &[("source", e.to_string())],
+        ))
     })
 }
 
@@ -115,7 +121,10 @@ where
 {
     let bytes = read_limited_bytes(resp, max_bytes).await?;
     serde_json::from_slice(&bytes).map_err(|e| {
-        AlchemizeError::MineruConversion(format!("failed to parse JSON response: {e}"))
+        AlchemizeError::MineruConversion(crate::tr_args(
+            "failed-to-parse-json-response",
+            &[("source", e.to_string())],
+        ))
     })
 }
 

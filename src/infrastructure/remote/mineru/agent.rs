@@ -84,7 +84,12 @@ impl MineruAgentClient {
             // closing the DNS-rebinding window (deny-by-default).
             .dns_resolver(std::sync::Arc::new(super::SsrfSafeResolver::default()))
             .build()
-            .map_err(|e| AlchemizeError::Other(format!("failed to build HTTP client: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::Other(crate::tr_args(
+                    "failed-to-build-http-client",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
         Ok(Self {
             http,
@@ -110,9 +115,12 @@ impl MineruAgentClient {
         debug!(url = %url, file_url = %file_url.as_str(), "submitting task to MinerU Agent API");
 
         let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {
-            AlchemizeError::MineruUnavailable(format!(
-                "cannot reach MinerU at {}: {e}",
-                self.base_url
+            AlchemizeError::MineruUnavailable(crate::tr_args(
+                "cannot-reach-mineru",
+                &[
+                    ("base", self.base_url.to_string()),
+                    ("source", e.to_string()),
+                ],
             ))
         })?;
 
@@ -123,15 +131,19 @@ impl MineruAgentClient {
                     .await
                     .unwrap_or_else(|_| "<unreadable>".to_string()),
             );
-            return Err(AlchemizeError::MineruConversion(format!(
-                "MinerU Agent API returned {status}: {body}"
+            return Err(AlchemizeError::MineruConversion(crate::tr_args(
+                "mineru-agent-api-returned",
+                &[("status", status.to_string()), ("body", body.to_string())],
             )));
         }
 
         let result: AgentTaskSubmitResponse = read_limited_json(resp, MAX_SUBMIT_RESPONSE_BYTES)
             .await
             .map_err(|e| {
-                AlchemizeError::MineruConversion(format!("failed to parse MinerU response: {e}"))
+                AlchemizeError::MineruConversion(crate::tr_args(
+                    "failed-to-parse-mineru-response",
+                    &[("source", e.to_string())],
+                ))
             })?;
 
         info!(task_id = %result.task_id, "{}", crate::tr("mineru-task-submitted"));
@@ -148,7 +160,10 @@ impl MineruAgentClient {
         debug!(task_id = %task_id.as_str(), "polling MinerU Agent task status");
 
         let resp = self.http.get(&url).send().await.map_err(|e| {
-            AlchemizeError::MineruUnavailable(format!("polling MinerU task {}: {e}", task_id))
+            AlchemizeError::MineruUnavailable(crate::tr_args(
+                "polling-mineru-task",
+                &[("task", task_id.to_string()), ("source", e.to_string())],
+            ))
         })?;
 
         if !resp.status().is_success() {
@@ -158,16 +173,18 @@ impl MineruAgentClient {
                     .await
                     .unwrap_or_else(|_| "<unreadable>".to_string()),
             );
-            return Err(AlchemizeError::MineruConversion(format!(
-                "MinerU poll returned {status}: {body}"
+            return Err(AlchemizeError::MineruConversion(crate::tr_args(
+                "mineru-poll-returned",
+                &[("status", status.to_string()), ("body", body.to_string())],
             )));
         }
 
         let result: AgentTaskStatusResponse = read_limited_json(resp, MAX_POLL_RESPONSE_BYTES)
             .await
             .map_err(|e| {
-                AlchemizeError::MineruConversion(format!(
-                    "failed to parse MinerU poll response: {e}"
+                AlchemizeError::MineruConversion(crate::tr_args(
+                    "failed-to-parse-mineru-poll-response",
+                    &[("source", e.to_string())],
                 ))
             })?;
 
@@ -205,9 +222,12 @@ impl MineruClient for MineruAgentClient {
 
         loop {
             if std::time::Instant::now() > deadline {
-                return Err(AlchemizeError::MineruConversion(format!(
-                    "MinerU task {} timed out after {}s",
-                    task_id, self.timeout_secs
+                return Err(AlchemizeError::MineruConversion(crate::tr_args(
+                    "mineru-task-timed-out",
+                    &[
+                        ("task", task_id.to_string()),
+                        ("secs", self.timeout_secs.to_string()),
+                    ],
                 )));
             }
 
@@ -221,10 +241,13 @@ impl MineruClient for MineruAgentClient {
                 }
                 TaskStatus::Failed => {
                     let err_msg =
-                        truncate_body(error.unwrap_or_else(|| "unknown error".to_string()));
-                    return Err(AlchemizeError::MineruConversion(format!(
-                        "MinerU task {} failed: {}",
-                        task_id, err_msg
+                        truncate_body(error.unwrap_or_else(|| crate::tr("mineru-unknown-error")));
+                    return Err(AlchemizeError::MineruConversion(crate::tr_args(
+                        "mineru-task-failed",
+                        &[
+                            ("task", task_id.to_string()),
+                            ("error", err_msg.to_string()),
+                        ],
                     )));
                 }
                 TaskStatus::Pending | TaskStatus::Processing => {

@@ -134,9 +134,12 @@ pub fn read_part(
     zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
     name: &str,
 ) -> Result<Vec<u8>, AlchemizeError> {
-    let mut file = zip
-        .by_name(name)
-        .map_err(|e| AlchemizeError::Zip(format!("part {name} not found: {e}")))?;
+    let mut file = zip.by_name(name).map_err(|e| {
+        AlchemizeError::Zip(crate::tr_args(
+            "part-not-found",
+            &[("name", name.to_string()), ("source", e.to_string())],
+        ))
+    })?;
     crate::infrastructure::document::shared::read_part_limited(&mut file, name)
 }
 
@@ -517,8 +520,9 @@ pub fn parse_body(xml: &[u8], ctx: &mut BodyCtx) -> Result<Vec<Block>, Alchemize
             }
             Ok(Event::Eof) => break,
             Err(e) => {
-                return Err(AlchemizeError::Xml(format!(
-                    "document.xml parse error: {e}"
+                return Err(AlchemizeError::Xml(crate::tr_args(
+                    "document-xml-parse-error",
+                    &[("source", e.to_string())],
                 )));
             }
             _ => {}

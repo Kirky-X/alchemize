@@ -123,8 +123,12 @@ fn xz_decompress(bytes: &[u8]) -> Result<Vec<u8>, AlchemizeError> {
 
 #[cfg(feature = "zstd")]
 fn zst_decompress(bytes: &[u8]) -> Result<Vec<u8>, AlchemizeError> {
-    let decoder = zstd::stream::read::Decoder::new(Cursor::new(bytes))
-        .map_err(|e| AlchemizeError::other(format!("zst: failed to start decoder: {e}")))?;
+    let decoder = zstd::stream::read::Decoder::new(Cursor::new(bytes)).map_err(|e| {
+        AlchemizeError::other(crate::tr_args(
+            "zst-decoder-start-failed",
+            &[("source", e.to_string())],
+        ))
+    })?;
     read_limited(decoder, MAX_SINGLE_DECOMPRESSED_BYTES, "zst")
 }
 
@@ -168,7 +172,13 @@ async fn convert_single(
     with_depth_scope(async {
         let _depth = acquire_depth()?;
         let bytes = input.to_bytes().await.map_err(|e| {
-            AlchemizeError::other(format!("failed to read {source_format} input: {e}"))
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-format-input",
+                &[
+                    ("format", source_format.to_string()),
+                    ("source", e.to_string()),
+                ],
+            ))
         })?;
         let filename = input.filename().unwrap_or("payload").to_string();
         let inner_name = strip_compression_suffix(&filename);

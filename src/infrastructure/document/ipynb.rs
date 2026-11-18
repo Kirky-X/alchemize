@@ -43,17 +43,26 @@ impl Converter for IpynbConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::Other(format!("failed to read notebook input: {e}")))?;
-
-        let json = String::from_utf8(bytes).map_err(|e| {
-            AlchemizeError::Other(format!("notebook content is not valid UTF-8: {e}"))
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::Other(crate::tr_args(
+                "failed-to-read-notebook-input",
+                &[("source", e.to_string())],
+            ))
         })?;
 
-        let notebook: Notebook = serde_json::from_str(&json)
-            .map_err(|e| AlchemizeError::Other(format!("failed to parse notebook JSON: {e}")))?;
+        let json = String::from_utf8(bytes).map_err(|e| {
+            AlchemizeError::Other(crate::tr_args(
+                "notebook-not-utf8",
+                &[("source", e.to_string())],
+            ))
+        })?;
+
+        let notebook: Notebook = serde_json::from_str(&json).map_err(|e| {
+            AlchemizeError::Other(crate::tr_args(
+                "failed-to-parse-notebook-json",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let mut markdown_parts = Vec::new();
         let mut code_cell_count = 0;

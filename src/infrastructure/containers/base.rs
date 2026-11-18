@@ -67,8 +67,9 @@ pub(crate) fn charge_chain_bytes(bytes: u64) -> Result<(), AlchemizeError> {
         .try_with(|total| {
             let next = total.get().saturating_add(bytes);
             if next > MAX_CHAIN_BYTES {
-                return Err(AlchemizeError::other(format!(
-                    "container chain decompressed size exceeds the {MAX_CHAIN_BYTES}-byte safety limit"
+                return Err(AlchemizeError::other(crate::tr_args(
+                    "chain-decompressed-size-exceeded",
+                    &[("limit", MAX_CHAIN_BYTES.to_string())],
                 )));
             }
             total.set(next);
@@ -101,18 +102,18 @@ pub(crate) fn acquire_depth() -> Result<DepthGuard, AlchemizeError> {
             depth.set(current + 1);
             Ok(DepthGuard)
         })
-        .unwrap_or_else(|_| {
-            Err(AlchemizeError::other(
-                "container depth scope not entered: container converters must run inside with_depth_scope",
-            ))
-        })
+        .unwrap_or_else(|_| Err(AlchemizeError::other(crate::tr("depth-scope-not-entered"))))
 }
 
 /// Enforce the total decompressed size limit.
 pub(crate) fn check_total_bytes(total: u64) -> Result<(), AlchemizeError> {
     if total > MAX_TOTAL_BYTES {
-        return Err(AlchemizeError::other(format!(
-            "decompressed container size {total} bytes exceeds the {MAX_TOTAL_BYTES}-byte safety limit"
+        return Err(AlchemizeError::other(crate::tr_args(
+            "container-size-exceeded",
+            &[
+                ("total", total.to_string()),
+                ("limit", MAX_TOTAL_BYTES.to_string()),
+            ],
         )));
     }
     Ok(())
@@ -124,8 +125,13 @@ pub(crate) fn check_total_bytes(total: u64) -> Result<(), AlchemizeError> {
 #[cfg_attr(not(any(feature = "tar", feature = "sevenz")), allow(dead_code))]
 pub(crate) fn check_entry_size(name: &str, size: u64) -> Result<(), AlchemizeError> {
     if size > MAX_ENTRY_BYTES {
-        return Err(AlchemizeError::other(format!(
-            "entry '{name}' is {size} bytes, exceeds the {MAX_ENTRY_BYTES}-byte per-entry limit"
+        return Err(AlchemizeError::other(crate::tr_args(
+            "entry-size-exceeded",
+            &[
+                ("name", name.to_string()),
+                ("size", size.to_string()),
+                ("limit", MAX_ENTRY_BYTES.to_string()),
+            ],
         )));
     }
     Ok(())
@@ -145,13 +151,19 @@ pub(crate) fn read_limited(
     context: &str,
 ) -> Result<Vec<u8>, AlchemizeError> {
     let mut buf = Vec::new();
-    reader
-        .take(limit + 1)
-        .read_to_end(&mut buf)
-        .map_err(|e| AlchemizeError::other(format!("{context}: {e}")))?;
+    reader.take(limit + 1).read_to_end(&mut buf).map_err(|e| {
+        AlchemizeError::other(crate::tr_args(
+            "container-read-failed",
+            &[("context", context.to_string()), ("source", e.to_string())],
+        ))
+    })?;
     if buf.len() as u64 > limit {
-        return Err(AlchemizeError::other(format!(
-            "{context}: decompressed size exceeds the {limit}-byte safety limit"
+        return Err(AlchemizeError::other(crate::tr_args(
+            "container-decompressed-size-exceeded",
+            &[
+                ("context", context.to_string()),
+                ("limit", limit.to_string()),
+            ],
         )));
     }
     Ok(buf)
@@ -229,14 +241,20 @@ pub(crate) fn fallback_entry(
     }
 
     let reason = if depth_limited {
-        "nested container exceeds the depth limit"
+        crate::tr("nested-container-depth-limit")
     } else {
-        "unsupported inner format"
+        crate::tr("unsupported-inner-format")
     };
     let markdown = format!(
-        "> Attachment: `{}` ({size} bytes) — {reason}; content preserved as attachment.\n",
-        code_span_label(name),
-        size = bytes.len(),
+        "{}\n",
+        crate::tr_args(
+            "attachment-markdown",
+            &[
+                ("name", code_span_label(name)),
+                ("size", bytes.len().to_string()),
+                ("reason", reason.to_string())
+            ]
+        )
     );
     (markdown, Some(Asset::new(name, bytes.to_vec())))
 }
@@ -307,9 +325,9 @@ impl ContainerBase {
             let nested = Input::bytes(entry.bytes.clone(), entry.name.clone());
             let converted = match &registry {
                 Some(registry) => registry.convert(&nested).await,
-                None => Err(AlchemizeError::other(
-                    "container registry slot is not wired",
-                )),
+                None => Err(AlchemizeError::other(crate::tr(
+                    "container-registry-slot-not-wired",
+                ))),
             };
             match converted {
                 Ok(mut result) => {

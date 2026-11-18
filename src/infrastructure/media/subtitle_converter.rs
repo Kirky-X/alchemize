@@ -37,10 +37,12 @@ impl Converter for SubtitleConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read subtitle input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-subtitle-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
         let (text, encoding) = shared_text_decode(&bytes);
 
         let ext = input.extension().unwrap_or_default();

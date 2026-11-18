@@ -42,10 +42,12 @@ impl Converter for PptxConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::Other(format!("failed to read PPTX input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::Other(crate::tr_args(
+                "failed-to-read-pptx-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let mut archive = ZipArchive::new(std::io::Cursor::new(bytes))
             .map_err(|e| AlchemizeError::Zip(format!("{e}")))?;
@@ -188,9 +190,12 @@ fn extract_text_from_slide_xml(xml: &str) -> Result<Vec<String>, AlchemizeError>
             Ok(Event::Text(_)) => {}
             Ok(Event::Eof) => break,
             Err(e) => {
-                return Err(AlchemizeError::Xml(format!(
-                    "XML parse error at position {}: {e}",
-                    reader.error_position()
+                return Err(AlchemizeError::Xml(crate::tr_args(
+                    "xml-parse-error-at-position",
+                    &[
+                        ("position", reader.error_position().to_string()),
+                        ("source", e.to_string()),
+                    ],
                 )));
             }
             _ => {}

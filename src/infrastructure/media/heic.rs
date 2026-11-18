@@ -48,10 +48,12 @@ impl Converter for HeicConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read HEIC input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-heic-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
         let info = ifd::describe(&bytes);
         let filename = input.filename().unwrap_or("image.heic").to_string();
 

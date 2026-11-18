@@ -52,10 +52,20 @@ impl TempDbGuard {
             .prefix("alchemize-sqlite-")
             .suffix(".db")
             .tempfile()
-            .map_err(|e| AlchemizeError::other(format!("failed to stage SQLite temp file: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-stage-sqlite-temp",
+                    &[("source", e.to_string())],
+                ))
+            })?;
         file.write_all(bytes)
             .and_then(|()| file.flush())
-            .map_err(|e| AlchemizeError::other(format!("failed to stage SQLite temp file: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-stage-sqlite-temp",
+                    &[("source", e.to_string())],
+                ))
+            })?;
         Ok(Self { file })
     }
 
@@ -71,10 +81,12 @@ impl Converter for SqliteConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read sqlite input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-sqlite-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         // All inputs are staged into a private temp copy before opening:
         // reading the attacker-supplied database in place would also let a
@@ -87,7 +99,10 @@ impl Converter for SqliteConverter {
 
         let conn =
             Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| {
-                AlchemizeError::other(format!("failed to open SQLite database read-only: {e}"))
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-open-sqlite-readonly",
+                    &[("source", e.to_string())],
+                ))
             })?;
 
         let mut stmt = conn
@@ -95,12 +110,27 @@ impl Converter for SqliteConverter {
                 "SELECT name FROM sqlite_master WHERE type = 'table' \
                  AND name NOT LIKE 'sqlite_%' ORDER BY name",
             )
-            .map_err(|e| AlchemizeError::other(format!("failed to list SQLite tables: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-list-sqlite-tables",
+                    &[("source", e.to_string())],
+                ))
+            })?;
         let tables: Vec<String> = stmt
             .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| AlchemizeError::other(format!("failed to query SQLite tables: {e}")))?
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-query-sqlite-tables",
+                    &[("source", e.to_string())],
+                ))
+            })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AlchemizeError::other(format!("failed to read SQLite tables: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-read-sqlite-tables",
+                    &[("source", e.to_string())],
+                ))
+            })?;
         drop(stmt);
 
         let mut markdown = String::new();
@@ -144,9 +174,12 @@ fn render_table_section(
 
     // Column list.
     let pragma = format!("PRAGMA table_info({})", escape_ident(table));
-    let mut col_stmt = conn
-        .prepare(&pragma)
-        .map_err(|e| AlchemizeError::other(format!("failed to inspect table '{table}': {e}")))?;
+    let mut col_stmt = conn.prepare(&pragma).map_err(|e| {
+        AlchemizeError::other(crate::tr_args(
+            "failed-to-inspect-sqlite-table",
+            &[("table", table.to_string()), ("source", e.to_string())],
+        ))
+    })?;
     let columns: Vec<(String, String, i64, i64)> = col_stmt
         .query_map([], |row| {
             Ok((
@@ -156,9 +189,19 @@ fn render_table_section(
                 row.get::<_, i64>(5)?, // pk
             ))
         })
-        .map_err(|e| AlchemizeError::other(format!("failed to inspect table '{table}': {e}")))?
+        .map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-inspect-sqlite-table",
+                &[("table", table.to_string()), ("source", e.to_string())],
+            ))
+        })?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| AlchemizeError::other(format!("failed to inspect table '{table}': {e}")))?;
+        .map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-inspect-sqlite-table",
+                &[("table", table.to_string()), ("source", e.to_string())],
+            ))
+        })?;
     drop(col_stmt);
 
     out.push_str("Columns:\n\n");
@@ -177,9 +220,12 @@ fn render_table_section(
 
     // Sample rows.
     let query = format!("SELECT * FROM {} LIMIT {SAMPLE_ROWS}", escape_ident(table));
-    let mut sample = conn
-        .prepare(&query)
-        .map_err(|e| AlchemizeError::other(format!("failed to sample table '{table}': {e}")))?;
+    let mut sample = conn.prepare(&query).map_err(|e| {
+        AlchemizeError::other(crate::tr_args(
+            "failed-to-sample-sqlite-table",
+            &[("table", table.to_string()), ("source", e.to_string())],
+        ))
+    })?;
     let headers: Vec<String> = sample
         .column_names()
         .iter()
@@ -194,17 +240,40 @@ fn render_table_section(
             }
             Ok(cells)
         })
-        .map_err(|e| AlchemizeError::other(format!("failed to sample table '{table}': {e}")))?
+        .map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-sample-sqlite-table",
+                &[("table", table.to_string()), ("source", e.to_string())],
+            ))
+        })?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| AlchemizeError::other(format!("failed to sample table '{table}': {e}")))?;
+        .map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-sample-sqlite-table",
+                &[("table", table.to_string()), ("source", e.to_string())],
+            ))
+        })?;
     drop(sample);
 
     if rows.is_empty() {
-        out.push_str("Sample rows: *(none)*\n\n");
+        out.push_str(&format!(
+            "{}
+
+",
+            crate::tr("sqlite-sample-rows-none")
+        ));
         return Ok(());
     }
 
-    out.push_str(&format!("Sample rows (first {SAMPLE_ROWS}):\n\n"));
+    out.push_str(&format!(
+        "{}
+
+",
+        crate::tr_args(
+            "sqlite-sample-rows-header",
+            &[("count", SAMPLE_ROWS.to_string())]
+        )
+    ));
     out.push_str("| ");
     out.push_str(
         &headers

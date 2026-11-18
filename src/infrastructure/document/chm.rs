@@ -48,7 +48,12 @@ impl Converter for ChmConverter {
         // spawn_blocking，避免钉死 async worker；panic 经 JoinError 显性化。
         tokio::task::spawn_blocking(move || convert_sync(input))
             .await
-            .map_err(|e| AlchemizeError::other(format!("CHM extraction task failed: {e}")))?
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "chm-extraction-task-failed",
+                    &[("source", e.to_string())],
+                ))
+            })?
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -88,22 +93,36 @@ fn convert_sync(input: Input) -> Result<ConvertResult, AlchemizeError> {
         Input::Path(p) => p.clone(),
         Input::Bytes { data, .. } => {
             let mut tmp = tempfile::NamedTempFile::new().map_err(|e| {
-                AlchemizeError::other(format!("failed to create temp file for CHM: {e}"))
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-create-temp-for-chm",
+                    &[("source", e.to_string())],
+                ))
             })?;
-            std::io::Write::write_all(&mut tmp, data)
-                .map_err(|e| AlchemizeError::other(format!("failed to spool CHM input: {e}")))?;
+            std::io::Write::write_all(&mut tmp, data).map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-spool-chm-input",
+                    &[("source", e.to_string())],
+                ))
+            })?;
             keep_alive = tmp;
             keep_alive.path().to_path_buf()
         }
     };
 
     let html = crate::infrastructure::document::HtmlConverter::new();
-    let mut chm = libchm::ChmFile::open(&path)
-        .map_err(|e| AlchemizeError::other(format!("CHM open failed: {e}")))?;
+    let mut chm = libchm::ChmFile::open(&path).map_err(|e| {
+        AlchemizeError::other(crate::tr_args(
+            "chm-open-failed",
+            &[("source", e.to_string())],
+        ))
+    })?;
 
-    let entries = chm
-        .entries(libchm::EntrySel::ALL)
-        .map_err(|e| AlchemizeError::other(format!("CHM enumeration failed: {e}")))?;
+    let entries = chm.entries(libchm::EntrySel::ALL).map_err(|e| {
+        AlchemizeError::other(crate::tr_args(
+            "chm-enumeration-failed",
+            &[("source", e.to_string())],
+        ))
+    })?;
     let entry_count = entries.len();
 
     let topic_paths: Vec<String> = entries
@@ -178,9 +197,12 @@ fn convert_sync(input: Input) -> Result<ConvertResult, AlchemizeError> {
         };
 
         let html_body = String::from_utf8_lossy(&bytes);
-        let converted = html
-            .convert_str(&html_body)
-            .map_err(|e| AlchemizeError::other(format!("CHM topic {topic} failed: {e}")))?;
+        let converted = html.convert_str(&html_body).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "chm-topic-failed",
+                &[("topic", topic.to_string()), ("source", e.to_string())],
+            ))
+        })?;
         out.push_str(&format!(
             "## {}\n\n",
             crate::infrastructure::document::shared::escape_markdown_label(topic)

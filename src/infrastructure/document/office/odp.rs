@@ -40,13 +40,20 @@ impl Converter for OdpConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read ODP input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-odp-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
         let parsed = tokio::task::spawn_blocking(move || parse(&bytes))
             .await
-            .map_err(|e| AlchemizeError::other(format!("odp-deep task panicked: {e}")))??;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "odp-deep-task-panicked",
+                    &[("source", e.to_string())],
+                ))
+            })??;
         build_result(parsed, "odp")
     }
 

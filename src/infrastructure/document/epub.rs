@@ -44,13 +44,19 @@ impl Converter for EpubConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read EPUB input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-epub-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
-        let epub = Epub::read(Cursor::new(bytes))
-            .map_err(|e| AlchemizeError::Zip(format!("failed to open EPUB: {e}")))?;
+        let epub = Epub::read(Cursor::new(bytes)).map_err(|e| {
+            AlchemizeError::Zip(crate::tr_args(
+                "failed-to-open-epub",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let mut markdown_parts = Vec::new();
         let mut chapter_count = 0;
@@ -87,7 +93,10 @@ impl Converter for EpubConverter {
             }
 
             let chapter_md = self.html_converter.convert(content).map_err(|e| {
-                AlchemizeError::other(format!("chapter HTML conversion failed: {e}"))
+                AlchemizeError::other(crate::tr_args(
+                    "chapter-html-conversion-failed",
+                    &[("source", e.to_string())],
+                ))
             })?;
 
             if !chapter_md.trim().is_empty() {

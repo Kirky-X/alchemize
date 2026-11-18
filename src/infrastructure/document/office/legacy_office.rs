@@ -60,28 +60,53 @@ impl Converter for LegacyOfficeConverter {
         let ext = input.extension().unwrap_or_default();
         let hop = hop_for(&ext);
         let filename = input.filename().unwrap_or("input.bin").to_string();
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read {ext} input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-ext-input",
+                &[("ext", ext.to_string()), ("source", e.to_string())],
+            ))
+        })?;
 
         let work = tempfile::Builder::new()
             .prefix("alch-legacy-")
             .tempdir()
-            .map_err(|e| AlchemizeError::other(format!("tempdir failed: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "tempdir-failed",
+                    &[("source", e.to_string())],
+                ))
+            })?;
         let input_path = work.path().join(&filename);
-        std::fs::write(&input_path, &bytes)
-            .map_err(|e| AlchemizeError::other(format!("staging failed: {e}")))?;
+        std::fs::write(&input_path, &bytes).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "staging-failed",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
-        let runner = crate::infrastructure::tools::libreoffice::LibreOfficeRunner::new()
-            .map_err(|e| AlchemizeError::other(format!("soffice profile failed: {e}")))?;
+        let runner =
+            crate::infrastructure::tools::libreoffice::LibreOfficeRunner::new().map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "soffice-profile-failed",
+                    &[("source", e.to_string())],
+                ))
+            })?;
         let out_dir = work.path().join("out");
         let produced = runner
             .convert(&input_path, hop.target, hop.filter, &out_dir)
             .await
-            .map_err(|e| AlchemizeError::other(format!("soffice conversion failed: {e}")))?;
-        let converted = std::fs::read(&produced)
-            .map_err(|e| AlchemizeError::other(format!("converted output unreadable: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "soffice-conversion-failed",
+                    &[("source", e.to_string())],
+                ))
+            })?;
+        let converted = std::fs::read(&produced).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "converted-output-unreadable",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         // Second hop: self-hosted deep parsers handle the OOXML.
         let result = match hop.target {
@@ -91,8 +116,9 @@ impl Converter for LegacyOfficeConverter {
                     .await?
             }
             other => {
-                return Err(AlchemizeError::other(format!(
-                    "unsupported intermediate format '{other}'"
+                return Err(AlchemizeError::other(crate::tr_args(
+                    "unsupported-intermediate-format",
+                    &[("other", other.to_string())],
                 )));
             }
         };
@@ -137,7 +163,7 @@ impl Converter for LegacyOfficeConverter {
             Availability::Available
         } else {
             Availability::Unavailable {
-                reason: "'soffice' not found on PATH (legacy doc/rtf need LibreOffice)".to_string(),
+                reason: crate::tr("soffice-not-found-doc-rtf"),
             }
         }
     }
@@ -175,21 +201,37 @@ impl Converter for LegacyPptConverter {
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
         let filename = input.filename().unwrap_or("input.ppt").to_string();
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read ppt input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-ppt-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let work = tempfile::Builder::new()
             .prefix("alch-legacy-ppt-")
             .tempdir()
-            .map_err(|e| AlchemizeError::other(format!("tempdir failed: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "tempdir-failed",
+                    &[("source", e.to_string())],
+                ))
+            })?;
         let input_path = work.path().join(&filename);
-        std::fs::write(&input_path, &bytes)
-            .map_err(|e| AlchemizeError::other(format!("staging failed: {e}")))?;
+        std::fs::write(&input_path, &bytes).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "staging-failed",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
-        let runner = crate::infrastructure::tools::libreoffice::LibreOfficeRunner::new()
-            .map_err(|e| AlchemizeError::other(format!("soffice profile failed: {e}")))?;
+        let runner =
+            crate::infrastructure::tools::libreoffice::LibreOfficeRunner::new().map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "soffice-profile-failed",
+                    &[("source", e.to_string())],
+                ))
+            })?;
         let out_dir = work.path().join("out");
         let produced = runner
             .convert(
@@ -199,9 +241,18 @@ impl Converter for LegacyPptConverter {
                 &out_dir,
             )
             .await
-            .map_err(|e| AlchemizeError::other(format!("soffice conversion failed: {e}")))?;
-        let converted = std::fs::read(&produced)
-            .map_err(|e| AlchemizeError::other(format!("converted output unreadable: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "soffice-conversion-failed",
+                    &[("source", e.to_string())],
+                ))
+            })?;
+        let converted = std::fs::read(&produced).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "converted-output-unreadable",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let result = crate::infrastructure::document::office::pptx_deep::PptxDeepConverter::new()
             .convert(Input::bytes(converted, format!("{}.pptx", stem(&filename))))
@@ -245,7 +296,7 @@ impl Converter for LegacyPptConverter {
             Availability::Available
         } else {
             Availability::Unavailable {
-                reason: "'soffice' not found on PATH (legacy ppt needs LibreOffice)".to_string(),
+                reason: crate::tr("soffice-not-found-legacy-ppt"),
             }
         }
     }

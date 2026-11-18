@@ -53,25 +53,34 @@ impl Converter for ImageConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::Other(format!("failed to read image input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::Other(crate::tr_args(
+                "failed-to-read-image-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let filename = input.filename().unwrap_or("unknown").to_string();
         let byte_count = bytes.len();
 
         if let Some(ref vision) = self.vision {
             // Use vision provider for OCR + description.
-            let ocr_text = vision
-                .ocr(&bytes)
-                .await
-                .map_err(|e| AlchemizeError::VisionUnavailable(format!("OCR failed: {e}")))?;
+            let ocr_text = vision.ocr(&bytes).await.map_err(|e| {
+                AlchemizeError::VisionUnavailable(crate::tr_args(
+                    "ocr-failed",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
             let description = vision
                 .describe(&bytes, crate::domain::result::DetailLevel::Moderate)
                 .await
-                .map_err(|e| AlchemizeError::VisionUnavailable(format!("analysis failed: {e}")))?;
+                .map_err(|e| {
+                    AlchemizeError::VisionUnavailable(crate::tr_args(
+                        "image-analysis-failed",
+                        &[("source", e.to_string())],
+                    ))
+                })?;
 
             let mut markdown = String::new();
 

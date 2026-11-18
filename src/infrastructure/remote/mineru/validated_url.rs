@@ -62,7 +62,10 @@ fn check_ipv4_ssrf(octets: [u8; 4], host: &str, label: &str) -> Result<(), Alche
     if octets[0] == 127 {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::LoopbackAddress,
-            message: format!("URL points to {label}loopback address '{host}'"),
+            message: crate::tr_args(
+                "url-points-to-loopback",
+                &[("label", label.to_string()), ("host", host.to_string())],
+            ),
         });
     }
     // Private ranges (RFC1918), 0.0.0.0/8, and CGNAT (RFC 6598)
@@ -74,21 +77,30 @@ fn check_ipv4_ssrf(octets: [u8; 4], host: &str, label: &str) -> Result<(), Alche
     {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::PrivateAddress,
-            message: format!("URL points to {label}private address '{host}'"),
+            message: crate::tr_args(
+                "url-points-to-private",
+                &[("label", label.to_string()), ("host", host.to_string())],
+            ),
         });
     }
     // Link-local (169.254/16)
     if octets[0] == 169 && octets[1] == 254 {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::LinkLocalAddress,
-            message: format!("URL points to {label}link-local address '{host}'"),
+            message: crate::tr_args(
+                "url-points-to-link-local",
+                &[("label", label.to_string()), ("host", host.to_string())],
+            ),
         });
     }
     // Broadcast (255.255.255.255) — defense in depth
     if octets == [255, 255, 255, 255] {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::PrivateAddress,
-            message: format!("URL points to {label}broadcast address '{host}'"),
+            message: crate::tr_args(
+                "url-points-to-broadcast",
+                &[("label", label.to_string()), ("host", host.to_string())],
+            ),
         });
     }
     Ok(())
@@ -119,14 +131,20 @@ pub fn validate_file_url(
 ) -> Result<ValidatedFileUrl, AlchemizeError> {
     let parsed = reqwest::Url::parse(raw).map_err(|e| AlchemizeError::SecurityViolation {
         kind: SecurityViolationType::InvalidScheme,
-        message: format!("invalid URL '{raw}': {e}"),
+        message: crate::tr_args(
+            "invalid-file-url",
+            &[("raw", raw.to_string()), ("source", e.to_string())],
+        ),
     })?;
 
     // Check scheme: only HTTPS allowed
     if parsed.scheme() != "https" {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::InvalidScheme,
-            message: format!("URL must use HTTPS scheme, got '{}'", parsed.scheme()),
+            message: crate::tr_args(
+                "url-must-use-https",
+                &[("scheme", parsed.scheme().to_string())],
+            ),
         });
     }
 
@@ -135,14 +153,17 @@ pub fn validate_file_url(
         .host_str()
         .ok_or_else(|| AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::HostnameNotAllowed,
-            message: format!("URL '{raw}' has no host"),
+            message: crate::tr_args("url-has-no-host", &[("raw", raw.to_string())]),
         })?;
 
     // Reject loopback addresses
     if host == "localhost" || host == "127.0.0.1" || host == "::1" {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::LoopbackAddress,
-            message: format!("URL points to loopback address '{host}'"),
+            message: crate::tr_args(
+                "url-points-to-loopback",
+                &[("label", String::new()), ("host", host.to_string())],
+            ),
         });
     }
 
@@ -183,7 +204,10 @@ fn check_ipv6_ssrf(ipv6: Ipv6Addr, host: &str) -> Result<(), AlchemizeError> {
     if ipv6.is_loopback() {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::LoopbackAddress,
-            message: format!("URL points to loopback address '{host}'"),
+            message: crate::tr_args(
+                "url-points-to-loopback",
+                &[("label", String::new()), ("host", host.to_string())],
+            ),
         });
     }
 
@@ -193,7 +217,7 @@ fn check_ipv6_ssrf(ipv6: Ipv6Addr, host: &str) -> Result<(), AlchemizeError> {
     if (segments[0] & 0xfe00) == 0xfc00 {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::PrivateAddress,
-            message: format!("URL points to IPv6 ULA address '{host}'"),
+            message: crate::tr_args("url-ipv6-ula", &[("host", host.to_string())]),
         });
     }
 
@@ -201,7 +225,7 @@ fn check_ipv6_ssrf(ipv6: Ipv6Addr, host: &str) -> Result<(), AlchemizeError> {
     if (segments[0] & 0xffc0) == 0xfe80 {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::LinkLocalAddress,
-            message: format!("URL points to IPv6 link-local address '{host}'"),
+            message: crate::tr_args("url-ipv6-link-local", &[("host", host.to_string())]),
         });
     }
 
@@ -209,7 +233,7 @@ fn check_ipv6_ssrf(ipv6: Ipv6Addr, host: &str) -> Result<(), AlchemizeError> {
     if (segments[0] & 0xff00) == 0xff00 {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::PrivateAddress,
-            message: format!("URL points to IPv6 multicast address '{host}'"),
+            message: crate::tr_args("url-ipv6-multicast", &[("host", host.to_string())]),
         });
     }
 
@@ -250,7 +274,7 @@ fn check_hostname_allowlist(host: &str, allowlist: &[&str]) -> Result<(), Alchem
     if !is_allowed {
         return Err(AlchemizeError::SecurityViolation {
             kind: SecurityViolationType::HostnameNotAllowed,
-            message: format!("hostname '{host}' is not in the configured allowlist"),
+            message: crate::tr_args("hostname-not-in-allowlist", &[("host", host.to_string())]),
         });
     }
     Ok(())
@@ -262,13 +286,18 @@ fn check_hostname_allowlist(host: &str, allowlist: &[&str]) -> Result<(), Alchem
 /// `base_url` configuration. Unlike [`validate_file_url`], this allows `http`
 /// because MinerU can be self-hosted on plain HTTP (e.g. `http://localhost:8888`).
 pub(crate) fn validate_base_url(url: &str) -> Result<(), AlchemizeError> {
-    let parsed = reqwest::Url::parse(url)
-        .map_err(|e| AlchemizeError::Other(format!("invalid MinerU URL '{url}': {e}")))?;
+    let parsed = reqwest::Url::parse(url).map_err(|e| {
+        AlchemizeError::Other(crate::tr_args(
+            "invalid-mineru-url",
+            &[("url", url.to_string()), ("source", e.to_string())],
+        ))
+    })?;
 
     let scheme = parsed.scheme();
     if scheme != "http" && scheme != "https" {
-        return Err(AlchemizeError::Other(format!(
-            "MinerU URL must use http or https scheme, got '{scheme}'"
+        return Err(AlchemizeError::Other(crate::tr_args(
+            "mineru-url-scheme-invalid",
+            &[("scheme", scheme.to_string())],
         )));
     }
 

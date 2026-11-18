@@ -90,10 +90,18 @@ impl TranscribeProvider for VecboostTranscriber {
     async fn transcribe(&self, audio_wav16k: &[u8]) -> Result<Transcript, AlchemizeError> {
         // WAV bytes land in a temp file: the vecboost facade reads 16kHz
         // mono WAV from disk (read_wav_16k_mono).
-        let tmp = tempfile::NamedTempFile::new()
-            .map_err(|e| AlchemizeError::AudioUnavailable(format!("tempfile failed: {e}")))?;
-        std::fs::write(tmp.path(), audio_wav16k)
-            .map_err(|e| AlchemizeError::AudioUnavailable(format!("wav write failed: {e}")))?;
+        let tmp = tempfile::NamedTempFile::new().map_err(|e| {
+            AlchemizeError::AudioUnavailable(crate::tr_args(
+                "vecboost-tempfile-failed",
+                &[("source", e.to_string())],
+            ))
+        })?;
+        std::fs::write(tmp.path(), audio_wav16k).map_err(|e| {
+            AlchemizeError::AudioUnavailable(crate::tr_args(
+                "vecboost-wav-write-failed",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let opts = vecboost::transcribe::TranscribeOpts::default();
         let wav_path = tmp.path().to_path_buf();
@@ -122,10 +130,18 @@ impl TranscribeProvider for VecboostTranscriber {
             })
         })
         .await
-        .map_err(|e| AlchemizeError::AudioUnavailable(format!("vecboost task panicked: {e}")))?;
+        .map_err(|e| {
+            AlchemizeError::AudioUnavailable(crate::tr_args(
+                "vecboost-task-panicked",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         result.map_err(|e| {
-            AlchemizeError::AudioUnavailable(format!("vecboost transcription failed: {e}"))
+            AlchemizeError::AudioUnavailable(crate::tr_args(
+                "vecboost-transcription-failed",
+                &[("source", e.to_string())],
+            ))
         })
     }
 
@@ -140,15 +156,14 @@ impl TranscribeProvider for VecboostTranscriber {
             Ok(dir) => {
                 if !ort_dylib_available() {
                     return Availability::Unavailable {
-                        reason: "ORT_DYLIB_PATH is not set; vecboost loads onnxruntime dynamically"
-                            .to_string(),
+                        reason: crate::tr("ort-dylib-not-set"),
                     };
                 }
                 if !dir.join("silero_vad.onnx").is_file() {
                     return Availability::Unavailable {
-                        reason: format!(
-                            "bundle at {} misses silero_vad.onnx; incomplete bundle",
-                            dir.display()
+                        reason: crate::tr_args(
+                            "vecboost-bundle-missing-vad",
+                            &[("path", dir.display().to_string())],
                         ),
                     };
                 }
@@ -183,7 +198,7 @@ mod tests {
 
     #[test]
     fn transcript_disclaimer_mentions_vad() {
-        assert!(Transcript::DISCLAIMER.contains("VAD"));
+        assert!(Transcript::disclaimer().contains("VAD"));
     }
 
     #[tokio::test]

@@ -21,10 +21,19 @@ pub fn read_part_limited<R: Read>(reader: &mut R, what: &str) -> Result<Vec<u8>,
     reader
         .take(MAX_PART_BYTES + 1)
         .read_to_end(&mut buf)
-        .map_err(|e| AlchemizeError::Zip(format!("part {what} read failed: {e}")))?;
+        .map_err(|e| {
+            AlchemizeError::Zip(crate::tr_args(
+                "part-read-failed",
+                &[("what", what.to_string()), ("source", e.to_string())],
+            ))
+        })?;
     if buf.len() as u64 > MAX_PART_BYTES {
-        return Err(AlchemizeError::Zip(format!(
-            "part {what} exceeds the {MAX_PART_BYTES}-byte per-part limit"
+        return Err(AlchemizeError::Zip(crate::tr_args(
+            "part-per-part-limit",
+            &[
+                ("what", what.to_string()),
+                ("limit", MAX_PART_BYTES.to_string()),
+            ],
         )));
     }
     Ok(buf)
@@ -37,8 +46,9 @@ pub const MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 /// Enforce the cumulative output ceiling.
 pub fn check_output_budget(bytes: usize) -> Result<(), AlchemizeError> {
     if bytes > MAX_OUTPUT_BYTES {
-        return Err(AlchemizeError::other(format!(
-            "converted output exceeds the {MAX_OUTPUT_BYTES}-byte cumulative limit"
+        return Err(AlchemizeError::other(crate::tr_args(
+            "output-cumulative-limit",
+            &[("limit", MAX_OUTPUT_BYTES.to_string())],
         )));
     }
     Ok(())

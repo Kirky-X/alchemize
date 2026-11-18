@@ -83,10 +83,12 @@ impl Converter for SevenZConverter {
     ) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
         with_depth_scope(async {
             let _depth = acquire_depth()?;
-            let bytes = input
-                .to_bytes()
-                .await
-                .map_err(|e| AlchemizeError::other(format!("failed to read 7z input: {e}")))?;
+            let bytes = input.to_bytes().await.map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-read-7z-input",
+                    &[("source", e.to_string())],
+                ))
+            })?;
             let archive = SevenZArchive::new(bytes);
             self.base
                 .convert_container(archive.format_name(), archive.entries())
@@ -108,7 +110,12 @@ impl Converter for SevenZConverter {
 fn extract_sevenz(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
     let mut reader =
         sevenz_rust2::ArchiveReader::new(Cursor::new(bytes), sevenz_rust2::Password::empty())
-            .map_err(|e| AlchemizeError::other(format!("failed to open 7z archive: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-open-7z-archive",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
     let mut out: Vec<ContainerEntry> = Vec::new();
     let mut total: u64 = 0;
@@ -123,9 +130,13 @@ fn extract_sevenz(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
             }
             if entry.size > limit {
                 return Err(sevenz_rust2::Error::Other(
-                    format!(
-                        "entry '{}' is {} bytes, exceeds the {limit}-byte per-entry limit",
-                        entry.name, entry.size
+                    crate::tr_args(
+                        "sevenz-per-entry-limit",
+                        &[
+                            ("name", entry.name.to_string()),
+                            ("size", entry.size.to_string()),
+                            ("limit", limit.to_string()),
+                        ],
                     )
                     .into(),
                 ));
@@ -149,7 +160,12 @@ fn extract_sevenz(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
             });
             Ok(true)
         })
-        .map_err(|e| AlchemizeError::other(format!("failed to extract 7z entries: {e}")))?;
+        .map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-extract-7z-entries",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
     Ok(out)
 }

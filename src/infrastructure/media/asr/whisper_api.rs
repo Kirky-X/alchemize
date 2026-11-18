@@ -68,7 +68,9 @@ impl TranscribeProvider for WhisperApiTranscriber {
         let part = reqwest::multipart::Part::bytes(audio_wav16k.to_vec())
             .file_name("audio.wav")
             .mime_str("audio/wav")
-            .map_err(|e| AlchemizeError::other(format!("mime error: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args("mime-error", &[("source", e.to_string())]))
+            })?;
         let form = reqwest::multipart::Form::new()
             .text("model", self.config.model.clone())
             .part("file", part);
@@ -81,13 +83,26 @@ impl TranscribeProvider for WhisperApiTranscriber {
             .send()
             .await
             .map_err(|e| {
-                AlchemizeError::AudioUnavailable(format!("whisper api request failed: {e}"))
+                AlchemizeError::AudioUnavailable(crate::tr_args(
+                    "whisper-api-request-failed",
+                    &[("source", e.to_string())],
+                ))
             })?
             .error_for_status()
-            .map_err(|e| AlchemizeError::AudioUnavailable(format!("whisper api status: {e}")))?
+            .map_err(|e| {
+                AlchemizeError::AudioUnavailable(crate::tr_args(
+                    "whisper-api-status",
+                    &[("source", e.to_string())],
+                ))
+            })?
             .json()
             .await
-            .map_err(|e| AlchemizeError::AudioUnavailable(format!("whisper api decode: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::AudioUnavailable(crate::tr_args(
+                    "whisper-api-decode",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
         let text = response
             .get("text")

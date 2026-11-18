@@ -61,17 +61,24 @@ impl Converter for PandocGenericConverter {
         let ext = input.extension().unwrap_or_default();
         let format = pandoc_format(&ext)
             .ok_or_else(|| AlchemizeError::UnsupportedFormat(format!("pandoc-generic: .{ext}")))?;
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read .{ext} input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-pandoc-input",
+                &[("ext", ext.to_string()), ("source", e.to_string())],
+            ))
+        })?;
         let (source, encoding) = crate::infrastructure::document::detect_encoding(&bytes);
 
         match PandocTool::probe() {
             Availability::Available => {
                 let raw = PandocTool::to_gfm(format, &source, None)
                     .await
-                    .map_err(|e| AlchemizeError::other(format!("pandoc failed: {e}")))?;
+                    .map_err(|e| {
+                        AlchemizeError::other(crate::tr_args(
+                            "pandoc-failed",
+                            &[("source", e.to_string())],
+                        ))
+                    })?;
                 let metadata = serde_json::json!({
                     "source_format": ext,
                     "engine": "pandoc",

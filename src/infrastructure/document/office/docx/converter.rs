@@ -46,14 +46,21 @@ impl Converter for DocxDeepConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read DOCX input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-docx-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let result = tokio::task::spawn_blocking(move || parse(&bytes))
             .await
-            .map_err(|e| AlchemizeError::other(format!("docx-deep task panicked: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "docx-deep-task-panicked",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
         let parsed = result?;
         let mut doc = parsed.document;
@@ -140,8 +147,12 @@ pub struct ParsedDocx {
 
 /// Parse DOCX bytes into the unified model.
 pub fn parse(bytes: &[u8]) -> Result<ParsedDocx, AlchemizeError> {
-    let mut zip = zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(|e| AlchemizeError::Zip(format!("failed to open DOCX: {e}")))?;
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| {
+        AlchemizeError::Zip(crate::tr_args(
+            "failed-to-open-docx",
+            &[("source", e.to_string())],
+        ))
+    })?;
 
     let document_xml = body::read_part(&mut zip, "word/document.xml")?;
     let styles_xml = body::read_part(&mut zip, "word/styles.xml").ok();

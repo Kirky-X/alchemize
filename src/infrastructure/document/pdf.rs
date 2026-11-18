@@ -38,8 +38,9 @@ const MAX_TOTAL_TEXT_BYTES: usize = 256 * 1024 * 1024;
 /// 300 MiB fixture lives in the `full` suite only.
 fn check_cumulative_text_budget(total_text: usize) -> Result<(), AlchemizeError> {
     if total_text > MAX_TOTAL_TEXT_BYTES {
-        return Err(AlchemizeError::Pdf(format!(
-            "PDF cumulative text budget exceeded ({MAX_TOTAL_TEXT_BYTES} bytes total, bomb protection; page-farm DoS guard)"
+        return Err(AlchemizeError::Pdf(crate::tr_args(
+            "pdf-cumulative-text-budget-exceeded",
+            &[("limit", MAX_TOTAL_TEXT_BYTES.to_string())],
         )));
     }
     Ok(())
@@ -73,11 +74,12 @@ fn extract_pages(bytes: &[u8]) -> Result<Vec<String>, AlchemizeError> {
             .into_iter()
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| match e {
-                lopdf::Error::Decompress(lopdf::DecompressError::MemoryLimitExceeded { .. }) => {
-                    AlchemizeError::Pdf(format!(
-                        "PDF page decompression limit exceeded ({MAX_STREAM_DECOMPRESSED_BYTES} bytes/page, bomb protection; lopdf built-in limits)"
-                    ))
-                }
+                lopdf::Error::Decompress(lopdf::DecompressError::MemoryLimitExceeded {
+                    ..
+                }) => AlchemizeError::Pdf(crate::tr_args(
+                    "pdf-page-decompression-limit-exceeded",
+                    &[("limit", MAX_STREAM_DECOMPRESSED_BYTES.to_string())],
+                )),
                 other => AlchemizeError::Pdf(format!("{other}")),
             })?
             .join("");
@@ -115,16 +117,23 @@ impl Converter for PdfConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read PDF input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-pdf-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         // 同步解析/抽取是 CPU 密集段，与其他转换器（pdfium/odt/pptx_deep）一
         // 致包 spawn_blocking，避免钉死 async worker；panic 由 JoinError 显性化。
         let pages = tokio::task::spawn_blocking(move || extract_pages(&bytes))
             .await
-            .map_err(|e| AlchemizeError::other(format!("pdf extraction task failed: {e}")))??;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "pdf-extraction-task-failed",
+                    &[("source", e.to_string())],
+                ))
+            })??;
 
         let page_count = pages.len();
         let mut markdown = String::new();

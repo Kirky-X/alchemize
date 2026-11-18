@@ -38,10 +38,12 @@ impl Converter for EmlConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read EML input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-eml-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
         convert_eml_bytes(&bytes, "eml")
     }
 
@@ -68,7 +70,7 @@ pub(crate) fn convert_eml_bytes(
 ) -> Result<ConvertResult, AlchemizeError> {
     let parsed = mail_parser::MessageParser::default()
         .parse(bytes)
-        .ok_or_else(|| AlchemizeError::other("EML parse failed: not a valid RFC 822 message"))?;
+        .ok_or_else(|| AlchemizeError::other(crate::tr("eml-parse-failed")))?;
 
     let markdown = render_message(&parsed);
     let attachments = collect_attachments(&parsed);

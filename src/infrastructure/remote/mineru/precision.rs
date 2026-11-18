@@ -86,12 +86,8 @@ impl MineruPrecisionClient {
     pub fn from_env() -> Result<Self, AlchemizeError> {
         // External service token — follows third-party naming convention (no MNEMIS_ prefix).
         // Corresponding config path: [parser.mineru] api_token (not yet in config schema).
-        let token = std::env::var(MINERU_API_TOKEN_ENV).map_err(|_| {
-            AlchemizeError::Other(
-                "MINERU_API_TOKEN environment variable not set. Required for Precision API."
-                    .to_string(),
-            )
-        })?;
+        let token = std::env::var(MINERU_API_TOKEN_ENV)
+            .map_err(|_| AlchemizeError::Other(crate::tr("mineru-token-not-set")))?;
         Self::with_token(token)
     }
 
@@ -102,12 +98,8 @@ impl MineruPrecisionClient {
     pub fn from_config(config: &MineruConfig) -> Result<Self, AlchemizeError> {
         // External service token — follows third-party naming convention (no MNEMIS_ prefix).
         // Corresponding config path: [parser.mineru] api_token (not yet in config schema).
-        let token = std::env::var(MINERU_API_TOKEN_ENV).map_err(|_| {
-            AlchemizeError::Other(
-                "MINERU_API_TOKEN environment variable not set. Required for Precision API."
-                    .to_string(),
-            )
-        })?;
+        let token = std::env::var(MINERU_API_TOKEN_ENV)
+            .map_err(|_| AlchemizeError::Other(crate::tr("mineru-token-not-set")))?;
         Self::with_base_url_and_token(&config.precision_base_url, token)
     }
 
@@ -126,9 +118,7 @@ impl MineruPrecisionClient {
         validate_base_url(&base_url)?;
 
         if token.is_empty() {
-            return Err(AlchemizeError::Other(
-                "MinerU API token cannot be empty".to_string(),
-            ));
+            return Err(AlchemizeError::Other(crate::tr("mineru-token-empty")));
         }
 
         let http = Client::builder()
@@ -142,7 +132,12 @@ impl MineruPrecisionClient {
             // closing the DNS-rebinding window (deny-by-default).
             .dns_resolver(std::sync::Arc::new(super::SsrfSafeResolver::default()))
             .build()
-            .map_err(|e| AlchemizeError::Other(format!("failed to build HTTP client: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::Other(crate::tr_args(
+                    "failed-to-build-http-client",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
         Ok(Self {
             http,
@@ -237,7 +232,10 @@ impl MineruPrecisionClient {
             .send()
             .await
             .map_err(|e| {
-                AlchemizeError::MineruUnavailable(format!("polling MinerU task {}: {e}", task_id))
+                AlchemizeError::MineruUnavailable(crate::tr_args(
+                    "polling-mineru-task",
+                    &[("task", task_id.to_string()), ("source", e.to_string())],
+                ))
             })?;
 
         if !resp.status().is_success() {
@@ -305,7 +303,10 @@ impl MineruPrecisionClient {
             .send()
             .await
             .map_err(|e| {
-                AlchemizeError::MineruConversion(format!("failed to fetch result: {e}"))
+                AlchemizeError::MineruConversion(crate::tr_args(
+                    "failed-to-fetch-result",
+                    &[("source", e.to_string())],
+                ))
             })?;
 
         if !resp.status().is_success() {
@@ -318,7 +319,12 @@ impl MineruPrecisionClient {
         // Try to parse as JSON with markdown field, otherwise return raw text
         let text = read_limited_text(resp, MAX_RESULT_RESPONSE_BYTES)
             .await
-            .map_err(|e| AlchemizeError::MineruConversion(format!("failed to read result: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::MineruConversion(crate::tr_args(
+                    "failed-to-read-result",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
         // If it looks like JSON, try to extract markdown field
         if text.trim_start().starts_with('{')

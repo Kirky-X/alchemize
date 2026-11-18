@@ -80,10 +80,12 @@ impl Converter for TarConverter {
     ) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
         with_depth_scope(async {
             let _depth = acquire_depth()?;
-            let bytes = input
-                .to_bytes()
-                .await
-                .map_err(|e| AlchemizeError::other(format!("failed to read tar input: {e}")))?;
+            let bytes = input.to_bytes().await.map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-read-tar-input",
+                    &[("source", e.to_string())],
+                ))
+            })?;
             let archive = TarArchive::new(bytes);
             self.base
                 .convert_container(archive.format_name(), archive.entries())
@@ -142,10 +144,12 @@ impl Converter for TarGzConverter {
     ) -> Result<crate::domain::result::ConvertResult, AlchemizeError> {
         with_depth_scope(async {
             let _depth = acquire_depth()?;
-            let bytes = input
-                .to_bytes()
-                .await
-                .map_err(|e| AlchemizeError::other(format!("failed to read tar.gz input: {e}")))?;
+            let bytes = input.to_bytes().await.map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-read-targz-input",
+                    &[("source", e.to_string())],
+                ))
+            })?;
             // The decompressed tar is itself a container, so it is bounded by
             // the total limit rather than the single-file limit.
             let tar_bytes = read_limited(
@@ -173,12 +177,18 @@ fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
     let mut out = Vec::new();
     let mut total: u64 = 0;
 
-    for entry in archive
-        .entries()
-        .map_err(|e| AlchemizeError::other(format!("failed to read tar archive: {e}")))?
-    {
-        let entry =
-            entry.map_err(|e| AlchemizeError::other(format!("failed to read tar entry: {e}")))?;
+    for entry in archive.entries().map_err(|e| {
+        AlchemizeError::other(crate::tr_args(
+            "failed-to-read-tar-archive",
+            &[("source", e.to_string())],
+        ))
+    })? {
+        let entry = entry.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-tar-entry",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         // Only real file contents. Directories, symlinks, pax extended
         // headers (XHeader/XGlobalHeader) and GNU long-name markers are
@@ -189,7 +199,12 @@ fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
 
         let name = entry
             .path()
-            .map_err(|e| AlchemizeError::other(format!("failed to read tar entry name: {e}")))?
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-read-tar-entry-name",
+                    &[("source", e.to_string())],
+                ))
+            })?
             .to_string_lossy()
             .into_owned();
 
@@ -199,10 +214,12 @@ fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
             continue;
         }
 
-        let declared = entry
-            .header()
-            .size()
-            .map_err(|e| AlchemizeError::other(format!("failed to read tar entry size: {e}")))?;
+        let declared = entry.header().size().map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-tar-entry-size",
+                &[("source", e.to_string())],
+            ))
+        })?;
         check_entry_size(&name, declared)?;
 
         // `take` guards against malformed headers declaring a smaller size
@@ -212,7 +229,10 @@ fn extract_tar(bytes: &[u8]) -> Result<Vec<ContainerEntry>, AlchemizeError> {
             .take(crate::infrastructure::containers::MAX_ENTRY_BYTES + 1)
             .read_to_end(&mut data)
             .map_err(|e| {
-                AlchemizeError::other(format!("failed to read tar entry '{name}': {e}"))
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-read-tar-entry-named",
+                    &[("name", name.to_string()), ("source", e.to_string())],
+                ))
             })?;
         check_entry_size(&name, data.len() as u64)?;
         // Incremental aggregate check: the post-materialization check would

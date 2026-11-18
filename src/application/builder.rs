@@ -117,8 +117,12 @@ fn check_input_size(len: Option<u64>) -> Result<(), AlchemizeError> {
     if let Some(len) = len
         && len > MAX_INPUT_BYTES
     {
-        return Err(AlchemizeError::Other(format!(
-            "input size {len} bytes exceeds the hard input limit of {MAX_INPUT_BYTES} bytes (1 GiB)"
+        return Err(AlchemizeError::other(crate::tr_args(
+            "input-size-exceeds-hard-limit",
+            &[
+                ("len", len.to_string()),
+                ("limit", MAX_INPUT_BYTES.to_string()),
+            ],
         )));
     }
     Ok(())
@@ -163,9 +167,12 @@ impl Alchemize {
         if let Some(len) = input.len()
             && len as usize > self.max_file_size
         {
-            return Err(AlchemizeError::Other(format!(
-                "input size {len} bytes exceeds max_file_size {} bytes",
-                self.max_file_size
+            return Err(AlchemizeError::other(crate::tr_args(
+                "input-size-exceeds-max-file-size",
+                &[
+                    ("len", len.to_string()),
+                    ("limit", self.max_file_size.to_string()),
+                ],
             )));
         }
         if matches!(input.extension().as_deref(), Some("zip") | Some("cbz")) {
@@ -209,14 +216,14 @@ impl Alchemize {
     /// dedicated thread (e.g. inside `spawn_blocking`).
     pub fn convert_sync(&self, input: &Input) -> Result<ConvertResult, AlchemizeError> {
         if matches!(input, Input::Path(_)) {
-            return Err(AlchemizeError::NotSyncCapable(
-                "path input requires the async port; the sync port serves in-memory Input::Bytes only".into(),
-            ));
+            return Err(AlchemizeError::NotSyncCapable(crate::tr(
+                "path-input-requires-async-port",
+            )));
         }
         if matches!(input.extension().as_deref(), Some("zip") | Some("cbz")) {
-            return Err(AlchemizeError::NotSyncCapable(
-                "zip/cbz requires nested async dispatch; use the async port".into(),
-            ));
+            return Err(AlchemizeError::NotSyncCapable(crate::tr(
+                "zip-cbz-requires-async-port",
+            )));
         }
         // Hard entry ceiling, same as the async port; placed with the size
         // guards (after category refusals) per the documented priority.
@@ -224,9 +231,12 @@ impl Alchemize {
         if let Some(len) = input.len()
             && len as usize > self.max_file_size
         {
-            return Err(AlchemizeError::Other(format!(
-                "input size {len} bytes exceeds max_file_size {} bytes",
-                self.max_file_size
+            return Err(AlchemizeError::other(crate::tr_args(
+                "input-size-exceeds-max-file-size",
+                &[
+                    ("len", len.to_string()),
+                    ("limit", self.max_file_size.to_string()),
+                ],
             )));
         }
         self.registry.convert_pref_sync(input, None)

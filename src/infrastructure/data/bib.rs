@@ -36,15 +36,21 @@ impl Converter for BibConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read bib input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-bib-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
         let text = String::from_utf8(bytes)
-            .map_err(|_| AlchemizeError::other("bib file is not valid UTF-8 text"))?;
+            .map_err(|_| AlchemizeError::other(crate::tr("bib-not-utf8")))?;
 
-        let bibliography = Bibliography::parse(&text)
-            .map_err(|e| AlchemizeError::other(format!("failed to parse BibTeX: {e}")))?;
+        let bibliography = Bibliography::parse(&text).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-parse-bibtex",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let lines: Vec<String> = bibliography.iter().map(render_entry).collect();
         let entry_count = lines.len();

@@ -254,12 +254,18 @@ impl crate::application::ports::Converter for HtmlDeepConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read HTML input: {e}")))?;
-        let html = String::from_utf8(bytes)
-            .map_err(|e| AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-html-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
+        let html = String::from_utf8(bytes).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "html-content-not-valid-utf8",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         self.convert_html(&html)
     }
@@ -274,7 +280,7 @@ impl crate::application::ports::Converter for HtmlDeepConverter {
         match input {
             Input::Bytes { data, .. } => {
                 let html = String::from_utf8(data.clone()).map_err(|e| {
-                    AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}"))
+                    AlchemizeError::other(crate::tr_args("html-content-not-valid-utf8", &[("source", e.to_string())]))
                 })?;
                 self.convert_html(&html)
             }

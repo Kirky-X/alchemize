@@ -43,15 +43,17 @@ impl HtmlConverter {
         // backslashes inside `$…$`, so the LaTeX travels as a placeholder.
         let (preprocessed, fragments) = preprocess_math(&html);
 
-        let markdown = self
-            .converter
-            .convert(&preprocessed)
-            .map_err(|e| AlchemizeError::other(format!("HTML conversion failed: {e}")))?;
+        let markdown = self.converter.convert(&preprocessed).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "html-conversion-failed",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let markdown = restore_math(&markdown, &fragments);
 
         let markdown = if markdown.trim().is_empty() {
-            "*HTML document contains no extractable content.*\n".to_string()
+            format!("{}\n", crate::tr("html-no-extractable-content"))
         } else {
             markdown.trim().to_string() + "\n"
         };
@@ -215,13 +217,19 @@ impl Converter for HtmlConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read HTML input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-html-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
-        let html = String::from_utf8(bytes)
-            .map_err(|e| AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}")))?;
+        let html = String::from_utf8(bytes).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "html-content-not-valid-utf8",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         self.convert_str(&html)
     }
@@ -235,7 +243,7 @@ impl Converter for HtmlConverter {
         match input {
             Input::Bytes { data, .. } => {
                 let html = String::from_utf8(data.clone()).map_err(|e| {
-                    AlchemizeError::other(format!("HTML content is not valid UTF-8: {e}"))
+                    AlchemizeError::other(crate::tr_args("html-content-not-valid-utf8", &[("source", e.to_string())]))
                 })?;
                 self.convert_str(&html)
             }

@@ -139,10 +139,12 @@ impl Converter for TextConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read text input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-text-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let (text, encoding_name) = detect_encoding(&bytes);
 

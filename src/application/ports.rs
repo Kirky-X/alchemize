@@ -190,9 +190,11 @@ pub struct TranscriptSegment {
 }
 
 impl Transcript {
-    /// The disclaimer carried with every transcript output.
-    pub const DISCLAIMER: &'static str =
-        "分段由 VAD（语音活动检测）产生，非说话人识别；不提供说话人归属。";
+    /// The disclaimer carried with every transcript output (localized via
+    /// the Fluent catalog; en/zh both keep the `VAD` term).
+    pub fn disclaimer() -> String {
+        crate::tr("transcript-disclaimer")
+    }
 
     /// Concatenated text of all segments.
     pub fn full_text(&self) -> String {
@@ -240,7 +242,10 @@ pub trait ExternalTool: Send + Sync {
             Availability::Available
         } else {
             Availability::Unavailable {
-                reason: format!("'{}' not found on PATH", self.program()),
+                reason: crate::tr_args(
+                    "program-not-found-on-path",
+                    &[("program", self.program().to_string())],
+                ),
             }
         }
     }
@@ -303,7 +308,7 @@ mod tests {
             ],
         };
         assert_eq!(t.full_text(), "你好 世界");
-        assert!(Transcript::DISCLAIMER.contains("VAD"));
+        assert!(Transcript::disclaimer().contains("VAD"));
     }
 
     #[test]

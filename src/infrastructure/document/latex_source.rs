@@ -47,10 +47,12 @@ impl Converter for LatexSourceConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read LaTeX input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-latex-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let latex = String::from_utf8_lossy(&bytes).into_owned();
 
@@ -76,14 +78,23 @@ impl Converter for LatexSourceConverter {
             }));
         }
 
-        let media_dir = tempfile::tempdir()
-            .map_err(|e| AlchemizeError::other(format!("tempdir failed: {e}")))?;
+        let media_dir = tempfile::tempdir().map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "tempdir-failed",
+                &[("source", e.to_string())],
+            ))
+        })?;
         let raw = crate::infrastructure::tools::pandoc::PandocTool::latex_to_gfm(
             &latex,
             Some(media_dir.path()),
         )
         .await
-        .map_err(|e| AlchemizeError::other(format!("pandoc failed: {e}")))?;
+        .map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "pandoc-failed",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let mut markdown = normalize_pandoc_math(&raw);
         markdown = strip_latex_div_noise(&markdown);

@@ -98,18 +98,25 @@ impl Converter for PdfiumConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read PDF input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-pdf-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
         let library = self
             .library
             .clone()
-            .ok_or_else(|| AlchemizeError::Pdf("pdfium library unavailable".into()))?;
+            .ok_or_else(|| AlchemizeError::Pdf(crate::tr("pdfium-library-unavailable")))?;
 
         let result = tokio::task::spawn_blocking(move || extract_all(&library, &bytes))
             .await
-            .map_err(|e| AlchemizeError::other(format!("pdfium task panicked: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "pdfium-task-panicked",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
         let (markdown, assets, page_count, skip_reasons) = result?;
 
@@ -202,12 +209,19 @@ fn extract(
 ) -> Result<(String, usize), AlchemizeError> {
     use pdfium_render::prelude::*;
 
-    let bindings = Pdfium::bind_to_library(library.display().to_string())
-        .map_err(|e| AlchemizeError::Pdf(format!("pdfium bind failed: {e:?}")))?;
+    let bindings = Pdfium::bind_to_library(library.display().to_string()).map_err(|e| {
+        AlchemizeError::Pdf(crate::tr_args(
+            "pdfium-bind-failed",
+            &[("source", format!("{e:?}"))],
+        ))
+    })?;
     let pdfium = Pdfium::new(bindings);
-    let doc = pdfium
-        .load_pdf_from_byte_slice(bytes, None)
-        .map_err(|e| AlchemizeError::Pdf(format!("pdfium open failed: {e:?}")))?;
+    let doc = pdfium.load_pdf_from_byte_slice(bytes, None).map_err(|e| {
+        AlchemizeError::Pdf(crate::tr_args(
+            "pdfium-open-failed",
+            &[("source", format!("{e:?}"))],
+        ))
+    })?;
 
     let page_count = doc.pages().len();
     let mut markdown = String::new();

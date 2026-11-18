@@ -81,10 +81,12 @@ impl Converter for ZipConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read ZIP input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-zip-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let Extracted { files, oversize } = extract_zip_contents(&bytes, self.max_entry_size)?;
 
@@ -222,14 +224,20 @@ impl Converter for ZipConverter {
                         markdown_parts.push(format!("{fence}{ext}\n{body}\n{fence}\n"));
                     } else {
                         let reason = if depth_hit {
-                            "nested container exceeds the depth limit"
+                            crate::tr("nested-container-depth-limit")
                         } else {
-                            "unsupported inner format"
+                            crate::tr("unsupported-inner-format")
                         };
                         markdown_parts.push(format!(
-                            "> Attachment: `{}` ({} bytes) — {reason}; content preserved as attachment.\n",
-                            code_span_label(&filename),
-                            content.len()
+                            "{}\n",
+                            crate::tr_args(
+                                "attachment-markdown",
+                                &[
+                                    ("name", code_span_label(&filename)),
+                                    ("size", content.len().to_string()),
+                                    ("reason", reason.to_string())
+                                ]
+                            )
                         ));
                         assets.push(crate::domain::asset::Asset::new(&filename, content));
                     }
@@ -240,7 +248,7 @@ impl Converter for ZipConverter {
         }
 
         let markdown = if markdown_parts.is_empty() {
-            "*ZIP archive contains no convertible files.*\n".to_string()
+            format!("{}\n", crate::tr("zip-no-convertible-files"))
         } else {
             markdown_parts.join("\n")
         };
@@ -278,17 +286,24 @@ fn extract_zip_contents(
     bytes: &[u8],
     max_entry_size: Option<usize>,
 ) -> Result<Extracted, AlchemizeError> {
-    let mut archive = ZipArchive::new(Cursor::new(bytes))
-        .map_err(|e| AlchemizeError::Zip(format!("failed to open ZIP archive: {e}")))?;
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|e| {
+        AlchemizeError::Zip(crate::tr_args(
+            "failed-to-open-zip-archive",
+            &[("source", e.to_string())],
+        ))
+    })?;
 
     let mut files = Vec::new();
     let mut oversize = Vec::new();
     let mut total_extracted: usize = 0;
 
     for i in 0..archive.len() {
-        let file = archive
-            .by_index(i)
-            .map_err(|e| AlchemizeError::Zip(format!("failed to read ZIP entry {i}: {e}")))?;
+        let file = archive.by_index(i).map_err(|e| {
+            AlchemizeError::Zip(crate::tr_args(
+                "failed-to-read-zip-entry",
+                &[("index", i.to_string()), ("source", e.to_string())],
+            ))
+        })?;
 
         if file.is_dir() {
             continue;
@@ -296,7 +311,12 @@ fn extract_zip_contents(
 
         let filename = file
             .name()
-            .map_err(|e| AlchemizeError::Zip(format!("failed to read ZIP entry name {i}: {e}")))?
+            .map_err(|e| {
+                AlchemizeError::Zip(crate::tr_args(
+                    "failed-to-read-zip-entry-name",
+                    &[("index", i.to_string()), ("source", e.to_string())],
+                ))
+            })?
             .to_string();
 
         // Hidden-file filter on the basename: a nested dotfile like
@@ -317,9 +337,12 @@ fn extract_zip_contents(
 
         let limit = max_entry_size.unwrap_or(usize::MAX).saturating_add(1) as u64;
         let mut content = Vec::new();
-        file.take(limit)
-            .read_to_end(&mut content)
-            .map_err(|e| AlchemizeError::Zip(format!("failed to read file content: {e}")))?;
+        file.take(limit).read_to_end(&mut content).map_err(|e| {
+            AlchemizeError::Zip(crate::tr_args(
+                "failed-to-read-file-content",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         if max_entry_size.is_some_and(|max| content.len() > max) {
             oversize.push(filename);
@@ -328,8 +351,9 @@ fn extract_zip_contents(
 
         total_extracted = total_extracted.saturating_add(content.len());
         if total_extracted > MAX_TOTAL_EXTRACTED_BYTES {
-            return Err(AlchemizeError::Zip(format!(
-                "cumulative extracted size exceeds {MAX_TOTAL_EXTRACTED_BYTES} bytes — aborting (possible decompression bomb)"
+            return Err(AlchemizeError::Zip(crate::tr_args(
+                "zip-cumulative-exceeded",
+                &[("limit", MAX_TOTAL_EXTRACTED_BYTES.to_string())],
             )));
         }
 

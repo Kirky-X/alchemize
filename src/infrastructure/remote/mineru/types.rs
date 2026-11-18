@@ -69,7 +69,7 @@ impl TaskId {
     pub(super) fn new(s: String) -> Result<Self, crate::domain::error::AlchemizeError> {
         if s.is_empty() {
             return Err(crate::domain::error::AlchemizeError::MineruUnavailable(
-                "MinerU returned an empty task_id".to_string(),
+                crate::tr("mineru-empty-task-id"),
             ));
         }
         if !s
@@ -77,7 +77,7 @@ impl TaskId {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
             return Err(crate::domain::error::AlchemizeError::MineruUnavailable(
-                format!("MinerU returned a task_id with disallowed characters: {s}"),
+                crate::tr_args("mineru-task-id-disallowed", &[("id", s.to_string())]),
             ));
         }
         Ok(Self(s))

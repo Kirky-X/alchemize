@@ -82,10 +82,12 @@ impl Converter for CsvConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read CSV input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-csv-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let (decoded, encoding_name) = detect_encoding(&bytes);
         let ext = input.extension().unwrap_or_default();
@@ -103,8 +105,12 @@ impl Converter for CsvConverter {
                 .flexible(true)
                 .from_reader(decoded.as_bytes());
             for result in probe.records() {
-                let record =
-                    result.map_err(|e| AlchemizeError::other(format!("CSV parse error: {e}")))?;
+                let record = result.map_err(|e| {
+                    AlchemizeError::other(crate::tr_args(
+                        "csv-parse-error",
+                        &[("source", e.to_string())],
+                    ))
+                })?;
                 data_width = data_width.max(record.len());
             }
         }
@@ -115,9 +121,12 @@ impl Converter for CsvConverter {
             .flexible(true)
             .from_reader(decoded.as_bytes());
 
-        let headers = reader
-            .headers()
-            .map_err(|e| AlchemizeError::other(format!("failed to read CSV headers: {e}")))?;
+        let headers = reader.headers().map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-csv-headers",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let mut header_vec: Vec<String> = headers.iter().map(|s| s.to_string()).collect();
         let col_count = header_vec.len().max(data_width);
@@ -152,8 +161,12 @@ impl Converter for CsvConverter {
         // Pass 2: emit rows one at a time.
         let mut row_count = 0usize;
         for result in reader.records() {
-            let record =
-                result.map_err(|e| AlchemizeError::other(format!("CSV parse error: {e}")))?;
+            let record = result.map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "csv-parse-error",
+                    &[("source", e.to_string())],
+                ))
+            })?;
             let mut padded: Vec<String> = record.iter().map(|s| s.to_string()).collect();
             padded.resize(col_count, String::new());
             push_row(format!("| {} |", padded.join(" | ")), &mut output_bytes)?;

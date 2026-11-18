@@ -14,28 +14,40 @@ use sha2::{Digest, Sha256};
 /// markdown reference from the written file.
 pub fn validate_asset_filename(filename: &str) -> Result<(), String> {
     if filename.is_empty() {
-        return Err("empty asset filename".into());
+        return Err(crate::tr("empty-asset-filename"));
     }
     if filename.contains('\0') {
-        return Err("asset filename contains NUL".into());
+        return Err(crate::tr("asset-filename-contains-nul"));
     }
     if filename.contains('\\') {
-        return Err("asset filename contains backslash".into());
+        return Err(crate::tr("asset-filename-contains-backslash"));
     }
     if filename.starts_with('/') || filename.contains(r":\") {
-        return Err(format!("absolute asset filename: {filename:?}"));
+        return Err(crate::tr_args(
+            "absolute-asset-filename",
+            &[("filename", format!("{filename:?}"))],
+        ));
     }
     // Colons are rejected anywhere: Windows drive prefixes ("C:...") and
     // NTFS alternate data streams ("a:b") must not reach the write boundary.
     if filename.contains(':') {
-        return Err(format!("colon in asset filename: {filename:?}"));
+        return Err(crate::tr_args(
+            "colon-in-asset-filename",
+            &[("filename", format!("{filename:?}"))],
+        ));
     }
     for component in filename.split('/') {
         if component.is_empty() {
-            return Err(format!("empty path component in {filename:?}"));
+            return Err(crate::tr_args(
+                "empty-path-component-in-filename",
+                &[("filename", format!("{filename:?}"))],
+            ));
         }
         if component == "." || component == ".." {
-            return Err(format!("path traversal component in {filename:?}"));
+            return Err(crate::tr_args(
+                "path-traversal-component-in-filename",
+                &[("filename", format!("{filename:?}"))],
+            ));
         }
     }
     Ok(())

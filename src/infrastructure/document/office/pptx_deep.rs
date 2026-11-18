@@ -55,14 +55,21 @@ impl Converter for PptxDeepConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read PPTX input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-pptx-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let result = tokio::task::spawn_blocking(move || parse(&bytes))
             .await
-            .map_err(|e| AlchemizeError::other(format!("pptx-deep task panicked: {e}")))?;
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "pptx-deep-task-panicked",
+                    &[("source", e.to_string())],
+                ))
+            })?;
 
         let parsed = result?;
         let slide_count = parsed.slide_count;
@@ -123,8 +130,12 @@ pub struct ParsedPptx {
 
 /// Parse PPTX bytes into the unified model.
 pub fn parse(bytes: &[u8]) -> Result<ParsedPptx, AlchemizeError> {
-    let mut zip = zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(|e| AlchemizeError::Zip(format!("failed to open PPTX: {e}")))?;
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| {
+        AlchemizeError::Zip(crate::tr_args(
+            "failed-to-open-pptx",
+            &[("source", e.to_string())],
+        ))
+    })?;
 
     // Slide and note parts, sorted numerically: slide10 sorts after slide2.
     let slide_parts = numbered_parts(&mut zip, "ppt/slides/slide", ".xml")?;
@@ -273,9 +284,12 @@ fn read_part(
     zip: &mut zip::ZipArchive<Cursor<&[u8]>>,
     name: &str,
 ) -> Result<Vec<u8>, AlchemizeError> {
-    let mut file = zip
-        .by_name(name)
-        .map_err(|e| AlchemizeError::Zip(format!("part {name} not found: {e}")))?;
+    let mut file = zip.by_name(name).map_err(|e| {
+        AlchemizeError::Zip(crate::tr_args(
+            "part-not-found",
+            &[("name", name.to_string()), ("source", e.to_string())],
+        ))
+    })?;
     crate::infrastructure::document::shared::read_part_limited(&mut file, name)
 }
 
@@ -457,7 +471,12 @@ fn parse_slide(
     loop {
         let event = match reader.read_event_into(&mut buf) {
             Ok(ev) => ev,
-            Err(e) => return Err(AlchemizeError::Xml(format!("slide parse error: {e}"))),
+            Err(e) => {
+                return Err(AlchemizeError::Xml(crate::tr_args(
+                    "slide-parse-error",
+                    &[("source", e.to_string())],
+                )));
+            }
         };
         match event {
             Event::Eof => break,

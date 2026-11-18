@@ -87,15 +87,22 @@ impl Converter for MsgConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read MSG input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-msg-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         // CFB 解析 + MIME 重建是 CPU 密集段，与 pdf/chm 一致包 spawn_blocking。
         tokio::task::spawn_blocking(move || convert_sync(bytes))
             .await
-            .map_err(|e| AlchemizeError::other(format!("MSG extraction task failed: {e}")))?
+            .map_err(|e| {
+                AlchemizeError::other(crate::tr_args(
+                    "msg-extraction-task-failed",
+                    &[("source", e.to_string())],
+                ))
+            })?
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -114,8 +121,12 @@ impl Converter for MsgConverter {
 /// The whole (synchronous) MSG conversion: MAPI read → MIME rebuild → the
 /// shared eml renderer. Runs on the blocking pool.
 fn convert_sync(bytes: Vec<u8>) -> Result<ConvertResult, AlchemizeError> {
-    let mut cf = cfb::CompoundFile::open(Cursor::new(bytes))
-        .map_err(|e| AlchemizeError::other(format!("MSG compound file open failed: {e}")))?;
+    let mut cf = cfb::CompoundFile::open(Cursor::new(bytes)).map_err(|e| {
+        AlchemizeError::other(crate::tr_args(
+            "msg-compound-file-open-failed",
+            &[("source", e.to_string())],
+        ))
+    })?;
 
     let props = read_prop_records(&mut cf, "/")?;
     let codepage = inline_u32(&props, MESSAGE_CODEPAGE, PT_I4).unwrap_or(65001);
@@ -369,9 +380,12 @@ fn read_prop_records(
         return Ok(Vec::new());
     };
     let mut bytes = Vec::new();
-    stream
-        .read_to_end(&mut bytes)
-        .map_err(|e| AlchemizeError::other(format!("MSG properties read failed: {e}")))?;
+    stream.read_to_end(&mut bytes).map_err(|e| {
+        AlchemizeError::other(crate::tr_args(
+            "msg-properties-read-failed",
+            &[("source", e.to_string())],
+        ))
+    })?;
     let mut records = Vec::new();
     let (chunks, rest) = bytes.as_chunks::<16>();
     if !rest.is_empty() {

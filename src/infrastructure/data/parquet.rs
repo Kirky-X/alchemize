@@ -40,13 +40,19 @@ impl Converter for ParquetConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::other(format!("failed to read parquet input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-parquet-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
-        let reader = SerializedFileReader::new(Bytes::from(bytes))
-            .map_err(|e| AlchemizeError::other(format!("failed to open parquet file: {e}")))?;
+        let reader = SerializedFileReader::new(Bytes::from(bytes)).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-open-parquet-file",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let meta = reader.metadata();
         let total_rows = meta.file_metadata().num_rows();
@@ -58,9 +64,12 @@ impl Converter for ParquetConverter {
             .map(|c| c.name().to_string())
             .collect();
 
-        let iter = reader
-            .get_row_iter(None)
-            .map_err(|e| AlchemizeError::other(format!("failed to read parquet rows: {e}")))?;
+        let iter = reader.get_row_iter(None).map_err(|e| {
+            AlchemizeError::other(crate::tr_args(
+                "failed-to-read-parquet-rows",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let mut rows: Vec<Vec<String>> = Vec::new();
         let mut truncated = false;
@@ -70,7 +79,10 @@ impl Converter for ParquetConverter {
                 break;
             }
             let row = row.map_err(|e| {
-                AlchemizeError::other(format!("failed to read parquet row {}: {e}", rows.len()))
+                AlchemizeError::other(crate::tr_args(
+                    "failed-to-read-parquet-row-n",
+                    &[("n", rows.len().to_string()), ("source", e.to_string())],
+                ))
             })?;
             let cells: Vec<String> = row
                 .get_column_iter()

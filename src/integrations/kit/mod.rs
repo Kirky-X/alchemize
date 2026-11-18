@@ -167,7 +167,10 @@ impl AsyncAutoBuilder for ConverterModule {
     ) -> Pin<Box<dyn Future<Output = Result<Self::Capability, Self::Error>> + Send + 'a>> {
         Box::pin(async move {
             let alchemize = kit.require::<AlchemizeModule>().map_err(|e| {
-                AlchemizeError::Other(format!("ConverterModule: require alchemize: {e}"))
+                AlchemizeError::Other(crate::tr_args(
+                    "converter-module-require-failed",
+                    &[("source", e.to_string())],
+                ))
             })?;
             Ok(ConverterHandle { alchemize })
         })

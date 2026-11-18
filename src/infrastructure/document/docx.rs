@@ -42,10 +42,12 @@ impl Converter for DocxConverter {
     }
 
     async fn convert(&self, input: Input) -> Result<ConvertResult, AlchemizeError> {
-        let bytes = input
-            .to_bytes()
-            .await
-            .map_err(|e| AlchemizeError::Other(format!("failed to read DOCX input: {e}")))?;
+        let bytes = input.to_bytes().await.map_err(|e| {
+            AlchemizeError::Other(crate::tr_args(
+                "failed-to-read-docx-input",
+                &[("source", e.to_string())],
+            ))
+        })?;
 
         let mut archive = ZipArchive::new(std::io::Cursor::new(bytes))
             .map_err(|e| AlchemizeError::Zip(format!("{e}")))?;
@@ -53,9 +55,12 @@ impl Converter for DocxConverter {
         // Keep the Cow: valid UTF-8 borrows, only lossy input allocates a
         // replacement (matches the pptx shallow reader).
         let xml_content = {
-            let mut doc_file = archive
-                .by_name("word/document.xml")
-                .map_err(|e| AlchemizeError::Zip(format!("word/document.xml not found: {e}")))?;
+            let mut doc_file = archive.by_name("word/document.xml").map_err(|e| {
+                AlchemizeError::Zip(crate::tr_args(
+                    "word-document-xml-not-found",
+                    &[("source", e.to_string())],
+                ))
+            })?;
             let bytes = crate::infrastructure::document::shared::read_part_limited(
                 &mut doc_file,
                 "word/document.xml",
@@ -150,9 +155,12 @@ fn extract_paragraphs_from_docx_xml(xml: &str) -> Result<Vec<String>, AlchemizeE
             Ok(Event::Text(_)) => {}
             Ok(Event::Eof) => break,
             Err(e) => {
-                return Err(AlchemizeError::Xml(format!(
-                    "XML parse error at position {}: {e}",
-                    reader.error_position()
+                return Err(AlchemizeError::Xml(crate::tr_args(
+                    "xml-parse-error-at-position",
+                    &[
+                        ("position", reader.error_position().to_string()),
+                        ("source", e.to_string()),
+                    ],
                 )));
             }
             _ => {}

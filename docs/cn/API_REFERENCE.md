@@ -230,7 +230,7 @@ pub trait TranscribeProvider: Send + Sync {
 }
 ```
 
-输入为 16kHz 单声道 WAV 字节。`Transcript { language, duration, segments: Vec<TranscriptSegment{start_sec, end_sec, text}> }`；`full_text()` 拼接段文本；`DISCLAIMER` 常量声明「分段由 VAD 产生，非说话人识别」。
+输入为 16kHz 单声道 WAV 字节。`Transcript { language, duration, segments: Vec<TranscriptSegment{start_sec, end_sec, text}> }`；`full_text()` 拼接段文本；`disclaimer()` 方法返回经 Fluent 目录本地化的免责声明（中英均含 "VAD"，声明分段来自 VAD、非说话人识别）。
 
 ### ExternalTool Trait
 
