@@ -22,9 +22,10 @@ use super::http_limit::{
     read_limited_json, read_limited_text, truncate_body,
 };
 use super::validated_url::validate_base_url;
-use crate::application::ports::Converter;
+use crate::application::ports::{Converter, EngineProvenanceDescriptor};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
+use crate::domain::provenance::NetworkEgress;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 
 // Configuration
@@ -332,6 +333,26 @@ impl Converter for MinerUConverter {
     fn priority(&self) -> u8 {
         5
     }
+
+    /// Data leaves this process: uploads go to the configured MinerU endpoint
+    /// and results come back via presigned download URLs.
+    fn provenance_descriptor(&self) -> EngineProvenanceDescriptor {
+        EngineProvenanceDescriptor {
+            network_egress: Some(NetworkEgress {
+                endpoint_host: endpoint_host_of(&self.config.base_url),
+                presigned: true,
+            }),
+            ..EngineProvenanceDescriptor::default()
+        }
+    }
+}
+
+/// Extract the host (no scheme/port/path/query/credentials) from a base URL.
+fn endpoint_host_of(base_url: &str) -> String {
+    reqwest::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .unwrap_or_else(|| base_url.to_string())
 }
 
 // Tests
@@ -363,6 +384,23 @@ mod tests {
     fn supported_extensions_is_pdf() {
         let converter = MinerUConverter::new(MinerUHttpConfig::default()).unwrap();
         assert_eq!(converter.supported_extensions(), &["pdf"]);
+    }
+
+    /// The descriptor declares the configured endpoint host only — never the
+    /// full URL (path/query could carry credentials).
+    #[test]
+    fn provenance_descriptor_declares_endpoint_host_only() {
+        let converter =
+            MinerUConverter::new(MinerUHttpConfig::new("http://mineru.example:8888")).unwrap();
+        let d = converter.provenance_descriptor();
+        let egress = d.network_egress.expect("mineru must declare egress");
+        assert_eq!(egress.endpoint_host, "mineru.example");
+        assert!(!egress.endpoint_host.contains('/'));
+        assert!(!egress.endpoint_host.contains('?'));
+        assert!(!egress.endpoint_host.contains(':'));
+        assert!(egress.presigned);
+        assert!(d.external_tools.is_empty());
+        assert!(d.model_bundles.is_empty());
     }
 
     #[test]
