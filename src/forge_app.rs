@@ -293,15 +293,17 @@ async fn convert(
     }
 }
 
-/// Report engine availability.
+/// Report engine availability; `security = true` appends the build's
+/// security posture (parse surfaces / network egress / subprocesses /
+/// budgets).
 #[forge(
     name = "doctor",
-    version = "1.0",
+    version = "1.1",
     description = "Report engine availability",
     cli = true,
     tool_name = "doctor"
 )]
-async fn doctor() -> Result<String, ApiError> {
+async fn doctor(security: bool) -> Result<String, ApiError> {
     let alch = build_alch(false, AssetMode::Dir, None, false);
     let mut lines: Vec<String> = Vec::new();
     for (name, exts, availability) in alch.availability() {
@@ -314,7 +316,101 @@ async fn doctor() -> Result<String, ApiError> {
             }
         }
     }
+    if security {
+        lines.push(String::new());
+        lines.extend(render_security_posture(&alch));
+    }
     Ok(lines.join("\n"))
+}
+
+/// Render the four posture sections (one line each + detail lines), with
+/// ✓/!/✗ prefixes matching SECURITY.md's visual language.
+fn render_security_posture(alch: &alchemize::application::builder::Alchemize) -> Vec<String> {
+    use alchemize::application::posture::{
+        EgressStatus, SecurityPosture, ToolKind, collect_posture,
+    };
+    let p: SecurityPosture = collect_posture(alch);
+    let mut lines = Vec::new();
+
+    lines.push(format!(
+        "Parse surfaces:    {}",
+        if p.parse_surfaces.is_empty() {
+            "NONE".to_string()
+        } else {
+            p.parse_surfaces.join(", ")
+        }
+    ));
+
+    match &p.network_egress {
+        EgressStatus::UnavailableCompiledOut => {
+            lines.push("Network egress:    ✗ NONE (pdf-cloud not compiled)".to_string());
+        }
+        EgressStatus::Ready {
+            endpoint_host,
+            token_present,
+        } => match endpoint_host {
+            Some(host) => {
+                lines.push(format!(
+                    "Network egress:    ! MinerU cloud -> {host} (HTTPS-only, SSRF-validated, no redirects)"
+                ));
+                lines.push(format!(
+                    "  token:           {}",
+                    if *token_present {
+                        "✓ present"
+                    } else {
+                        "! NOT SET (precision API unavailable)"
+                    }
+                ));
+            }
+            None => {
+                lines.push(
+                    "Network egress:    ✓ NONE (pdf-cloud compiled, ALCHEMIZE_MINERU_URL unset — engine not registered)"
+                        .to_string(),
+                );
+                lines.push(format!(
+                    "  token:           {}",
+                    if *token_present {
+                        "✓ present"
+                    } else {
+                        "! NOT SET"
+                    }
+                ));
+            }
+        },
+    }
+
+    lines.push("External subprocesses:".to_string());
+    for (tool, available) in &p.subprocesses {
+        let name = match tool {
+            ToolKind::Pandoc => "pandoc",
+            ToolKind::LibreOffice => "soffice",
+            ToolKind::Sips => "sips",
+            ToolKind::Ffmpeg => "ffmpeg",
+        };
+        lines.push(format!(
+            "  {name:<15} {}",
+            if *available {
+                "✓ on PATH"
+            } else {
+                "✗ not found"
+            }
+        ));
+    }
+
+    lines.push("Budgets:".to_string());
+    for (name, limit) in p.budgets {
+        lines.push(format!("  {name:<44} {}", format_bytes(*limit)));
+    }
+    lines
+}
+
+/// Format a byte count for the posture report (KiB/MiB units).
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{} MiB", bytes / (1024 * 1024))
+    } else {
+        format!("{} KiB", bytes / 1024)
+    }
 }
 
 /// List supported extensions.
@@ -340,6 +436,41 @@ async fn formats() -> Result<String, ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `security = false` keeps the availability-only output byte-identical
+    /// (the posture block is strictly additive).
+    #[tokio::test]
+    async fn doctor_without_security_matches_availability_lines() {
+        let out = doctor(false).await.unwrap();
+        let alch = build_alch(false, AssetMode::Dir, None, false);
+        let mut expected: Vec<String> = Vec::new();
+        for (name, exts, availability) in alch.availability() {
+            match availability {
+                Availability::Available => {
+                    expected.push(format!("{name:<16} AVAILABLE   {}", exts.join(",")));
+                }
+                Availability::Unavailable { reason } => {
+                    expected.push(format!("{name:<16} UNAVAILABLE {reason}"));
+                }
+            }
+        }
+        assert_eq!(out, expected.join("\n"));
+        assert!(!out.contains("Network egress"));
+    }
+
+    /// `security = true` appends all four posture sections.
+    #[tokio::test]
+    async fn doctor_with_security_appends_posture_sections() {
+        let out = doctor(true).await.unwrap();
+        assert!(out.contains("Network egress"), "{out}");
+        assert!(out.contains("Parse surfaces:"), "{out}");
+        assert!(out.contains("External subprocesses:"), "{out}");
+        assert!(out.contains("Budgets:"), "{out}");
+        // The token status line only exists when the egress engine is
+        // compiled in (pdf-cloud); guard the assertion accordingly.
+        #[cfg(feature = "pdf-cloud")]
+        assert!(out.contains("token:"), "{out}");
+    }
 
     #[test]
     fn sanitize_ext_replaces_controls_and_bidi() {

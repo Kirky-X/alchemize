@@ -5,6 +5,7 @@
 
 pub mod builder;
 pub mod ports;
+pub mod posture;
 pub mod registry;
 
 pub use builder::{Alchemize, AlchemizeBuilder, AssetMode, MineruConfig};
