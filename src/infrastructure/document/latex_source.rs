@@ -7,9 +7,10 @@
 
 use async_trait::async_trait;
 
-use crate::application::ports::{Availability, Converter};
+use crate::application::ports::{Availability, Converter, EngineProvenanceDescriptor};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
+use crate::domain::provenance::{ExternalToolKind, ProvenanceEnvelope, SanitizationSummary};
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 use crate::infrastructure::document::shared::fence_for;
 
@@ -57,12 +58,22 @@ impl Converter for LatexSourceConverter {
             let fence = fence_for(&latex);
             let markdown = format!("{fence}latex\n{latex}\n{fence}\n");
             let warnings = crate::domain::latex_validate::validate_markdown_math(&markdown);
+            // Fence reinforcement is an engine-applied output transform:
+            // declare it on the result (the registry merges it into the
+            // envelope).
             return Ok(ConvertResult::with_metadata(
                 markdown,
                 ContentType::Document,
                 serde_json::json!({"source_format": "tex", "engine": "fenced-fallback", "latex_warnings": warnings}),
             )
-            .with_quality(ConversionQuality::LocalFallback));
+            .with_quality(ConversionQuality::LocalFallback)
+            .with_provenance(ProvenanceEnvelope {
+                sanitization: SanitizationSummary {
+                    fence_reinforced: true,
+                    ..SanitizationSummary::default()
+                },
+                ..ProvenanceEnvelope::default()
+            }));
         }
 
         let media_dir = tempfile::tempdir()
@@ -108,6 +119,15 @@ impl Converter for LatexSourceConverter {
         // fenced LaTeX block (quality LocalFallback). Unavailable is reserved
         // for engines that cannot produce output at all.
         Availability::Available
+    }
+
+    /// Drives the pandoc child process when available (the fenced fallback
+    /// path runs no subprocess).
+    fn provenance_descriptor(&self) -> EngineProvenanceDescriptor {
+        EngineProvenanceDescriptor {
+            external_tools: vec![ExternalToolKind::Pandoc],
+            ..EngineProvenanceDescriptor::default()
+        }
     }
 }
 
@@ -552,6 +572,14 @@ mod tests {
             LatexSourceConverter::new().supported_extensions(),
             &["tex", "latex"]
         );
+    }
+
+    #[test]
+    fn provenance_descriptor_declares_pandoc() {
+        let d = LatexSourceConverter::new().provenance_descriptor();
+        assert_eq!(d.external_tools, vec![ExternalToolKind::Pandoc]);
+        assert!(d.network_egress.is_none());
+        assert!(d.model_bundles.is_empty());
     }
 
     // -- normalize_pandoc_math ------------------------------------------------

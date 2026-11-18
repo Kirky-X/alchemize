@@ -11,10 +11,13 @@
 
 use async_trait::async_trait;
 
-use crate::application::ports::{Availability, Converter, which_program};
+use crate::application::ports::{
+    Availability, Converter, EngineProvenanceDescriptor, which_program,
+};
 use crate::domain::asset::Asset;
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
+use crate::domain::provenance::ExternalToolKind;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 
 /// HEIC/HEIF converter backed by the OS image decoder.
@@ -129,6 +132,15 @@ impl Converter for HeicConverter {
         // Always produces output (metadata-only when no decoder exists).
         Availability::Available
     }
+
+    /// Decoding drives the macOS `sips` child process (the metadata-only
+    /// degraded path runs no subprocess).
+    fn provenance_descriptor(&self) -> EngineProvenanceDescriptor {
+        EngineProvenanceDescriptor {
+            external_tools: vec![ExternalToolKind::Sips],
+            ..EngineProvenanceDescriptor::default()
+        }
+    }
 }
 
 /// Decode HEIC bytes to PNG with `sips`.
@@ -230,6 +242,14 @@ pub mod ifd {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provenance_descriptor_declares_sips() {
+        let d = HeicConverter::new().provenance_descriptor();
+        assert_eq!(d.external_tools, vec![ExternalToolKind::Sips]);
+        assert!(d.network_egress.is_none());
+        assert!(d.model_bundles.is_empty());
+    }
 
     /// A minimal ISOBMFF header with an `ispe` box (1920×1080).
     fn fake_heic() -> Vec<u8> {

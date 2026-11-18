@@ -12,9 +12,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::application::ports::Converter;
+use crate::application::ports::{Converter, EngineProvenanceDescriptor};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
+use crate::domain::provenance::ExternalToolKind;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 
 /// Supported video file extensions.
@@ -207,6 +208,15 @@ impl Converter for VideoConverter {
     fn supported_extensions(&self) -> &[&str] {
         VIDEO_EXTENSIONS
     }
+
+    /// Audio extraction drives the ffmpeg child process (the metadata-only
+    /// degraded path runs no subprocess).
+    fn provenance_descriptor(&self) -> EngineProvenanceDescriptor {
+        EngineProvenanceDescriptor {
+            external_tools: vec![ExternalToolKind::Ffmpeg],
+            ..EngineProvenanceDescriptor::default()
+        }
+    }
 }
 
 impl VideoConverter {
@@ -392,6 +402,14 @@ impl VideoConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provenance_descriptor_declares_ffmpeg() {
+        let d = VideoConverter::new(VideoProcessingMode::AudioOnly).provenance_descriptor();
+        assert_eq!(d.external_tools, vec![ExternalToolKind::Ffmpeg]);
+        assert!(d.network_egress.is_none());
+        assert!(d.model_bundles.is_empty());
+    }
 
     #[test]
     fn supports_video_extensions() {

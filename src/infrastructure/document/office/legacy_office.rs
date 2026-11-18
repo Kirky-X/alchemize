@@ -12,9 +12,10 @@
 
 use async_trait::async_trait;
 
-use crate::application::ports::{Availability, Converter};
+use crate::application::ports::{Availability, Converter, EngineProvenanceDescriptor};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
+use crate::domain::provenance::ExternalToolKind;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 use crate::infrastructure::tools::libreoffice::LibreOfficeTool;
 
@@ -123,6 +124,14 @@ impl Converter for LegacyOfficeConverter {
         15
     }
 
+    /// Drives the LibreOffice (soffice) child process for the first hop.
+    fn provenance_descriptor(&self) -> EngineProvenanceDescriptor {
+        EngineProvenanceDescriptor {
+            external_tools: vec![ExternalToolKind::LibreOffice],
+            ..EngineProvenanceDescriptor::default()
+        }
+    }
+
     fn availability(&self) -> Availability {
         if LibreOfficeTool::on_path() {
             Availability::Available
@@ -223,6 +232,14 @@ impl Converter for LegacyPptConverter {
         15
     }
 
+    /// Drives the LibreOffice (soffice) child process for the first hop.
+    fn provenance_descriptor(&self) -> EngineProvenanceDescriptor {
+        EngineProvenanceDescriptor {
+            external_tools: vec![ExternalToolKind::LibreOffice],
+            ..EngineProvenanceDescriptor::default()
+        }
+    }
+
     fn availability(&self) -> Availability {
         if LibreOfficeTool::on_path() {
             Availability::Available
@@ -237,6 +254,17 @@ impl Converter for LegacyPptConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provenance_descriptor_declares_libreoffice() {
+        let d = LegacyOfficeConverter::new().provenance_descriptor();
+        assert_eq!(d.external_tools, vec![ExternalToolKind::LibreOffice]);
+        assert!(d.network_egress.is_none());
+        assert!(d.model_bundles.is_empty());
+
+        let d2 = LegacyPptConverter::new().provenance_descriptor();
+        assert_eq!(d2.external_tools, vec![ExternalToolKind::LibreOffice]);
+    }
 
     #[test]
     fn legacy_converter_contract() {

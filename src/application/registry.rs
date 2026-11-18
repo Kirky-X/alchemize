@@ -193,12 +193,20 @@ impl ConverterRegistry {
                     }
                     // Assemble the provenance envelope: the full step chain
                     // (skips and failures included) plus the used engine's
-                    // trust-origin declaration.
+                    // trust-origin declaration. Engines may pre-fill the
+                    // sanitization summary on the result (fence reinforcement,
+                    // link absolutization) — preserve it through assembly.
                     attempts.push(EngineStep {
                         engine: converter.name().to_string(),
                         outcome: StepOutcome::Used,
                     });
-                    result.provenance = Some(assemble_envelope(*converter, &attempts));
+                    let mut envelope = assemble_envelope(*converter, &attempts);
+                    envelope.sanitization = result
+                        .provenance
+                        .take()
+                        .map(|p| p.sanitization)
+                        .unwrap_or_default();
+                    result.provenance = Some(envelope);
                     return Ok(result);
                 }
                 Err(e) => {
@@ -359,12 +367,19 @@ impl ConverterRegistry {
                         }
                     }
                     // Envelope assembly mirrors the async twin: full chain
-                    // plus the used engine's descriptor.
+                    // plus the used engine's descriptor. A pre-filled
+                    // sanitization summary survives assembly (same merge).
                     attempts.push(EngineStep {
                         engine: converter.name().to_string(),
                         outcome: StepOutcome::Used,
                     });
-                    result.provenance = Some(assemble_envelope(*converter, &attempts));
+                    let mut envelope = assemble_envelope(*converter, &attempts);
+                    envelope.sanitization = result
+                        .provenance
+                        .take()
+                        .map(|p| p.sanitization)
+                        .unwrap_or_default();
+                    result.provenance = Some(envelope);
                     return Ok(result);
                 }
                 Err(e) => {

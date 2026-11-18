@@ -301,6 +301,26 @@ impl HtmlDeepConverter {
     /// 全页引擎转换 → 兜底决策。async `convert` 与同步口 `convert_sync`
     /// 在 UTF-8 解码后都委托到这里——两端口共享同一函数体，输出逐字节
     /// 相同由构造保证。
+    /// Whether this instance absolutizes links (explicit non-empty base_url).
+    fn absolutizes(&self) -> bool {
+        self.base_url.as_deref().is_some_and(|b| !b.is_empty())
+    }
+
+    /// Attach the links-absolutized declaration to a result produced from
+    /// absolutized HTML (the registry merges it into the envelope).
+    fn declare_absolutized(&self, result: ConvertResult) -> ConvertResult {
+        if !self.absolutizes() {
+            return result;
+        }
+        result.with_provenance(crate::domain::provenance::ProvenanceEnvelope {
+            sanitization: crate::domain::provenance::SanitizationSummary {
+                links_absolutized: true,
+                ..crate::domain::provenance::SanitizationSummary::default()
+            },
+            ..crate::domain::provenance::ProvenanceEnvelope::default()
+        })
+    }
+
     pub(crate) fn convert_html(&self, html: &str) -> Result<ConvertResult, AlchemizeError> {
         // math 保真路由：引擎会展平 `<math>`（MathML 净化为行内 HTML，非
         // LaTeX）；检测条件与 html.rs preprocess_math 的触发条件（`<math`
@@ -340,15 +360,17 @@ impl HtmlDeepConverter {
                         (!text.is_empty()).then(|| escape_leading_markdown_chars(&text))
                     });
                     if let Some(markdown) = markdown {
-                        return Ok(ConvertResult::with_metadata(
-                            markdown,
-                            ContentType::Document,
-                            serde_json::json!({
-                                "source_format": "html",
-                                "main_content_extracted": true,
-                            }),
-                        )
-                        .with_quality(ConversionQuality::LocalFallback));
+                        return Ok(self.declare_absolutized(
+                            ConvertResult::with_metadata(
+                                markdown,
+                                ContentType::Document,
+                                serde_json::json!({
+                                    "source_format": "html",
+                                    "main_content_extracted": true,
+                                }),
+                            )
+                            .with_quality(ConversionQuality::LocalFallback),
+                        ));
                     }
                     // 双产皆空：诚实回退全页（不静默吞）。
                     tracing::warn!(
@@ -389,16 +411,20 @@ impl HtmlDeepConverter {
         if !primary.trim().is_empty() {
             let markdown = primary.trim().to_string() + "\n";
             let output_size = markdown.len();
-            return Ok(ConvertResult::with_metadata(
-                markdown,
-                ContentType::Document,
-                serde_json::json!({
-                    "source_format": "html",
-                    "original_size": html.len(),
-                    "output_size": output_size,
-                }),
-            )
-            .with_quality(ConversionQuality::LocalFull));
+            // Primary output derives from absolutized HTML; the htmd fallback
+            // below deliberately does NOT (it consumes the pre-rewrite source).
+            return Ok(self.declare_absolutized(
+                ConvertResult::with_metadata(
+                    markdown,
+                    ContentType::Document,
+                    serde_json::json!({
+                        "source_format": "html",
+                        "original_size": html.len(),
+                        "output_size": output_size,
+                    }),
+                )
+                .with_quality(ConversionQuality::LocalFull),
+            ));
         }
 
         if !has_visible_text(html) {
@@ -437,6 +463,23 @@ impl HtmlDeepConverter {
 mod tests {
     use super::*;
     use crate::application::ports::Converter as _;
+
+    /// 显式 base_url 的转换必须声明 links_absolutized；无 base_url 的
+    /// 结果不得声明（空集 = 未声明）。
+    #[test]
+    fn explicit_base_url_declares_links_absolutized() {
+        let conv = HtmlDeepConverter::new(Some("https://example.test/docs/".into()), false);
+        let result = conv
+            .convert_html("<p><a href=\"page.html\">x</a></p>")
+            .unwrap();
+        let prov = result.provenance.expect("provenance declared");
+        assert!(prov.sanitization.links_absolutized);
+        assert!(!prov.sanitization.fence_reinforced);
+
+        let plain = HtmlDeepConverter::new(None, false);
+        let result = plain.convert_html("<p>hi</p>").unwrap();
+        assert!(result.provenance.is_none());
+    }
 
     fn engine() -> HtmlDeepConverter {
         HtmlDeepConverter::new(None, false)

@@ -7,9 +7,10 @@
 
 use async_trait::async_trait;
 
-use crate::application::ports::{Availability, Converter};
+use crate::application::ports::{Availability, Converter, EngineProvenanceDescriptor};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
+use crate::domain::provenance::{ExternalToolKind, ProvenanceEnvelope, SanitizationSummary};
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
 use crate::infrastructure::document::shared::fence_for;
 use crate::infrastructure::tools::pandoc::PandocTool;
@@ -93,9 +94,19 @@ impl Converter for PandocGenericConverter {
                     "pandoc_unavailable": reason,
                     "encoding": encoding,
                 });
+                // The fence reinforcement is an engine-applied output
+                // transform: declare it on the result (the registry merges
+                // it into the envelope).
                 Ok(
                     ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
-                        .with_quality(ConversionQuality::LocalFallback),
+                        .with_quality(ConversionQuality::LocalFallback)
+                        .with_provenance(ProvenanceEnvelope {
+                            sanitization: SanitizationSummary {
+                                fence_reinforced: true,
+                                ..SanitizationSummary::default()
+                            },
+                            ..ProvenanceEnvelope::default()
+                        }),
                 )
             }
         }
@@ -125,6 +136,15 @@ impl Converter for PandocGenericConverter {
         // Always converts: without pandoc it degrades to a fenced block.
         Availability::Available
     }
+
+    /// Drives the pandoc child process when available (the degraded fence
+    /// fallback path runs no subprocess).
+    fn provenance_descriptor(&self) -> EngineProvenanceDescriptor {
+        EngineProvenanceDescriptor {
+            external_tools: vec![ExternalToolKind::Pandoc],
+            ..EngineProvenanceDescriptor::default()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +166,14 @@ mod tests {
         assert_eq!(c.name(), "pandoc-generic");
         assert_eq!(c.availability(), Availability::Available);
         assert!(c.supported_extensions().contains(&"org"));
+    }
+
+    #[test]
+    fn provenance_descriptor_declares_pandoc() {
+        let d = PandocGenericConverter::new().provenance_descriptor();
+        assert_eq!(d.external_tools, vec![ExternalToolKind::Pandoc]);
+        assert!(d.network_egress.is_none());
+        assert!(d.model_bundles.is_empty());
     }
 
     #[tokio::test]
