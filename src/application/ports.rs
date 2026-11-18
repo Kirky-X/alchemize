@@ -123,6 +123,30 @@ pub trait Converter: Send + Sync {
             &[("engine", self.name().to_string())],
         )))
     }
+
+    /// Static trust-origin declaration of this engine (input-independent).
+    ///
+    /// Default: a self-contained local engine (no network egress, no external
+    /// child process, no model bundle). Engines that ship data off-process —
+    /// cloud endpoints, pandoc/LibreOffice/sips/ffmpeg subprocesses, local
+    /// ASR model bundles — override to declare it; the registry aggregates
+    /// descriptors of used engines into the result's provenance envelope.
+    fn provenance_descriptor(&self) -> EngineProvenanceDescriptor {
+        EngineProvenanceDescriptor::default()
+    }
+}
+
+/// A converter's trust-origin declaration: what leaves this process when the
+/// engine runs. Aggregated (used engines only) into
+/// [`crate::domain::provenance::ProvenanceEnvelope`].
+#[derive(Debug, Clone, Default)]
+pub struct EngineProvenanceDescriptor {
+    /// Network destination this engine sends data to, if any.
+    pub network_egress: Option<crate::domain::provenance::NetworkEgress>,
+    /// External child processes this engine drives.
+    pub external_tools: Vec<crate::domain::provenance::ExternalToolKind>,
+    /// Local model bundle paths this engine depends on.
+    pub model_bundles: Vec<String>,
 }
 
 /// Vision provider port — image description and OCR.
@@ -330,6 +354,31 @@ mod tests {
             "engine name must surface: {msg}"
         );
         assert_eq!(err.kind(), "not_sync_capable");
+    }
+
+    /// Anonymous engines (no provenance override) declare an empty
+    /// descriptor — the self-contained default.
+    #[test]
+    fn provenance_descriptor_defaults_to_empty() {
+        struct Anonymous;
+        #[async_trait::async_trait]
+        impl Converter for Anonymous {
+            async fn convert(&self, _input: Input) -> Result<ConvertResult, AlchemizeError> {
+                unreachable!("not exercised by this test")
+            }
+            fn supported_extensions(&self) -> &[&str] {
+                &["pdf"]
+            }
+            fn name(&self) -> &'static str {
+                "anonymous"
+            }
+        }
+
+        let conv = Anonymous;
+        let d = conv.provenance_descriptor();
+        assert!(d.network_egress.is_none());
+        assert!(d.external_tools.is_empty());
+        assert!(d.model_bundles.is_empty());
     }
 
     #[test]
