@@ -220,6 +220,13 @@ pub trait TranscribeProvider: Send + Sync {
 
     /// Provider name for logging and engine selection.
     fn name(&self) -> &'static str;
+
+    /// Local model bundle paths this provider depends on (provenance
+    /// declaration). Default: nothing declared — an empty vec means the
+    /// provider cannot name a path, NOT that it uses no models.
+    fn model_bundle_paths(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// External binary tool port (pandoc / ffmpeg) — build-time absent, runtime probed.

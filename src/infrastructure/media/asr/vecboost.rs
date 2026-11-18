@@ -129,6 +129,11 @@ impl TranscribeProvider for VecboostTranscriber {
         })
     }
 
+    /// The configured bundle directory (provenance declaration).
+    fn model_bundle_paths(&self) -> Vec<String> {
+        vec![self.models_dir.display().to_string()]
+    }
+
     fn availability(&self) -> Availability {
         match resolve_models_dir() {
             Err(reason) => Availability::Unavailable { reason },

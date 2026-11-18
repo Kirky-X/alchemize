@@ -8,7 +8,7 @@
 
 use async_trait::async_trait;
 
-use crate::application::ports::Converter;
+use crate::application::ports::{Converter, EngineProvenanceDescriptor};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
 use crate::domain::result::{ContentType, ConversionQuality, ConvertResult};
@@ -116,11 +116,47 @@ impl Converter for AudioConverter {
     fn supported_extensions(&self) -> &[&str] {
         AUDIO_EXTENSIONS
     }
+
+    /// With an injected transcriber, transcription runs local model bundles;
+    /// the bundle path is whatever the provider declares (empty = provider
+    /// cannot name a path, not "no models").
+    fn provenance_descriptor(&self) -> EngineProvenanceDescriptor {
+        let model_bundles = self
+            .transcribe
+            .as_ref()
+            .map(|p| p.model_bundle_paths())
+            .unwrap_or_default();
+        EngineProvenanceDescriptor {
+            model_bundles,
+            ..EngineProvenanceDescriptor::default()
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provenance_descriptor_empty_without_transcriber() {
+        let d = AudioConverter::new().provenance_descriptor();
+        assert!(d.model_bundles.is_empty());
+        assert!(d.network_egress.is_none());
+        assert!(d.external_tools.is_empty());
+    }
+
+    /// Vecboost-backed transcriber names its configured bundle directory
+    /// (audio feature build).
+    #[cfg(feature = "audio")]
+    #[test]
+    fn provenance_descriptor_declares_vecboost_bundle() {
+        let provider = std::sync::Arc::new(
+            crate::infrastructure::media::asr::vecboost::VecboostTranscriber::new(),
+        );
+        let d = AudioConverter::with_transcriber(provider).provenance_descriptor();
+        assert!(!d.model_bundles.is_empty());
+        assert!(d.model_bundles[0].contains("transcribe"));
+    }
 
     #[test]
     fn supports_audio_extensions() {
