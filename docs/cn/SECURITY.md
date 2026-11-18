@@ -133,6 +133,13 @@ cargo update -d          # 更新漏洞通告数据库
 - Whisper 兼容云端后端：仅显式注入配置时激活，绝不默认启用。
 - 视觉模型：无内置 provider，需库使用者显式注入（无隐式云兜底）。
 
+### 产物信任边界（Output Trust Boundary）
+
+- **`ConvertResult.provenance`**：每次成功转换附带结构化安全出身（`ProvenanceEnvelope`）——完整引擎链 `engine_path`（含跳过/失败步骤）、最终引擎 `final_engine`、网络出口 `network_egress`（仅主机名，不含 path/query/凭据）、外部子进程 `external_tools`、本地模型 bundle `model_bundles`、输出变换声明 `sanitization`、汇聚信任等级 `trust_level`。
+- **TrustLevel 三级语义**：`self_contained`（纯本地 Rust 解析链：无外部进程、无网络）；`mixed`（经过外部子进程（pandoc/LibreOffice/sips/ffmpeg）或本地模型 bundle，但无网络出口）；`external_service`（数据离开本进程，如 MinerU 云端上传/下载）。
+- **净化是下游责任**：alchemize 不净化 Markdown 内容本身——下游（RAG 管道、Agent 工作流）按 `trust_level` 决策各自的 sanitize 策略（如 `external_service` 产物渲染前消毒、`self_contained` 产物可信任渲染）。
+- **`SanitizationSummary` 空集语义**：空集 = 引擎未声明该变换，**而非保证无变换**。仅引擎原生持有信息的路径（pandoc/LaTeX fence 兜底、html-deep 显式 base_url 链接绝对化）填充声明。
+
 ## ✅ 安全最佳实践
 
 ### 面向库使用者

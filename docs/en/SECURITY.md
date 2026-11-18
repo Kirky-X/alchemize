@@ -133,6 +133,13 @@ Preallocation is capped at 8 MB (no matter how large the declared Content-Length
 - Whisper-compatible cloud backend: activated only via explicit injected configuration, never by default.
 - Vision models: no built-in provider; library users must inject explicitly (no implicit cloud fallback).
 
+### Output Trust Boundary
+
+- **`ConvertResult.provenance`**: every successful conversion carries structured security provenance (`ProvenanceEnvelope`) — the full engine chain `engine_path` (skipped and failed steps included), the final engine `final_engine`, network egress `network_egress` (host only, never path/query/credentials), external child processes `external_tools`, local model bundles `model_bundles`, output-transform declarations `sanitization`, and the aggregated trust level `trust_level`.
+- **TrustLevel semantics**: `self_contained` (pure local Rust parsing chain: no external process, no network); `mixed` (went through an external child process (pandoc/LibreOffice/sips/ffmpeg) or a local model bundle, but no network egress); `external_service` (data left this process, e.g. the MinerU cloud upload/download path).
+- **Sanitization is the downstream consumer's responsibility**: alchemize does not sanitize the Markdown content itself — downstream pipelines (RAG, agent workflows) decide their own sanitize policy based on `trust_level` (e.g. disinfect `external_service` output before rendering, trust `self_contained` output).
+- **Empty `SanitizationSummary` semantics**: an empty set means the engine did not declare the transform, NOT a guarantee that no transform happened. Only paths where the engine natively holds the information (pandoc/LaTeX fence fallbacks, html-deep explicit base_url link absolutization) populate the declaration.
+
 ## ✅ Security Best Practices
 
 ### For Library Users
