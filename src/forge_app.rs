@@ -171,6 +171,7 @@ async fn convert(
     #[param(kind = "body")] input_format: Option<String>,
     #[param(kind = "body")] base_url: Option<String>,
     #[param(kind = "body")] extract_main: Option<bool>,
+    #[param(kind = "body")] explain: Option<bool>,
 ) -> Result<serde_json::Value, ApiError> {
     let input_path = PathBuf::from(&input);
     if !input_path.is_file() {
@@ -289,8 +290,55 @@ async fn convert(
             // Null 哨兵：CLI runner 据此跳过 stdout 渲染（摘要已走 stderr）。
             Ok(serde_json::Value::Null)
         }
-        None => Ok(serde_json::Value::String(result.markdown)),
+        None => {
+            if explain.unwrap_or(false)
+                && let Some(envelope) = &result.provenance
+            {
+                eprint!(
+                    "{}",
+                    render_explain(&envelope.engine_path, envelope.trust_level)
+                );
+            }
+            Ok(serde_json::Value::String(result.markdown))
+        }
     }
+}
+
+/// Render the engine-chain replay for `--explain` (domain stderr channel).
+fn render_explain(
+    steps: &[alchemize::domain::provenance::EngineStep],
+    trust: alchemize::domain::provenance::TrustLevel,
+) -> String {
+    use alchemize::domain::provenance::StepOutcome;
+    let total_ms: u64 = steps.iter().filter_map(|s| s.duration_ms).sum();
+    let mut out = format!(
+        "-- engine chain ({} attempts, {total_ms}ms total) --
+",
+        steps.len()
+    );
+    for (i, step) in steps.iter().enumerate() {
+        let tail = match &step.outcome {
+            StepOutcome::Skipped { reason } => format!("skipped   {reason}"),
+            StepOutcome::Failed { error_kind } => match step.duration_ms {
+                Some(ms) => format!("failed    {error_kind} ({ms}ms)"),
+                None => format!("failed    {error_kind}"),
+            },
+            StepOutcome::Used => format!("used      {}ms", step.duration_ms.unwrap_or(0)),
+        };
+        out.push_str(&format!(
+            "{}. {:<14} {tail}
+",
+            i + 1,
+            step.engine
+        ));
+    }
+    let trust_label = serde_json::to_string(&trust).unwrap_or_else(|_| "\"?\"".to_string());
+    out.push_str(&format!(
+        "trust: {}
+",
+        trust_label.trim_matches('"')
+    ));
+    out
 }
 
 /// Report engine availability; `security = true` appends the build's
@@ -472,6 +520,50 @@ mod tests {
         assert!(out.contains("token:"), "{out}");
     }
 
+    /// The explain replay renders ordered step lines and closes with the
+    /// trust level.
+    #[test]
+    fn render_explain_lists_steps_in_order_with_trust_tail() {
+        use alchemize::domain::provenance::{EngineStep, StepOutcome, TrustLevel};
+        let steps = vec![
+            EngineStep {
+                engine: "pdfium".to_string(),
+                outcome: StepOutcome::Skipped {
+                    reason: "dylib not found".to_string(),
+                },
+                duration_ms: None,
+            },
+            EngineStep {
+                engine: "pdf".to_string(),
+                outcome: StepOutcome::Failed {
+                    error_kind: "pdf".to_string(),
+                },
+                duration_ms: Some(24),
+            },
+            EngineStep {
+                engine: "lopdf".to_string(),
+                outcome: StepOutcome::Used,
+                duration_ms: Some(388),
+            },
+        ];
+        let out = render_explain(&steps, TrustLevel::SelfContained);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "-- engine chain (3 attempts, 412ms total) --");
+        assert!(
+            lines[1].contains("pdfium") && lines[1].contains("skipped"),
+            "{out}"
+        );
+        assert!(
+            lines[2].contains("failed") && lines[2].contains("24ms"),
+            "{out}"
+        );
+        assert!(
+            lines[3].contains("lopdf") && lines[3].contains("388ms"),
+            "{out}"
+        );
+        assert_eq!(lines[4], "trust: self_contained");
+    }
+
     #[test]
     fn sanitize_ext_replaces_controls_and_bidi() {
         // C0 controls -> '?'
@@ -571,6 +663,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .await
         .unwrap_err();
@@ -589,6 +682,7 @@ mod tests {
             None,
             None,
             Some("bogus".to_string()),
+            None,
             None,
             None,
             None,
@@ -619,6 +713,7 @@ mod tests {
             None,
             None,
             Some(true),
+            None,
             None,
             None,
             None,
