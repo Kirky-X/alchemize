@@ -105,6 +105,19 @@ pub struct SanitizationSummary {
     pub links_absolutized: bool,
 }
 
+impl std::fmt::Display for EngineStep {
+    /// Render as `engine: outcome (detail)` — one attempt per line, matching
+    /// the registry's existing attempts text so failure messages do not drift.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: ", self.engine)?;
+        match &self.outcome {
+            StepOutcome::Skipped { reason } => write!(f, "skipped ({reason})"),
+            StepOutcome::Failed { error_kind } => write!(f, "failed ({error_kind})"),
+            StepOutcome::Used => write!(f, "used"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +145,34 @@ mod tests {
             let back: TrustLevel = serde_json::from_str(&json).unwrap();
             assert_eq!(back, value);
         }
+    }
+
+    /// `EngineStep` Display renders the stable `engine: outcome (detail)`
+    /// shape for every outcome variant. The registry's attempts reporting
+    /// (failure chains) builds on this, so the formats are pinned here.
+    #[test]
+    fn engine_step_display_formats_all_outcomes() {
+        let skipped = EngineStep {
+            engine: "mineru".to_string(),
+            outcome: StepOutcome::Skipped {
+                reason: "no token".to_string(),
+            },
+        };
+        assert_eq!(skipped.to_string(), "mineru: skipped (no token)");
+
+        let failed = EngineStep {
+            engine: "pdf".to_string(),
+            outcome: StepOutcome::Failed {
+                error_kind: "zip".to_string(),
+            },
+        };
+        assert_eq!(failed.to_string(), "pdf: failed (zip)");
+
+        let used = EngineStep {
+            engine: "lopdf".to_string(),
+            outcome: StepOutcome::Used,
+        };
+        assert_eq!(used.to_string(), "lopdf: used");
     }
 
     #[test]
