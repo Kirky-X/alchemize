@@ -43,12 +43,14 @@ mod mcp_cmd;
 ///   取参数标识符的下划线形式且 bool 恒为取值式）
 /// - `--base-url` → `--base_url`、`--extract-main` → `--extract_main true`
 ///   （同下划线归一；仅 convert 语境，html feature 未编译时端点侧诚实告警）
+/// - `--security` → `--security true`（doctor 语境：安全姿态段附加开关）
 /// - `--` 之后原样透传（位置参数字面量，不重写）
 fn normalize_argv(raw: Vec<String>) -> Vec<String> {
     use std::collections::VecDeque;
     let mut rest: VecDeque<_> = raw.into_iter().collect();
     let mut out = Vec::with_capacity(rest.len() + 2);
     let mut in_convert = false;
+    let mut in_doctor = false;
     let mut seen_subcommand = false;
     while let Some(arg) = rest.pop_front() {
         // `--` 之后的 token 是位置参数字面量（如文件名）：原样透传。
@@ -65,6 +67,7 @@ fn normalize_argv(raw: Vec<String>) -> Vec<String> {
             "convert" | "doctor" | "formats" => {
                 seen_subcommand = true;
                 in_convert = arg == "convert";
+                in_doctor = arg == "doctor";
                 out.push(arg);
             }
             "-o" if in_convert => out.push("--output".into()),
@@ -89,6 +92,16 @@ fn normalize_argv(raw: Vec<String>) -> Vec<String> {
             "--extract-main" if in_convert => {
                 out.push("--extract_main".into());
                 out.push("true".into());
+            }
+            "--security" if in_doctor => {
+                out.push("--security".into());
+                out.push("true".into());
+            }
+            s if in_doctor && s.starts_with("--security=") => {
+                out.push(format!(
+                    "--security={}",
+                    s.trim_start_matches("--security=")
+                ));
             }
             s if in_convert && s.starts_with("--format=") => {
                 out.push(format!(
@@ -227,6 +240,24 @@ mod argv_tests {
             "true",
         ];
         assert_eq!(joined, expected, "{joined:?}");
+    }
+
+    #[test]
+    fn doctor_security_flag_normalizes_to_value_form() {
+        let raw = vec!["alch".into(), "doctor".into(), "--security".into()];
+        assert_eq!(
+            normalize_argv(raw),
+            vec!["alch", "doctor", "--security", "true"]
+        );
+        // Value form passes through unchanged.
+        let raw = vec!["alch".into(), "doctor".into(), "--security=false".into()];
+        assert_eq!(
+            normalize_argv(raw),
+            vec!["alch", "doctor", "--security=false"]
+        );
+        // Outside doctor the flag stays verbatim (convert has no --security).
+        let raw = vec!["alch".into(), "convert".into(), "--security".into()];
+        assert_eq!(normalize_argv(raw), vec!["alch", "convert", "--security"]);
     }
 
     #[test]
