@@ -3,10 +3,13 @@
 
 //! Tests for MinerU module — SSRF validation, option builder, factory selection.
 
+use super::client::MineruClient;
 use super::factory::create_mineru_client;
+use super::precision::MineruPrecisionClient;
 use super::types::{ParseOptions, TaskId, TaskStatus};
 use super::validated_url::{DEFAULT_MINERU_ALLOWLIST, validate_file_url};
 use crate::domain::error::{AlchemizeError, SecurityViolationType};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 #[test]
 fn validate_https_url_succeeds() {
@@ -608,4 +611,146 @@ fn poll_delay_is_monotonic_and_capped() {
             "backoff must not shrink between attempts"
         );
     }
+}
+
+// ── R-redact-002: error-path credential stripping (T005/T006) ──────────────
+
+/// Minimal sequential HTTP/1.1 responder: one canned response per connection.
+async fn spawn_error_server(responses: Vec<(u16, &'static str)>) -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        for (status, body) in responses {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut total = Vec::new();
+            let mut buf = [0u8; 4096];
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    match sock.read(&mut buf).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            total.extend_from_slice(&buf[..n]);
+                            if total.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
+                            }
+                        }
+                    }
+                }
+            })
+            .await;
+            let resp = format!(
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = sock.write_all(resp.as_bytes()).await;
+            let _ = sock.flush().await;
+            let _ = sock.shutdown().await;
+        }
+    });
+    port
+}
+
+const ECHO_TOKEN: &str = "sk-echotoken-9f8e7d6c5b4a";
+
+fn echo_client(port: u16) -> MineruPrecisionClient {
+    MineruPrecisionClient::with_base_url_and_token(format!("http://127.0.0.1:{port}"), ECHO_TOKEN)
+        .unwrap()
+}
+
+fn allowlisted_url() -> super::validated_url::ValidatedFileUrl {
+    validate_file_url(
+        "https://cdn.mineru.net/fixture.pdf",
+        DEFAULT_MINERU_ALLOWLIST,
+    )
+    .unwrap()
+}
+
+/// 401 body echoes the Authorization token and a presigned URL: neither the
+/// token nor the Signature value may reach `AlchemizeError::to_string()` (R-redact-002).
+#[tokio::test]
+async fn submit_error_strips_echoed_token_and_presigned_param() {
+    let body: &'static str = Box::leak(
+        format!(
+            "unauthorized: Bearer {ECHO_TOKEN}; download https://cdn.example.com/o.zip?Expires=1719999999&Signature=abc123SECRET&x=1"
+        )
+        .into_boxed_str(),
+    );
+    let port = spawn_error_server(vec![(401, body)]).await;
+    let err = echo_client(port)
+        .parse(&allowlisted_url(), ParseOptions::default())
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(!msg.contains(ECHO_TOKEN), "token leaked: {msg}");
+    assert!(
+        !msg.contains("Signature=abc123SECRET"),
+        "presigned value leaked: {msg}"
+    );
+    assert!(msg.contains("REDACTED"), "expected redaction marker: {msg}");
+    assert!(msg.contains("401"), "status must survive redaction: {msg}");
+}
+
+/// 500 body repeats the token three times interleaved with presigned URLs:
+/// every occurrence must be gone and all target query values REDACTED (R-redact-002).
+#[tokio::test]
+async fn poll_error_strips_repeated_echo_without_mangling_body() {
+    let body: &'static str = Box::leak(
+        format!(
+            "err {ECHO_TOKEN} | https://cdn.example.com/a?Signature=sigONE&Expires=1&keep=yes \
+             | {ECHO_TOKEN} | {ECHO_TOKEN} end"
+        )
+        .into_boxed_str(),
+    );
+    // First response: submit 200 (task accepted); second: poll 500 echo body.
+    let port = spawn_error_server(vec![(200, r#"{"task_id":"t-redact"}"#), (500, body)]).await;
+    let err = echo_client(port)
+        .parse(&allowlisted_url(), ParseOptions::default())
+        .await
+        .unwrap_err();
+    let msg = err.to_string();
+    assert_eq!(
+        msg.matches(ECHO_TOKEN).count(),
+        0,
+        "no token occurrence may survive: {msg}"
+    );
+    assert!(!msg.contains("sigONE"), "signature value leaked: {msg}");
+    assert!(msg.contains("REDACTED"), "expected redaction marker: {msg}");
+    assert!(
+        msg.contains("keep=yes"),
+        "non-secret param preserved: {msg}"
+    );
+    assert!(msg.contains("500"), "status must survive redaction: {msg}");
+}
+
+/// A normal 200 response must not be mangled by the redaction layer (R-redact-002).
+#[tokio::test]
+async fn success_path_markdown_is_not_redacted() {
+    let body: &'static str =
+        Box::leak("# Report\n\nDownload: https://cdn.example.com/a?Signature=public&x=1\n".into());
+    let port = spawn_error_server(vec![
+        (200, r#"{"task_id":"t-ok"}"#),
+        (
+            200,
+            Box::leak(
+                format!(
+                    "{{\"status\":\"completed\",\"markdown\":{:?},\"result_url\":null,\"error\":null}}",
+                    body
+                )
+                .into_boxed_str(),
+            ) as &'static str,
+        ),
+    ])
+    .await;
+    let md = echo_client(port)
+        .parse(&allowlisted_url(), ParseOptions::default())
+        .await
+        .unwrap();
+    assert!(
+        md.contains("Signature=public"),
+        "success payload intact: {md}"
+    );
+    assert!(
+        !md.contains("REDACTED"),
+        "no redaction on success path: {md}"
+    );
 }
