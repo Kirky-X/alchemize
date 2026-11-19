@@ -515,8 +515,10 @@ mod feature_registration_tests {
             // itself, `default`, or a non-conversion tool face — so adding a
             // Cargo feature without wiring it into `full`/enabled_features
             // cannot ship unguarded. (`kit` is the trait-kit integration
-            // gate — adapter modules only, no converter surface.)
-            let tool_faces = ["default", "cli", "mcp", "full", "kit"];
+            // gate — adapter modules only, no converter surface. `cache` is
+            // an opt-in capability switch — no converter surface; it gates
+            // an internal dedup layer on expensive engines.)
+            let tool_faces = ["default", "cli", "mcp", "full", "kit", "cache"];
             for key in parse_cargo_feature_keys(&cargo) {
                 assert!(
                     full.contains(key) || tool_faces.contains(&key),
