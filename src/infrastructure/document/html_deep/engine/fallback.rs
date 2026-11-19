@@ -954,7 +954,7 @@ mod edge_tests3 {
     #[test]
     fn img_without_source_emits_label_and_anchors() {
         let out = render_html(
-            r##"<div><a href="#x">ref</a><img alt="plain glyph"></div>"##,
+            r##"<div><a href="#x">ref</a><img id="x" alt="plain glyph"></div>"##,
             "div",
         );
         assert!(!out.contains("<img"), "{out}");
@@ -969,12 +969,13 @@ mod edge_tests3 {
         assert!(out.contains("after"), "{out}");
     }
 
-    /// audio（非块）在普通上下文：前导空格 + <a href> 链接形式。
+    /// audio 在普通上下文：产出 <a href> 链接并保留前后文本。
     #[test]
-    fn audio_inline_renders_space_prefixed_link() {
+    fn audio_renders_link_keeping_text() {
         let out = render_html(r#"<p>before<audio src="safe.mp3"></audio>after</p>"#, "p");
-        assert!(out.contains(" safe.mp3"), "link: {out}");
+        assert!(out.contains("<a href=\"safe.mp3\">"), "link: {out}");
         assert!(out.contains("before"), "{out}");
+        assert!(out.contains("after"), "{out}");
     }
 
     /// 嵌套结构表（复杂）→ 整表 fallback；td 内 ul（needed 判定路径）。
