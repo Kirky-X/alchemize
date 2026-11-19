@@ -174,6 +174,54 @@ alch formats     # 全部支持扩展名，排序去重空格分隔
 
 ## 🚧 进阶用法
 
+### 🛡️ 审计安全姿态（`doctor --security`）
+
+`alch doctor --security` 在普通 doctor 报告基础上扩展四段视图，展示当前构建的安全边界：解析面、网络出口、外部子进程、预算。它只读编译期特性与环境变量，不发起网络调用。
+
+```bash
+alch doctor --security
+alch --format json doctor --security   # 同样四段，以 JSON 行数组呈现
+```
+
+输出样例（未编译 `pdf-cloud` 的构建）：
+
+```text
+Parse surfaces:    text, csv, docx, html, pdf-local, ...
+Network egress:    ✗ NONE (pdf-cloud not compiled)
+External subprocesses:
+  pandoc          ✓ on PATH
+  soffice         ✗ not found
+  sips            ✓ on PATH
+  ffmpeg          ✓ on PATH
+Budgets:
+  per page / stream         64 MiB
+  per document             256 MiB
+  container chain          512 MiB
+  http submit               64 KB
+```
+
+编译 `pdf-cloud` 且设置 `ALCHEMIZE_MINERU_URL` 时，出口行显示 MinerU 主机名与一行 `token:` 状态。token 值永不打印，只显示 `present` / `NOT SET`。该信息与 `SECURITY.md` 文档一致，针对当前构建实时渲染；参见[安全最佳实践](SECURITY.md#-安全最佳实践)。
+
+### 🔍 回放转换过程（`convert --explain`）
+
+`alch convert <INPUT> --explain` 在正常结果之后向 stderr 追加引擎链回放。每行显示引擎、结局，以及（对已执行步骤）实测耗时；末行显示汇聚后的信任等级。该旗标不改变 stdout 结果，仅是诊断视图。
+
+```bash
+alch convert report.pdf --explain
+```
+
+stderr 回放样例：
+
+```text
+-- engine chain (3 attempts, 412ms total) --
+1. pdfium         skipped   dylib not found
+2. pdf            used      388ms
+3. mineru         not reached
+trust: self_contained
+```
+
+`skipped` 表示探测过但未选中；`used` 表示执行并产出结果；`not reached` 表示从未尝试。耗时为整数毫秒（向下取整）。不带 `--explain` 时，输出与普通转换逐字节一致。
+
 ### ✅ 质量与降级判读
 
 `local_fallback` 不等于失败：PDF 本地文本链是预期行为。判读顺序：先看 stderr 摘要行 `[quality]`，再按需升级特性（配 MinerU）。库使用者读 `metadata.converter` 与 `quality` 字段做同样判断。

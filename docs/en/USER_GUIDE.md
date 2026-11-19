@@ -174,6 +174,67 @@ Note: **engines not compiled into features, and MinerU without a configured endp
 
 ## 🚧 Advanced Usage
 
+### 🛡️ Auditing the Security Posture (`doctor --security`)
+
+`alch doctor --security` extends the plain doctor report with a four-section
+view of the current build's security boundary — parse surfaces, network egress,
+external subprocesses, and budgets. It reads compile-time features and the
+environment only; it makes no network call.
+
+```bash
+alch doctor --security
+alch --format json doctor --security   # same four sections as a JSON line array
+```
+
+Example output (a build without `pdf-cloud`):
+
+```text
+Parse surfaces:    text, csv, docx, html, pdf-local, ...
+Network egress:    ✗ NONE (pdf-cloud not compiled)
+External subprocesses:
+  pandoc          ✓ on PATH
+  soffice         ✗ not found
+  sips            ✓ on PATH
+  ffmpeg          ✓ on PATH
+Budgets:
+  per page / stream         64 MiB
+  per document             256 MiB
+  container chain          512 MiB
+  http submit               64 KB
+```
+
+When `pdf-cloud` is compiled and `ALCHEMIZE_MINERU_URL` is set, the egress line
+shows the MinerU host and a `token:` status line. The token value is never
+printed — only `present` / `NOT SET`. This is the same information `SECURITY.md`
+documents, rendered live for the active build; see
+[Security Best Practices](SECURITY.md#-security-best-practices).
+
+### 🔍 Replaying a Conversion (`convert --explain`)
+
+`alch convert <INPUT> --explain` appends an engine-chain replay to stderr after
+the normal result. Each line shows the engine, its outcome, and (for executed
+steps) the measured duration; the last line shows the aggregated trust level.
+The flag does not change the stdout result — it is a diagnostic view only.
+
+```bash
+alch convert report.pdf --explain
+```
+
+Example stderr replay:
+
+```text
+-- engine chain (3 attempts, 412ms total) --
+1. pdfium         skipped   dylib not found
+2. pdf            used      388ms
+3. mineru         not reached
+trust: self_contained
+```
+
+A `skipped` step was probed but not chosen; `used` executed and produced the
+result; `not reached` was never attempted. Durations are whole milliseconds
+rounded down. Without `--explain`, output is byte-for-byte identical to a normal
+conversion.
+
 ### ✅ Reading Quality and Degradation
 
 `local_fallback` is not failure: the local PDF text chain is expected behavior. Reading order: check the stderr summary line `[quality]` first, then upgrade features as needed (configure MinerU). Library users read `metadata.converter` and the `quality` field to make the same call.

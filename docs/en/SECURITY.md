@@ -151,6 +151,7 @@ Preallocation is capped at 8 MB (no matter how large the declared Content-Length
 - In untrusted environments use `AlchemizeBuilder::new().with_no_remote().build()` — zero network egress for the process.
 - Prefer an isolated environment (container/sandbox) when processing untrusted files; this tool's parsing surface contains no network execution path, but deep defense against parser flaws still relies on isolation.
 - Before printing configuration containing sensitive fields, confirm its Debug/Display are redacted; for custom types with secret fields, imitate `MineruConfig`'s hand-written implementation.
+- In embedded form, run `doctor --security` to audit the current build's security boundary (parse surfaces, network egress, subprocess availability, budgets).
 
 ### Production Configuration Example
 
