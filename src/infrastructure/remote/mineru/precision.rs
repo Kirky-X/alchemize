@@ -24,6 +24,7 @@ use super::http_limit::{
 use super::types::DEFAULT_TIMEOUT_SECS;
 use super::validated_url::{DEFAULT_MINERU_ALLOWLIST, validate_base_url, validate_file_url};
 use super::{MineruClient, ParseOptions, TaskId, TaskStatus, ValidatedFileUrl};
+use super::{redact_secrets, strip_presigned_params};
 use crate::domain::error::AlchemizeError;
 
 /// Environment variable name for the API token.
@@ -185,8 +186,11 @@ impl MineruPrecisionClient {
             .send()
             .await
             .map_err(|e| {
+                // reqwest errors can embed the full request URL; scrub presigned
+                // params (R-redact-002). The token lives in a header, not the URL.
+                let source = strip_presigned_params(&e.to_string());
                 AlchemizeError::MineruUnavailable(format!(
-                    "cannot reach MinerU at {}: {e}",
+                    "cannot reach MinerU at {}: {source}",
                     self.base_url
                 ))
             })?;
@@ -198,6 +202,10 @@ impl MineruPrecisionClient {
                     .await
                     .unwrap_or_else(|_| "<unreadable>".to_string()),
             );
+            // Error-path credential stripping (R-redact-002): an upstream body
+            // may echo the bearer token or a presigned URL. Scrub both before
+            // the text enters AlchemizeError / Display / tracing.
+            let body = strip_presigned_params(&redact_secrets(&body, &[&self.token]));
             return Err(AlchemizeError::MineruConversion(format!(
                 "MinerU Precision API returned {status}: {body}"
             )));
@@ -232,9 +240,11 @@ impl MineruPrecisionClient {
             .send()
             .await
             .map_err(|e| {
+                // reqwest errors can embed the full request URL (R-redact-002).
+                let source = strip_presigned_params(&e.to_string());
                 AlchemizeError::MineruUnavailable(crate::tr_args(
                     "polling-mineru-task",
-                    &[("task", task_id.to_string()), ("source", e.to_string())],
+                    &[("task", task_id.to_string()), ("source", source)],
                 ))
             })?;
 
@@ -245,6 +255,8 @@ impl MineruPrecisionClient {
                     .await
                     .unwrap_or_else(|_| "<unreadable>".to_string()),
             );
+            // Error-path credential stripping (R-redact-002): see submit().
+            let body = strip_presigned_params(&redact_secrets(&body, &[&self.token]));
             return Err(AlchemizeError::MineruConversion(format!(
                 "MinerU poll returned {status}: {body}"
             )));
@@ -303,9 +315,12 @@ impl MineruPrecisionClient {
             .send()
             .await
             .map_err(|e| {
+                // reqwest errors can embed the result URL with presigned params
+                // (R-redact-002).
+                let source = strip_presigned_params(&e.to_string());
                 AlchemizeError::MineruConversion(crate::tr_args(
                     "failed-to-fetch-result",
-                    &[("source", e.to_string())],
+                    &[("source", source)],
                 ))
             })?;
 
@@ -375,8 +390,10 @@ impl MineruClient for MineruPrecisionClient {
                     return Ok(content);
                 }
                 TaskStatus::Failed => {
-                    let err_msg =
-                        truncate_body(error.unwrap_or_else(|| "unknown error".to_string()));
+                    let err_msg = strip_presigned_params(&redact_secrets(
+                        &truncate_body(error.unwrap_or_else(|| "unknown error".to_string())),
+                        &[&self.token],
+                    ));
                     return Err(AlchemizeError::MineruConversion(format!(
                         "MinerU task {} failed: {}",
                         task_id, err_msg

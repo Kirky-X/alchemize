@@ -22,6 +22,7 @@ use super::http_limit::{
     read_limited_json, read_limited_text, truncate_body,
 };
 use super::validated_url::validate_base_url;
+use super::{redact_secrets, strip_presigned_params};
 use crate::application::ports::{Converter, EngineProvenanceDescriptor};
 use crate::domain::error::AlchemizeError;
 use crate::domain::input::Input;
@@ -115,6 +116,17 @@ async fn read_error_body(resp: reqwest::Response) -> String {
     )
 }
 
+/// Error-path credential stripping (R-redact-002). When a token is configured,
+/// scrub its occurrences; always scrub presigned URL parameters (reqwest error
+/// Display and upstream bodies can echo both).
+fn scrub_error_text(text: &str, token: Option<&str>) -> String {
+    let redacted = match token {
+        Some(tok) => redact_secrets(text, &[tok]),
+        None => text.to_string(),
+    };
+    strip_presigned_params(&redacted)
+}
+
 // API Response Types
 
 /// Task submission response from MinerU API.
@@ -206,11 +218,13 @@ impl MinerUConverter {
         debug!(url = %url, filename = %filename, "submitting PDF to MinerU lightweight API");
 
         let resp = builder.send().await.map_err(|e| {
+            // reqwest errors can embed the full request URL (R-redact-002).
+            let source = scrub_error_text(&e.to_string(), self.config.api_token.as_deref());
             AlchemizeError::MineruUnavailable(crate::tr_args(
                 "cannot-reach-mineru",
                 &[
                     ("base", self.config.base_url.to_string()),
-                    ("source", e.to_string()),
+                    ("source", source),
                 ],
             ))
         })?;
@@ -218,9 +232,11 @@ impl MinerUConverter {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = read_error_body(resp).await;
+            // Upstream body may echo the token or a presigned URL (R-redact-002).
+            let body = scrub_error_text(&body, self.config.api_token.as_deref());
             return Err(AlchemizeError::MineruConversion(crate::tr_args(
                 "mineru-api-returned",
-                &[("status", status.to_string()), ("body", body.to_string())],
+                &[("status", status.to_string()), ("body", body)],
             )));
         }
 
@@ -249,18 +265,22 @@ impl MinerUConverter {
         }
 
         let resp = builder.send().await.map_err(|e| {
+            // reqwest errors can embed the full request URL (R-redact-002).
+            let source = scrub_error_text(&e.to_string(), self.config.api_token.as_deref());
             AlchemizeError::MineruUnavailable(crate::tr_args(
                 "polling-mineru-task",
-                &[("task", task_id.to_string()), ("source", e.to_string())],
+                &[("task", task_id.to_string()), ("source", source)],
             ))
         })?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let body = read_error_body(resp).await;
+            // Upstream body may echo the token or a presigned URL (R-redact-002).
+            let body = scrub_error_text(&body, self.config.api_token.as_deref());
             return Err(AlchemizeError::MineruConversion(crate::tr_args(
                 "mineru-poll-returned",
-                &[("status", status.to_string()), ("body", body.to_string())],
+                &[("status", status.to_string()), ("body", body)],
             )));
         }
 
@@ -301,14 +321,17 @@ impl MinerUConverter {
                     return Ok(markdown);
                 }
                 TaskStatus::Failed => {
-                    let error = truncate_body(
-                        status_resp
-                            .error
-                            .unwrap_or_else(|| crate::tr("mineru-unknown-error")),
+                    let error = scrub_error_text(
+                        &truncate_body(
+                            status_resp
+                                .error
+                                .unwrap_or_else(|| crate::tr("mineru-unknown-error")),
+                        ),
+                        self.config.api_token.as_deref(),
                     );
                     return Err(AlchemizeError::MineruConversion(crate::tr_args(
                         "mineru-task-failed",
-                        &[("task", task_id.to_string()), ("error", error.to_string())],
+                        &[("task", task_id.to_string()), ("error", error)],
                     )));
                 }
                 TaskStatus::Pending | TaskStatus::Processing => {

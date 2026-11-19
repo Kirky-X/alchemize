@@ -21,7 +21,9 @@ use super::http_limit::{
 };
 use super::types::DEFAULT_TIMEOUT_SECS;
 use super::validated_url::validate_base_url;
-use super::{MineruClient, ParseOptions, TaskId, TaskStatus, ValidatedFileUrl};
+use super::{
+    MineruClient, ParseOptions, TaskId, TaskStatus, ValidatedFileUrl, strip_presigned_params,
+};
 use crate::domain::error::AlchemizeError;
 
 /// Default base URL for MinerU Agent API.
@@ -115,12 +117,12 @@ impl MineruAgentClient {
         debug!(url = %url, file_url = %file_url.as_str(), "submitting task to MinerU Agent API");
 
         let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {
+            // reqwest errors can embed the full request URL (R-redact-002).
+            // Agent API has no token; strip presigned params at minimum.
+            let source = strip_presigned_params(&e.to_string());
             AlchemizeError::MineruUnavailable(crate::tr_args(
                 "cannot-reach-mineru",
-                &[
-                    ("base", self.base_url.to_string()),
-                    ("source", e.to_string()),
-                ],
+                &[("base", self.base_url.to_string()), ("source", source)],
             ))
         })?;
 
@@ -131,9 +133,12 @@ impl MineruAgentClient {
                     .await
                     .unwrap_or_else(|_| "<unreadable>".to_string()),
             );
+            // Upstream body may echo a presigned URL (R-redact-002). No token
+            // is available on this client, so scrub URL credentials only.
+            let body = strip_presigned_params(&body);
             return Err(AlchemizeError::MineruConversion(crate::tr_args(
                 "mineru-agent-api-returned",
-                &[("status", status.to_string()), ("body", body.to_string())],
+                &[("status", status.to_string()), ("body", body)],
             )));
         }
 
@@ -160,9 +165,11 @@ impl MineruAgentClient {
         debug!(task_id = %task_id.as_str(), "polling MinerU Agent task status");
 
         let resp = self.http.get(&url).send().await.map_err(|e| {
+            // reqwest errors can embed the full request URL (R-redact-002).
+            let source = strip_presigned_params(&e.to_string());
             AlchemizeError::MineruUnavailable(crate::tr_args(
                 "polling-mineru-task",
-                &[("task", task_id.to_string()), ("source", e.to_string())],
+                &[("task", task_id.to_string()), ("source", source)],
             ))
         })?;
 
@@ -173,9 +180,11 @@ impl MineruAgentClient {
                     .await
                     .unwrap_or_else(|_| "<unreadable>".to_string()),
             );
+            // Upstream body may echo a presigned URL (R-redact-002).
+            let body = strip_presigned_params(&body);
             return Err(AlchemizeError::MineruConversion(crate::tr_args(
                 "mineru-poll-returned",
-                &[("status", status.to_string()), ("body", body.to_string())],
+                &[("status", status.to_string()), ("body", body)],
             )));
         }
 
@@ -240,14 +249,12 @@ impl MineruClient for MineruAgentClient {
                     return Ok(content);
                 }
                 TaskStatus::Failed => {
-                    let err_msg =
-                        truncate_body(error.unwrap_or_else(|| crate::tr("mineru-unknown-error")));
+                    let err_msg = strip_presigned_params(&truncate_body(
+                        error.unwrap_or_else(|| crate::tr("mineru-unknown-error")),
+                    ));
                     return Err(AlchemizeError::MineruConversion(crate::tr_args(
                         "mineru-task-failed",
-                        &[
-                            ("task", task_id.to_string()),
-                            ("error", err_msg.to_string()),
-                        ],
+                        &[("task", task_id.to_string()), ("error", err_msg)],
                     )));
                 }
                 TaskStatus::Pending | TaskStatus::Processing => {
