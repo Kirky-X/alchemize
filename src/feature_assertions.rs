@@ -10,6 +10,12 @@
 //! member silently ships a truncated umbrella. These guards turn that into
 //! a compile error. New format features must be added here (sync point 7 in
 //! the Cargo.toml feature comment).
+//!
+//! Capability switches (`kit`, `mcp`, `cache`) are intentionally NOT full
+//! members — they gate optional surfaces, not format families. `cache` (the
+//! conversion-result dedup cache) is registered in Cargo.toml as
+//! `cache = ["dep:oxcache"]` and stays out of the `full` umbrella, covered by
+//! the CI per-feature isolation loop (sync point 7).
 
 macro_rules! full_membership_guards {
     ($($feature:literal),+ $(,)?) => {

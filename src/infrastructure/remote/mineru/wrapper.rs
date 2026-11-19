@@ -162,6 +162,10 @@ pub struct TaskStatusResponse {
 pub struct MinerUConverter {
     config: MinerUHttpConfig,
     http: reqwest::Client,
+    /// Optional dedup cache (feature `cache`); expensive cloud conversions are
+    /// keyed by content hash and reused within the TTL window.
+    #[cfg(feature = "cache")]
+    cache: Option<std::sync::Arc<crate::infrastructure::cache::ConversionCache>>,
 }
 
 impl MinerUConverter {
@@ -188,7 +192,23 @@ impl MinerUConverter {
                 ))
             })?;
 
-        Ok(Self { http, config })
+        Ok(Self {
+            http,
+            config,
+            #[cfg(feature = "cache")]
+            cache: None,
+        })
+    }
+
+    /// Attach a dedup cache (feature `cache`). Used by the engine registration
+    /// path when the builder enabled caching.
+    #[cfg(feature = "cache")]
+    pub fn with_cache(
+        mut self,
+        cache: std::sync::Arc<crate::infrastructure::cache::ConversionCache>,
+    ) -> Self {
+        self.cache = Some(cache);
+        self
     }
 
     /// Submit a PDF file to the MinerU lightweight API.
@@ -391,6 +411,34 @@ impl Converter for MinerUConverter {
         })?;
 
         let filename = input.filename().unwrap_or("document.pdf");
+
+        // Dedup cache (feature `cache`): key by content hash + build features
+        // + engine name. A hit reuses the prior result and marks the metadata;
+        // provenance/trust_level are preserved byte-for-byte on write-back.
+        #[cfg(feature = "cache")]
+        if let Some(cache) = &self.cache {
+            use crate::infrastructure::cache::ConversionCache;
+            let key = ConversionCache::key_for(&bytes, self.name());
+            if let Some(mut hit) = cache.get(&key).await {
+                hit.metadata["cache_hit"] = serde_json::json!(true);
+                return Ok(hit);
+            }
+            let mut result = cache
+                .get_or_insert_with(key, || async {
+                    let markdown = self.parse_pdf(&bytes, filename).await?;
+                    let metadata = serde_json::json!({
+                        "source_format": "pdf",
+                        "converter": "mineru",
+                    });
+                    Ok(
+                        ConvertResult::with_metadata(markdown, ContentType::Document, metadata)
+                            .with_quality(ConversionQuality::Api),
+                    )
+                })
+                .await?;
+            result.metadata["cache_hit"] = serde_json::json!(false);
+            return Ok(result);
+        }
 
         let markdown = self.parse_pdf(&bytes, filename).await?;
 

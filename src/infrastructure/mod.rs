@@ -3,6 +3,8 @@
 
 //! Infrastructure layer — concrete converters and external systems.
 
+#[cfg(feature = "cache")]
+pub mod cache;
 pub mod containers;
 pub mod data;
 pub mod document;

@@ -30,12 +30,26 @@ use crate::application::ports::TranscribeProvider;
 /// the mnemis-model Transcriber through this interface.
 pub struct AudioConverter {
     transcribe: Option<Arc<dyn TranscribeProvider>>,
+    /// Optional dedup cache (feature `cache`) for expensive ASR transcription.
+    #[cfg(feature = "cache")]
+    cache: Option<Arc<crate::infrastructure::cache::ConversionCache>>,
 }
 
 impl AudioConverter {
     /// Create an audio converter without ASR capabilities.
     pub fn new() -> Self {
-        Self { transcribe: None }
+        Self {
+            transcribe: None,
+            #[cfg(feature = "cache")]
+            cache: None,
+        }
+    }
+
+    /// Attach a dedup cache (feature `cache`) for expensive transcriptions.
+    #[cfg(feature = "cache")]
+    pub fn with_cache(mut self, cache: Arc<crate::infrastructure::cache::ConversionCache>) -> Self {
+        self.cache = Some(cache);
+        self
     }
 
     /// Create an audio converter with a transcription function.
@@ -45,6 +59,55 @@ impl AudioConverter {
     pub fn with_transcriber(provider: Arc<dyn TranscribeProvider>) -> Self {
         Self {
             transcribe: Some(provider),
+            #[cfg(feature = "cache")]
+            cache: None,
+        }
+    }
+
+    /// The uncached conversion body: run ASR inference and assemble the result.
+    async fn convert_uncached(
+        &self,
+        bytes: &[u8],
+        filename: &str,
+        byte_count: usize,
+    ) -> Result<ConvertResult, AlchemizeError> {
+        if let Some(ref provider) = self.transcribe {
+            let transcript = provider.transcribe(bytes).await.map_err(|e| {
+                AlchemizeError::AudioUnavailable(crate::tr_args(
+                    "transcription-failed",
+                    &[("source", e.to_string())],
+                ))
+            })?;
+            let transcript = transcript.full_text();
+            let markdown = if transcript.trim().is_empty() {
+                format!("*Audio '{filename}' — transcription produced no text.*\n")
+            } else {
+                format!("## Transcript\n\n{transcript}\n")
+            };
+            let metadata = serde_json::json!({
+                "filename": filename,
+                "byte_count": byte_count,
+                "transcribed": true,
+                "source_format": "audio",
+            });
+            Ok(
+                ConvertResult::with_metadata(markdown, ContentType::Audio, metadata)
+                    .with_quality(ConversionQuality::LocalFull),
+            )
+        } else {
+            let markdown = format!(
+                "*Audio '{filename}' ({byte_count} bytes) — no ASR provider configured.*\n"
+            );
+            let metadata = serde_json::json!({
+                "filename": filename,
+                "byte_count": byte_count,
+                "transcribed": false,
+                "source_format": "audio",
+            });
+            Ok(
+                ConvertResult::with_metadata(markdown, ContentType::Audio, metadata)
+                    .with_quality(ConversionQuality::LocalFallback),
+            )
         }
     }
 }
@@ -72,50 +135,23 @@ impl Converter for AudioConverter {
         let filename = input.filename().unwrap_or("unknown").to_string();
         let byte_count = bytes.len();
 
-        if let Some(ref provider) = self.transcribe {
-            let transcript = provider.transcribe(&bytes).await.map_err(|e| {
-                AlchemizeError::AudioUnavailable(crate::tr_args(
-                    "transcription-failed",
-                    &[("source", e.to_string())],
-                ))
-            })?;
-            let transcript = transcript.full_text();
-
-            let markdown = if transcript.trim().is_empty() {
-                format!("*Audio '{filename}' — transcription produced no text.*\n")
-            } else {
-                format!("## Transcript\n\n{transcript}\n")
-            };
-
-            let metadata = serde_json::json!({
-                "filename": filename,
-                "byte_count": byte_count,
-                "transcribed": true,
-                "source_format": "audio",
-            });
-
-            Ok(
-                ConvertResult::with_metadata(markdown, ContentType::Audio, metadata)
-                    .with_quality(ConversionQuality::LocalFull),
-            )
-        } else {
-            let markdown = format!(
-                "*Audio '{filename}' ({byte_count} bytes) — no ASR provider \
-                 configured.*\n"
-            );
-
-            let metadata = serde_json::json!({
-                "filename": filename,
-                "byte_count": byte_count,
-                "transcribed": false,
-                "source_format": "audio",
-            });
-
-            Ok(
-                ConvertResult::with_metadata(markdown, ContentType::Audio, metadata)
-                    .with_quality(ConversionQuality::LocalFallback),
-            )
+        // Dedup cache (feature `cache`): a hit skips ASR inference entirely.
+        #[cfg(feature = "cache")]
+        if let Some(cache) = &self.cache {
+            use crate::infrastructure::cache::ConversionCache;
+            let key = ConversionCache::key_for(&bytes, self.name());
+            if let Some(mut hit) = cache.get(&key).await {
+                hit.metadata["cache_hit"] = serde_json::json!(true);
+                return Ok(hit);
+            }
+            let mut result = cache
+                .get_or_insert_with(key, || self.convert_uncached(&bytes, &filename, byte_count))
+                .await?;
+            result.metadata["cache_hit"] = serde_json::json!(false);
+            return Ok(result);
         }
+
+        self.convert_uncached(&bytes, &filename, byte_count).await
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -312,5 +348,56 @@ mod extra_tests {
             converter.supported_extensions(),
             &["wav", "mp3", "ogg", "flac", "aac", "m4a", "wma", "opus"]
         );
+    }
+
+    #[cfg(feature = "cache")]
+    #[tokio::test]
+    async fn cache_skips_second_transcription_and_marks_hit() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountingTranscriber(AtomicUsize);
+        #[async_trait::async_trait]
+        impl crate::application::ports::TranscribeProvider for CountingTranscriber {
+            async fn transcribe(
+                &self,
+                _audio_wav16k: &[u8],
+            ) -> Result<crate::application::ports::Transcript, crate::domain::error::AlchemizeError>
+            {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(crate::application::ports::Transcript {
+                    language: None,
+                    duration: None,
+                    segments: vec![crate::application::ports::TranscriptSegment {
+                        start_sec: 0.0,
+                        end_sec: 1.0,
+                        text: "cached text".to_string(),
+                    }],
+                })
+            }
+            fn availability(&self) -> crate::application::ports::Availability {
+                crate::application::ports::Availability::Available
+            }
+            fn name(&self) -> &'static str {
+                "counting-stub"
+            }
+        }
+
+        let calls = std::sync::Arc::new(CountingTranscriber(AtomicUsize::new(0)));
+        let cache = std::sync::Arc::new(crate::infrastructure::cache::ConversionCache::new(
+            std::time::Duration::from_secs(60),
+        ));
+        let converter = AudioConverter::with_transcriber(calls.clone()).with_cache(cache);
+        let make_input = || Input::Bytes {
+            data: b"fake wav bytes".to_vec(),
+            filename: "speech.wav".to_string(),
+            mimetype: None,
+            extension: Some("wav".to_string()),
+        };
+        let first = converter.convert(make_input()).await.unwrap();
+        let second = converter.convert(make_input()).await.unwrap();
+        assert_eq!(first.markdown, second.markdown);
+        assert_eq!(calls.0.load(Ordering::SeqCst), 1, "ASR must run once");
+        assert_eq!(second.metadata["cache_hit"], true, "second call is a hit");
+        assert_eq!(first.metadata["cache_hit"], false, "first call is a miss");
     }
 }

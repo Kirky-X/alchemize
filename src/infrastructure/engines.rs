@@ -39,6 +39,12 @@ pub fn default_converters(
     container_registry_slot: &std::sync::Arc<
         std::sync::OnceLock<std::sync::Weak<crate::application::registry::ConverterRegistry>>,
     >,
+    #[cfg(feature = "cache")]
+    #[cfg_attr(
+        not(any(feature = "pdf-cloud", feature = "media")),
+        allow(unused_variables)
+    )]
+    conversion_cache: Option<std::sync::Arc<crate::infrastructure::cache::ConversionCache>>,
 ) -> Vec<Box<dyn Converter>> {
     // Text family (plain text + code/config fence) seeds the list; builds
     // without it start empty (clippy::vec_init_then_push cannot see the cfg).
@@ -110,6 +116,11 @@ pub fn default_converters(
             }
             None => crate::infrastructure::media::AudioConverter::new(),
         };
+        #[cfg(feature = "cache")]
+        let audio_converter = match conversion_cache.clone() {
+            Some(cache) => audio_converter.with_cache(cache),
+            None => audio_converter,
+        };
         engines.push(Box::new(audio_converter));
 
         let video_converter = match vision.clone() {
@@ -134,6 +145,11 @@ pub fn default_converters(
             crate::infrastructure::remote::mineru::MinerUHttpConfig::from_config(cfg),
         )
     {
+        #[cfg(feature = "cache")]
+        let conv = match conversion_cache.clone() {
+            Some(cache) => conv.with_cache(cache),
+            None => conv,
+        };
         engines.push(Box::new(conv));
     }
     #[cfg(feature = "pptx")]
@@ -300,6 +316,8 @@ mod feature_registration_tests {
             VideoProcessingMode::default(),
             &html_deep,
             &slot,
+            #[cfg(feature = "cache")]
+            None,
         )
         .iter()
         .map(|c| c.name())
@@ -385,6 +403,8 @@ mod feature_registration_tests {
                 VideoProcessingMode::default(),
                 &html_deep,
                 &slot,
+                #[cfg(feature = "cache")]
+                None,
             );
             converters
                 .iter()

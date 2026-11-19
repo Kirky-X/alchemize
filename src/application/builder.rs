@@ -143,6 +143,10 @@ pub struct Alchemize {
     /// (`with_max_file_size`; default 100 MB). Bounded above by the hard
     /// [`MAX_INPUT_BYTES`] cap, which applies regardless of this setting.
     max_file_size: usize,
+    /// Optional dedup cache for high-cost conversion paths (feature `cache`).
+    /// Shared as an Arc with the expensive engine implementations.
+    #[cfg(feature = "cache")]
+    conversion_cache: Option<std::sync::Arc<crate::infrastructure::cache::ConversionCache>>,
 }
 
 impl Alchemize {
@@ -274,6 +278,16 @@ impl Alchemize {
         self.no_remote
     }
 
+    /// Snapshot of the conversion cache counters (feature `cache`).
+    ///
+    /// Returns `None` when caching is disabled. Hits/misses are counted at the
+    /// engine cache check; `singleflight_waits` counts coalesced concurrent
+    /// callers.
+    #[cfg(feature = "cache")]
+    pub fn conversion_cache_stats(&self) -> Option<crate::infrastructure::cache::CacheStats> {
+        self.conversion_cache.as_ref().map(|c| c.stats())
+    }
+
     /// Build an asset sink for an output location.
     pub fn asset_sink_for(&self, output_root: &std::path::Path) -> Box<dyn AssetSink> {
         match self.asset_mode {
@@ -297,6 +311,9 @@ pub struct AlchemizeBuilder {
     /// its Arc (kit integration path; participates in normal priority
     /// routing and `no_remote` exclusion via `Converter::is_remote`).
     host_converters: Vec<Box<dyn Converter>>,
+    /// Opt-in dedup cache TTL (feature `cache`); `None` = no caching.
+    #[cfg(feature = "cache")]
+    conversion_cache_ttl: Option<std::time::Duration>,
 }
 
 /// Maximum file size default: 100 MB.
@@ -321,6 +338,8 @@ impl AlchemizeBuilder {
             no_remote: false,
             html_deep: None,
             host_converters: Vec::new(),
+            #[cfg(feature = "cache")]
+            conversion_cache_ttl: None,
         }
     }
 
@@ -389,6 +408,17 @@ impl AlchemizeBuilder {
         self
     }
 
+    /// Enable the conversion-result dedup cache (feature `cache`) with a TTL.
+    ///
+    /// Off by default. When enabled, the same input converted by the same
+    /// expensive engine within the TTL window reuses the first result, so the
+    /// untrusted input reaches the external service only once.
+    #[cfg(feature = "cache")]
+    pub fn with_conversion_cache(mut self, ttl: std::time::Duration) -> Self {
+        self.conversion_cache_ttl = Some(ttl);
+        self
+    }
+
     /// Build the converter with all configured engines registered.
     pub fn build(self) -> Alchemize {
         let mut registry = if self.no_remote {
@@ -415,6 +445,11 @@ impl AlchemizeBuilder {
             std::sync::OnceLock<std::sync::Weak<ConverterRegistry>>,
         > = std::sync::Arc::new(std::sync::OnceLock::new());
 
+        #[cfg(feature = "cache")]
+        let conversion_cache = self.conversion_cache_ttl.map(|ttl| {
+            std::sync::Arc::new(crate::infrastructure::cache::ConversionCache::new(ttl))
+        });
+
         for converter in crate::infrastructure::engines::default_converters(
             &self.mineru,
             self.vision_provider.clone(),
@@ -422,6 +457,8 @@ impl AlchemizeBuilder {
             self.video_mode,
             &html_deep,
             &container_registry_slot,
+            #[cfg(feature = "cache")]
+            conversion_cache.clone(),
         ) {
             registry.register(converter);
         }
@@ -455,6 +492,8 @@ impl AlchemizeBuilder {
             asset_mode: self.asset_mode,
             no_remote: self.no_remote,
             max_file_size: self.max_file_size,
+            #[cfg(feature = "cache")]
+            conversion_cache,
         }
     }
 }
@@ -762,5 +801,27 @@ mod tests {
                 async_out.metadata
             );
         }
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn conversion_cache_is_opt_in_and_not_shared_between_builds() {
+        let plain = AlchemizeBuilder::new().build();
+        assert!(plain.conversion_cache_stats().is_none(), "cache is opt-in");
+
+        let cached = AlchemizeBuilder::new()
+            .with_conversion_cache(std::time::Duration::from_secs(3600))
+            .build();
+        assert!(cached.conversion_cache_stats().is_some());
+
+        let other = AlchemizeBuilder::new()
+            .with_conversion_cache(std::time::Duration::from_secs(3600))
+            .build();
+        let a = cached.conversion_cache.as_ref().unwrap();
+        let b = other.conversion_cache.as_ref().unwrap();
+        assert!(
+            !std::sync::Arc::ptr_eq(a, b),
+            "separate builds own separate caches"
+        );
     }
 }

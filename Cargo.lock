@@ -93,6 +93,7 @@ dependencies = [
  "limiteron",
  "lopdf",
  "mail-parser",
+ "oxcache",
  "parquet",
  "pdfium-render",
  "proptest",

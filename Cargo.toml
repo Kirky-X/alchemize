@@ -116,6 +116,8 @@ sevenz = ["dep:sevenz-rust2"]
 mcp = ["cli", "sdforge/mcp"]
 # kit：trait-kit AsyncKit 依赖注入适配层（核心 trait 不重写）
 kit = ["dep:trait-kit"]
+# 转换结果去重缓存：高成本幂等路径（pdf-cloud/audio）的 TTL 缓存 + 单飞（能力开关，不进 full）
+cache = ["dep:oxcache"]
 # 全能力伞面：全部转换类 feature（不含 cli/mcp）。
 full = [
     "text",
@@ -163,6 +165,8 @@ sha2 = { version = "0.11", default-features = false }
 thiserror = { version = "2.0", default-features = false, features = ["std"] }
 tokio = { version = "1.0", default-features = false, features = ["rt", "rt-multi-thread", "macros", "fs", "process", "io-util", "time", "sync"] }
 tracing = { version = "0.1", default-features = false }
+# 转换结果去重缓存（cache feature）：memory + serialization + metrics + bloom 裁剪
+oxcache = { version = "0.5", default-features = false, features = ["memory", "serialization", "metrics", "bloom"], optional = true }
 
 # ── 文档族（全部 optional，经 dep: 由格式 feature 激活）
 # 编码探测（CJK 优先，lossy 兜底）；alloc 必须显式（decode 由 alloc 门控）
