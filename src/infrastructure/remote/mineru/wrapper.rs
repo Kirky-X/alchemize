@@ -17,6 +17,7 @@ use std::time::Duration;
 use tracing::{debug, info};
 
 use super::TaskStatus;
+use super::audit::{audit_mineru_failure, endpoint_host_label};
 use super::http_limit::{
     MAX_ERROR_RESPONSE_BYTES, MAX_POLL_RESPONSE_BYTES, MAX_SUBMIT_RESPONSE_BYTES,
     read_limited_json, read_limited_text, truncate_body,
@@ -231,6 +232,17 @@ impl MinerUConverter {
 
         if !resp.status().is_success() {
             let status = resp.status();
+            let kind = if status.is_server_error() {
+                "http_5xx"
+            } else {
+                "http_4xx"
+            };
+            audit_mineru_failure(
+                &endpoint_host_label(&self.config.base_url),
+                status.as_u16(),
+                0,
+                kind,
+            );
             let body = read_error_body(resp).await;
             // Upstream body may echo the token or a presigned URL (R-redact-002).
             let body = scrub_error_text(&body, self.config.api_token.as_deref());
@@ -275,6 +287,17 @@ impl MinerUConverter {
 
         if !resp.status().is_success() {
             let status = resp.status();
+            let kind = if status.is_server_error() {
+                "http_5xx"
+            } else {
+                "http_4xx"
+            };
+            audit_mineru_failure(
+                &endpoint_host_label(&self.config.base_url),
+                status.as_u16(),
+                0,
+                kind,
+            );
             let body = read_error_body(resp).await;
             // Upstream body may echo the token or a presigned URL (R-redact-002).
             let body = scrub_error_text(&body, self.config.api_token.as_deref());
@@ -336,7 +359,10 @@ impl MinerUConverter {
                 }
                 TaskStatus::Pending | TaskStatus::Processing => {
                     attempt += 1;
-                    let delay = super::backoff::poll_delay(attempt);
+                    let delay = super::backoff::poll_delay(
+                        &endpoint_host_label(&self.config.base_url),
+                        attempt,
+                    );
                     debug!(
                         task_id = %task_id,
                         status = ?status_resp.status,

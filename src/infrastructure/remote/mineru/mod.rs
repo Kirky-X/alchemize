@@ -10,6 +10,7 @@
 //! - [`create_mineru_client`] — factory that selects the appropriate client
 
 mod agent;
+mod audit;
 mod backoff;
 mod client;
 mod factory;

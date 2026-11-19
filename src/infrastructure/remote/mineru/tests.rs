@@ -3,6 +3,7 @@
 
 //! Tests for MinerU module — SSRF validation, option builder, factory selection.
 
+use super::audit::test_support::capture_guard;
 use super::client::MineruClient;
 use super::factory::create_mineru_client;
 use super::precision::MineruPrecisionClient;
@@ -596,18 +597,19 @@ fn poll_delay_pins_legacy_backoff_curve() {
     // `interval_secs` accumulators used to produce, pinned before/after the
     // move to `limiteron::retry::delay_for_attempt`.
     let secs: Vec<u64> = (1..=7)
-        .map(|attempt| super::backoff::poll_delay(attempt).as_secs())
+        .map(|attempt| super::backoff::poll_delay("test-host", attempt).as_secs())
         .collect();
     assert_eq!(secs, vec![2, 4, 8, 16, 30, 30, 30]);
 }
 
 #[test]
 fn poll_delay_is_monotonic_and_capped() {
-    let last = super::backoff::poll_delay(64);
+    let last = super::backoff::poll_delay("test-host", 64);
     assert_eq!(last, std::time::Duration::from_secs(30));
     for attempt in 1..64 {
         assert!(
-            super::backoff::poll_delay(attempt) <= super::backoff::poll_delay(attempt + 1),
+            super::backoff::poll_delay("test-host", attempt)
+                <= super::backoff::poll_delay("test-host", attempt + 1),
             "backoff must not shrink between attempts"
         );
     }
@@ -753,4 +755,45 @@ async fn success_path_markdown_is_not_redacted() {
         !md.contains("REDACTED"),
         "no redaction on success path: {md}"
     );
+}
+
+// ── R-audit-001: MinerU audit event emission (T008) ─────────────────────────
+
+/// A non-2xx response on the poll path emits a structured failure event with
+/// the `alchemize::audit` target, carrying only host/status/kind (R-audit-001).
+#[tokio::test]
+async fn http_failure_emits_audit_event() {
+    let (capture, _guard) = capture_guard();
+    let port = spawn_error_server(vec![
+        (200, r#"{"task_id":"t-audit"}"#),
+        (500, "upstream exploded"),
+    ])
+    .await;
+    let err = echo_client(port)
+        .parse(&allowlisted_url(), ParseOptions::default())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("500"), "{err}");
+    let out = capture.output();
+    assert!(out.contains("target=alchemize::audit"), "{out}");
+    assert!(out.contains("event=mineru_failure"), "{out}");
+    assert!(out.contains("status=500"), "{out}");
+    assert!(out.contains("error_kind=http_5xx"), "{out}");
+    assert!(!out.contains("Bearer"), "{out}");
+    drop(_guard);
+}
+
+/// Each scheduled retry emits a retry event with an incrementing attempt
+/// number (R-audit-001). Exercises the shared backoff instrumentation point directly.
+#[test]
+fn retry_events_carry_increasing_attempt_numbers() {
+    let (capture, _guard) = capture_guard();
+    super::backoff::poll_delay("mineru.example.com", 1);
+    super::backoff::poll_delay("mineru.example.com", 2);
+    let out = capture.output();
+    assert!(out.contains("event=mineru_retry"), "{out}");
+    assert!(out.contains("retry_attempt=1"), "{out}");
+    assert!(out.contains("retry_attempt=2"), "{out}");
+    assert!(out.matches("event=mineru_retry").count() >= 2, "{out}");
+    drop(_guard);
 }
