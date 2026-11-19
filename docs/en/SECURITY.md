@@ -41,10 +41,10 @@ A new dependency must satisfy: default features off (`default-features = false` 
 | --- | --- | --- |
 | `with_max_file_size` consumption point | Oversized inputs are already rejected at the facade before dispatch, and it doubles as the ZIP nested-entry cap | Covers registry dispatch and the zip branch; tar/tgz/7z nesting is fixed at 64 MiB/entry + 256 MiB/archive, gz/xz/zst single-stream decompression at 64 MiB — none bound by this value; MinerU precision has its own 200MB cap |
 | libsqlite3-sys 0.37 standing advisory RUSTSEC-2026-0459 (C SQLite CVE-2026-119375, medium) | A transitive dependency of the `sqlite` feature; standing, not new | Cleared by cargo-audit; the rusqlite upgrade is an independent dependency change, handled with the next dependency batch |
-| No CI or git hooks in the repo | Gates rely on contributors running them locally | CONTRIBUTING lists the local gate checklist explicitly |
 
 ### Supply Chain and Gates
 
+- CI gates: fmt/clippy/test/coverage/audit/deny on push and PR (`.github/workflows/ci.yml`).
 - `Cargo.lock` is committed to lock the dependency graph; dependency upgrades must pass `cargo audit`.
 - Every source file carries the two-line `SPDX-License-Identifier: Apache-2.0` header (59/59), so license scanners can identify file-level ownership mechanically.
 - The specmark spec directory is not committed (gitignored); the main specs serve as the local source of truth.
@@ -107,6 +107,9 @@ All network egress is concentrated in the MinerU backend (feature `pdf-cloud`); 
 - IPv4-mapped/compatible IPv6 (`::ffff:a.b.c.d` etc.) is classified by its embedded IPv4, preventing bypass;
 - The hostname allowlist defaults to `mineru.net` / `cdn.mineru.net` / `api.mineru.net` (`DEFAULT_MINERU_ALLOWLIST`);
 - Violations return `AlchemizeError::SecurityViolation { kind, message }`; kinds in `SecurityViolationType` (including `MissingSignature` for a missing presignature).
+- **Automatic redirects disabled**: all three MinerU clients set `reqwest::redirect::Policy::none()`, so a 3xx to an internal address is never followed.
+- **Connect-time per-IP revalidation**: `SsrfSafeResolver` revalidates every resolved address against the same policy as parse-time validation just before connecting; a denied address is dropped and an empty result set rejects the connection (deny-by-default).
+- **DNS rebinding defense**: address policy is checked both at URL validation time and at connection time; the connect-time recheck closes the rebind window between resolution and TCP connect.
 
 ### Response Size Limits
 
@@ -125,6 +128,7 @@ Preallocation is capped at 8 MB (no matter how large the declared Content-Length
 
 - **Credential sources and delivery**: `MINERU_API_TOKEN` or `MineruConfig::api_token` (both become Bearer tokens, sent only to endpoints passing `validate_base_url`); no built-in secrets, no encrypted-storage requirement. The token is sent with requests to the configured base_url: `validate_base_url` constrains the host and scheme allowlist, but when a local deployment uses a plaintext http endpoint, the deployer bears the link risk. Container nesting has a separate chain-level 512 MiB cumulative decompression budget (counted per conversion chain); each layer is billed only after its decompression is materialized, so transient peaks can exceed it by one layer's 256 MiB.
 - **Three-path redaction**: `MineruConfig::api_token` never appears in plaintext in `Debug` (hand-written impl), `Display`, or serde serialization (`skip_serializing`) — pinned by the `mineru_config_display_redacts_token` unit test across all three paths.
+- **Error-path redaction**: on error paths the Authorization token and presigned URL parameters never enter `AlchemizeError`, tracing, or Display/Debug output — upstream error bodies and reqwest error text are scrubbed at every construction point (pinned by mock echo tests in `mineru/tests.rs`).
 - **No secrets in logs**: tracing output contains only diagnostic fields such as engine name, priority, and failure reasons.
 
 ### No Automatic Networking Principle

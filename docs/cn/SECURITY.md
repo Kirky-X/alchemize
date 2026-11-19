@@ -41,10 +41,10 @@ cargo update -d          # 更新漏洞通告数据库
 | --- | --- | --- |
 | `with_max_file_size` 消费点 | 已在 facade 分发前拦截超限输入，并作为 ZIP 嵌套条目上限 | 覆盖注册表分发与 zip 分支；tar/tgz/7z 嵌套固定 64 MiB/条目 + 256 MiB/整包，gz/xz/zst 单流解压上限 64 MiB，均不受此值影响；MinerU precision 另有 200MB 上限 |
 | libsqlite3-sys 0.37 存量通告 RUSTSEC-2026-0459（C SQLite CVE-2026-119375，medium） | `sqlite` feature 传递依赖，存量非新增 | cargo-audit 已核；升级 rusqlite 属独立依赖变更，随下一依赖批次处理 |
-| 仓库无 CI 与 git 钩子 | 门禁靠贡献者本地执行 | CONTRIBUTING 明确列出本地门禁清单 |
 
 ### 供应链与门禁
 
+- CI 门禁：push 与 PR 触发 fmt/clippy/test/coverage/audit/deny（`.github/workflows/ci.yml`）。
 - `Cargo.lock` 入库锁定依赖图；依赖升级需过 `cargo audit`。
 - 全部源文件带 `SPDX-License-Identifier: Apache-2.0` 两行头（59/59），license 扫描工具可机器识别文件级权属。
 - specmark 规格目录不入库（gitignore），主 specs 作为本地规格真源。
@@ -107,6 +107,9 @@ cargo update -d          # 更新漏洞通告数据库
 - IPv4 映射/兼容的 IPv6（`::ffff:a.b.c.d` 等）按内嵌 IPv4 同样分类，防绕过；
 - 域名白名单默认 `mineru.net` / `cdn.mineru.net` / `api.mineru.net`（`DEFAULT_MINERU_ALLOWLIST`）；
 - 违规返回 `AlchemizeError::SecurityViolation { kind, message }`，kind 见 `SecurityViolationType`（含 `MissingSignature` 预签名缺失）。
+- **禁用自动重定向**：三个 MinerU 客户端均设 `reqwest::redirect::Policy::none()`，指向内网地址的 3xx 不会被跟随。
+- **连接时逐 IP 复验**：`SsrfSafeResolver` 在连接前用与解析时相同的策略复验每个解析出的地址；违规地址被剔除，剔除后为空则拒绝连接（deny-by-default）。
+- **DNS rebinding 防御**：地址策略在 URL 校验时与连接时双重检查，连接时复验封堵解析与 TCP 连接之间的重绑窗口。
 
 ### 响应体积限制
 
@@ -125,6 +128,7 @@ cargo update -d          # 更新漏洞通告数据库
 
 - **凭据来源与传递**：`MINERU_API_TOKEN` 或 `MineruConfig::api_token`（两者均转成 Bearer token，仅发往通过 `validate_base_url` 的端点）；无内置密钥、无加密存储需求。token 会随请求发往配置的 base_url：`validate_base_url` 约束主机与 scheme 白名单，但本地部署使用明文 http 端点时由部署方自行承担链路风险。容器嵌套另有链级 512 MiB 累计解压预算（按转换链计数）；每层在解压物化后才计费，瞬时峰值可多出一层的 256 MiB。
 - **三通路脱敏**：`MineruConfig::api_token` 在 `Debug`（手工 impl）、`Display`、serde 序列化（`skip_serializing`）中均不出现明文——单测 `mineru_config_display_redacts_token` 钉住三条通路。
+- **错误路径脱敏**：错误路径上 Authorization token 与预签名参数不进入 `AlchemizeError`、tracing 或 Display/Debug 输出——上游错误体与 reqwest 错误文本在每个构造点清洗（由 `mineru/tests.rs` 的 mock 回显测试钉住）。
 - **日志不落密钥**：tracing 输出仅含引擎名、优先级、失败原因等诊断字段。
 
 ### 不自动联网原则
