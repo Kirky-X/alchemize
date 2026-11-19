@@ -82,7 +82,7 @@
 </tr>
 </table>
 
-除上述核心能力外，视频抽轨与帧去重、视频处理模式（Gpu/AudioOnly/Disabled）、Whisper 兼容云端后端（显式注入激活）、LaTeX 数学定界符校验等能力也均已内置或以独立特性标志提供；完整矩阵见 [用户指南 · 特性标志](docs/cn/USER_GUIDE.md#-特性标志)。
+除上述核心能力外，视频抽轨与帧去重、视频处理模式（Gpu/AudioOnly/Disabled）、Whisper 兼容云端后端（显式注入激活）、LaTeX 数学定界符校验，以及可选的转换结果去重缓存（`cache`，TTL + 单飞，作用于 pdf-cloud/audio）等能力也均已内置或以独立特性标志提供；完整矩阵见 [用户指南 · 特性标志](docs/cn/USER_GUIDE.md#-特性标志)。
 
 ---
 

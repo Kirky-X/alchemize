@@ -97,6 +97,16 @@ Document input is **fully untrusted** (email attachments/download pages/crawler 
 | tex/latex | pandoc subprocess | PATH probing + parameterized invocation only, no shell interpolation; the fenced fallback path spawns no subprocess |
 | Resource consumption of crafted inputs | every parser | The zip facade rejects nested recursion (unbounded depth); the HTML engine iterates throughout (DOM depth never enters the call stack); response reading is memory-bounded |
 
+### Conversion cache (feature `cache`)
+
+When the opt-in `cache` feature is enabled (`with_conversion_cache`), duplicate expensive conversions (MinerU cloud / local ASR) are deduplicated in-process within a TTL window:
+
+- Entries are keyed by SHA-256 over input content, build version, enabled features, and engine name — the same untrusted input maps to one entry.
+- Within the TTL window the same input is sent to the external service / expensive parser **only once**; concurrent callers for the same key coalesce via single-flight.
+- A cache hit preserves the original `ProvenanceEnvelope` and `trust_level` unchanged — downstream trust decisions are never downgraded by caching.
+- Failed conversions are never cached (no negative caching), so retry semantics are preserved.
+- The cache is memory-only and empty after a process restart; it performs no content sanitization (cached results are the same untrusted artifacts the normal path would sanitize downstream).
+
 ### SSRF Protection
 
 All network egress is concentrated in the MinerU backend (feature `pdf-cloud`); download URLs must pass `ValidatedFileUrl` validation (`validated_url.rs`). The MCP surface (the `alch mcp` subcommand) uses stdio transport — **the transport surface has no network egress** (the convert tool can reach the network when the `pdf-cloud` feature and endpoint env var are both present — that is business capability, not transport); HTTP/gRPC/WS protocols are not enabled:

@@ -97,6 +97,16 @@ cargo update -d          # 更新漏洞通告数据库
 | tex/latex | pandoc 子进程 | 仅 PATH 探测 + 参数化调用，无 shell 拼接；围栏兜底路径无子进程 |
 | 构造输入的资源消耗 | 各解析器 | zip 门面拒绝嵌套递归（无界深度）；HTML 引擎全程迭代遍历（DOM 深度不进调用栈）；响应读取内存有界 |
 
+### 转换缓存（feature `cache`）
+
+开启可选的 `cache` feature（`with_conversion_cache`）后，高成本转换（MinerU 云端 / 本地 ASR）的重复请求在 TTL 窗口内进程内去重：
+
+- 条目键为输入内容、构建版本、已启用特性与引擎名的 SHA-256 —— 同一不可信输入映射到单一条目。
+- TTL 窗口内同一输入只送外部服务 / 昂贵解析器**一次**；同键并发调用经单飞合并。
+- 命中保留原 `ProvenanceEnvelope` 与 `trust_level` 不变 —— 下游信任决策不因缓存降级。
+- 失败结果不缓存（无负缓存），重试语义保持。
+- 缓存仅在内存中，进程重启即空；不做内容净化（缓存产物与普通路径一样，交由下游 sanitize）。
+
 ### SSRF 防护
 
 全部网络出口集中在 MinerU 后端（feature `pdf-cloud`），下载 URL 必须通过 `ValidatedFileUrl` 校验（`validated_url.rs`）。MCP 面（`alch mcp` 子命令）走 stdio 传输——**传输面无网络出口**（convert 工具在 `pdf-cloud` 特性与端点环境变量齐备时可出网，属业务能力而非传输）；HTTP/gRPC/WS 协议未启用：

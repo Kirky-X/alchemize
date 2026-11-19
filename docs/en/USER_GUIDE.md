@@ -301,6 +301,29 @@ let result = alch.convert_pref(&Input::Path("report.docx".into()), Some("docx-de
 println!("{} [{}]", result.title.as_deref().unwrap_or("-"), result.quality);
 ```
 
+#### Conversion cache (feature `cache`)
+
+For repeated conversions of the same content through expensive engines (MinerU
+cloud, local ASR), opt in to a process-local dedup cache:
+
+```rust
+use std::time::Duration;
+let alch = AlchemizeBuilder::new()
+    .with_conversion_cache(Duration::from_secs(24 * 3600)) // TTL: 24h
+    .build();
+let result = alch.convert(&input).await?;
+if result.metadata["cache_hit"] == true { /* reused a prior conversion */ }
+if let Some(stats) = alch.conversion_cache_stats() { /* hits / misses / waits */ }
+```
+
+The cache is **off by default** and is not part of `default`/`full`. The key is
+SHA-256 over the input bytes, the build version, the enabled feature set, and
+the engine name. Within the TTL window the same input is sent to the external
+service only once; concurrent callers for the same key coalesce into a single
+conversion (single-flight). A cache hit preserves the original provenance and
+`trust_level` and sets `metadata.cache_hit = true`; failed conversions are never
+cached. The cache lives in memory only and is empty after a process restart.
+
 For the full API see the [API Reference](API_REFERENCE.md#-usage-examples).
 
 ## 🌟 Best Practices
@@ -409,7 +432,8 @@ For the full API see the [API Reference](API_REFERENCE.md#-usage-examples).
 | `tar`/`gzip`/`xz`/`zstd`/`sevenz` | archive family, split into five per-format features | recursive conversion, magic-byte detection of the inner format; `.tgz` needs both `tar` and `gzip` |
 | `cli` | CLI skeleton (sdforge + inklog) | **default member**; `[[bin]] alch` has `required-features = ["cli"]` |
 | `mcp` | MCP tool surface (the `alch mcp` subcommand, stdio server) | convert/doctor/formats exposed as MCP tools; implies `cli`, not part of default |
-| `full` | All 30 conversion features (format family + backends/data/containers; excludes `cli`/`mcp`) | |
+| `cache` | conversion-result dedup cache (TTL + single-flight over oxcache) | opt-in via `with_conversion_cache`; applies to pdf-cloud/audio paths only; not in `default`/`full` |
+| `full` | All 30 conversion features (format family + backends/data/containers; excludes `cli`/`mcp`/`cache`) | |
 
 **Default behavior (breaking change)**: `default = ["cli", "text"]` — the default build compiles only the CLI skeleton and plain-text conversion. `alch convert x.pdf` / `x.docx` has no candidate engine in a default build and returns `unsupported format` (exit code 2). Enable the features you need explicitly (e.g. `--features pdf,docx`); `--features full` restores all capabilities.
 

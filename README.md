@@ -82,7 +82,7 @@ Hand `alch` a file — PDF, Office, audio/video, a zip archive — and it picks 
 </tr>
 </table>
 
-Beyond these core capabilities, video track extraction and frame dedup, video processing modes (Gpu/AudioOnly/Disabled), a Whisper-compatible cloud backend (activated only via explicit injection), and LaTeX math-delimiter validation are all built in or provided behind independent feature flags; see [User Guide · Feature Flags](docs/en/USER_GUIDE.md#-feature-flags) for the full matrix.
+Beyond these core capabilities, video track extraction and frame dedup, video processing modes (Gpu/AudioOnly/Disabled), a Whisper-compatible cloud backend (activated only via explicit injection), LaTeX math-delimiter validation, and an opt-in conversion-result dedup cache (`cache`, TTL + single-flight for pdf-cloud/audio) are all built in or provided behind independent feature flags; see [User Guide · Feature Flags](docs/en/USER_GUIDE.md#-feature-flags) for the full matrix.
 
 ---
 

@@ -288,6 +288,22 @@ let result = alch.convert_pref(&Input::Path("report.docx".into()), Some("docx-de
 println!("{} [{}]", result.title.as_deref().unwrap_or("-"), result.quality);
 ```
 
+#### 转换缓存（feature `cache`）
+
+对同一内容经高成本引擎（MinerU 云端、本地 ASR）的重复转换，可显式开启进程内去重缓存：
+
+```rust
+use std::time::Duration;
+let alch = AlchemizeBuilder::new()
+    .with_conversion_cache(Duration::from_secs(24 * 3600)) // TTL：24 小时
+    .build();
+let result = alch.convert(&input).await?;
+if result.metadata["cache_hit"] == true { /* 复用了先前的转换结果 */ }
+if let Some(stats) = alch.conversion_cache_stats() { /* hits / misses / waits */ }
+```
+
+缓存**默认关闭**，不随 `default`/`full` 开启。键为输入字节、构建版本、已启用 feature 集与引擎名的 SHA-256。TTL 窗口内同一输入只送外部服务一次；同键并发调用合并为一次转换（单飞）。命中保留原 provenance 与 `trust_level`，并置 `metadata.cache_hit = true`；失败结果不缓存。缓存仅在内存中，进程重启即空。
+
 完整 API 见[API 参考](API_REFERENCE.md#-使用示例)。
 
 ## 🌟 最佳实践
@@ -396,7 +412,8 @@ println!("{} [{}]", result.title.as_deref().unwrap_or("-"), result.quality);
 | `tar`/`gzip`/`xz`/`zstd`/`sevenz` | 归档容器族，按格式拆分的五个 feature | 递归转换，魔数检测内层格式；`.tgz` 需 `tar`+`gzip` 同时开启 |
 | `cli` | CLI 骨架（sdforge + inklog） | **default 成员**；`[[bin]] alch` 的 required-features 为 `cli` |
 | `mcp` | MCP 工具面（`alch mcp` 子命令，stdio 服务） | convert/doctor/formats 以 MCP 工具暴露；隐含 `cli`，不随 default |
-| `full` | 全部 30 个转换类 feature（格式族 + 后端/数据/容器；不含 `cli`/`mcp`） | |
+| `cache` | 转换结果去重缓存（TTL + 单飞，基于 oxcache） | 经 `with_conversion_cache` 显式开启；仅作用于 pdf-cloud/audio 路径；不随 `default`/`full` |
+| `full` | 全部 30 个转换类 feature（格式族 + 后端/数据/容器；不含 `cli`/`mcp`/`cache`） | |
 
 **default 行为（破坏性变更）**：`default = ["cli", "text"]` —— 默认构建只编译 CLI 骨架与纯文本转换。`alch convert x.pdf` / `x.docx` 在默认构建下没有候选引擎，返回 `unsupported format`（退出码 2）。需要哪些格式就显式开启对应 feature（如 `--features pdf,docx`）；`--features full` 恢复全部能力。
 
