@@ -90,6 +90,9 @@ jobs:
   security:
     name: cargo-audit + cargo-deny
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v7
       # deny.toml 是 advisory 忽略清单的单一事实源（.cargo/audit.toml 为同步
