@@ -41,7 +41,7 @@ fn formats_lists_core_extensions() {
 
 #[test]
 fn doctor_reports_engines_and_zip_row() {
-    let out = alch().arg("doctor").output().unwrap();
+    let out = alch().args(["doctor", "--security"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("AVAILABLE"));
